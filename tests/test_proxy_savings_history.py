@@ -43,9 +43,7 @@ def _record_request(
 def test_savings_tracker_helpers_normalize_inputs_and_paths(tmp_path, monkeypatch):
     override_path = tmp_path / "custom-savings.json"
     monkeypatch.setenv(HEADROOM_SAVINGS_PATH_ENV_VAR, str(override_path))
-    assert savings_tracker_module.get_default_savings_storage_path() == str(
-        override_path
-    )
+    assert savings_tracker_module.get_default_savings_storage_path() == str(override_path)
 
     monkeypatch.delenv(HEADROOM_SAVINGS_PATH_ENV_VAR, raising=False)
     default_path = savings_tracker_module.get_default_savings_storage_path()
@@ -119,10 +117,7 @@ def test_savings_tracker_sanitizes_legacy_state_and_applies_retention(tmp_path):
         "total_input_tokens": 0,
         "total_input_cost_usd": 0.0,
     }
-    assert (
-        snapshot["display_session"]
-        == savings_tracker_module._empty_display_session()
-    )
+    assert snapshot["display_session"] == savings_tracker_module._empty_display_session()
     assert snapshot["history"] == [
         {
             "timestamp": "2026-03-27T09:00:00Z",
@@ -152,10 +147,7 @@ def test_non_dict_savings_state_resets_to_default(tmp_path):
         "total_input_tokens": 0,
         "total_input_cost_usd": 0.0,
     }
-    assert (
-        snapshot["display_session"]
-        == savings_tracker_module._empty_display_session()
-    )
+    assert snapshot["display_session"] == savings_tracker_module._empty_display_session()
     assert snapshot["history"] == []
 
 
@@ -254,9 +246,7 @@ def test_litellm_resolution_and_savings_estimation_fallbacks(monkeypatch):
     ) == pytest.approx(0.2)
 
     fake_litellm.model_cost = {}
-    assert (
-        savings_tracker_module._estimate_compression_savings_usd("gpt-4o", 100) == 0.0
-    )
+    assert savings_tracker_module._estimate_compression_savings_usd("gpt-4o", 100) == 0.0
     assert savings_tracker_module._estimate_input_cost_usd("gpt-4o", 100) == 0.0
 
     monkeypatch.setattr(
@@ -264,19 +254,11 @@ def test_litellm_resolution_and_savings_estimation_fallbacks(monkeypatch):
         "cost_per_token",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    assert (
-        savings_tracker_module._resolve_litellm_model("mystery-model")
-        == "mystery-model"
-    )
-    assert (
-        savings_tracker_module._estimate_compression_savings_usd("mystery-model", 100)
-        == 0.0
-    )
+    assert savings_tracker_module._resolve_litellm_model("mystery-model") == "mystery-model"
+    assert savings_tracker_module._estimate_compression_savings_usd("mystery-model", 100) == 0.0
 
     monkeypatch.setattr(savings_tracker_module, "LITELLM_AVAILABLE", False)
-    assert (
-        savings_tracker_module._estimate_compression_savings_usd("gpt-4o", 100) == 0.0
-    )
+    assert savings_tracker_module._estimate_compression_savings_usd("gpt-4o", 100) == 0.0
     assert savings_tracker_module._estimate_input_cost_usd("gpt-4o", 100) == 0.0
 
 
@@ -331,10 +313,7 @@ def test_display_session_rolls_after_inactivity_and_counts_zero_savings_requests
         "_utc_now",
         lambda: datetime(2026, 3, 27, 9, 45, tzinfo=timezone.utc),
     )
-    assert (
-        tracker.snapshot()["display_session"]
-        == savings_tracker_module._empty_display_session()
-    )
+    assert tracker.snapshot()["display_session"] == savings_tracker_module._empty_display_session()
 
     tracker.record_request(
         model="gpt-4o",
@@ -362,9 +341,7 @@ def test_display_session_rolls_after_inactivity_and_counts_zero_savings_requests
     }
 
 
-def test_savings_tracker_rollups_preserve_spend_and_input_history(
-    tmp_path, monkeypatch
-):
+def test_savings_tracker_rollups_preserve_spend_and_input_history(tmp_path, monkeypatch):
     path = tmp_path / "proxy_savings.json"
     tracker = SavingsTracker(
         path=str(path),
@@ -507,9 +484,7 @@ def test_savings_tracker_rollups_preserve_spend_and_input_history(
     ]
 
 
-def test_stats_history_persists_across_restarts_and_stats_stays_compatible(
-    tmp_path, monkeypatch
-):
+def test_stats_history_persists_across_restarts_and_stats_stays_compatible(tmp_path, monkeypatch):
     savings_path = tmp_path / "proxy_savings.json"
     monkeypatch.setenv("HEADROOM_SAVINGS_PATH", str(savings_path))
     monkeypatch.setattr(
@@ -555,14 +530,13 @@ def test_stats_history_persists_across_restarts_and_stats_stays_compatible(
         ]
         assert history_data["exports"]["available_series"][-2:] == ["weekly", "monthly"]
         assert history_data["series"]["hourly"][0]["total_input_tokens_delta"] == 120
-        assert history_data["series"]["hourly"][0][
-            "total_input_cost_usd_delta"
-        ] == pytest.approx(0.24)
+        assert history_data["series"]["hourly"][0]["total_input_cost_usd_delta"] == pytest.approx(
+            0.24
+        )
 
         assert stats_data["display_session"] == history_data["display_session"]
         assert (
-            stats_data["persistent_savings"]["display_session"]
-            == history_data["display_session"]
+            stats_data["persistent_savings"]["display_session"] == history_data["display_session"]
         )
 
     with TestClient(create_app(config)) as client:
@@ -584,9 +558,7 @@ def test_stats_history_persists_across_restarts_and_stats_stays_compatible(
         assert updated["display_session"]["total_input_tokens"] == 240
         assert updated["display_session"]["savings_percent"] == pytest.approx(18.64)
         assert updated["series"]["daily"][0]["total_input_tokens_delta"] == 240
-        assert updated["series"]["daily"][0][
-            "total_input_cost_usd_delta"
-        ] == pytest.approx(0.48)
+        assert updated["series"]["daily"][0]["total_input_cost_usd_delta"] == pytest.approx(0.48)
 
         persisted = json.loads(savings_path.read_text())
         assert persisted["lifetime"]["tokens_saved"] == 55

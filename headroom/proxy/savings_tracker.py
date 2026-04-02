@@ -49,12 +49,7 @@ def _utc_now() -> datetime:
 
 
 def _to_utc_iso(dt: datetime) -> str:
-    return (
-        dt.astimezone(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -293,9 +288,7 @@ class SavingsTracker:
         path: str | None = None,
         max_history_points: int = DEFAULT_MAX_HISTORY_POINTS,
         max_history_age_days: int = DEFAULT_MAX_HISTORY_AGE_DAYS,
-        display_session_inactivity_minutes: int = (
-            DEFAULT_DISPLAY_SESSION_INACTIVITY_MINUTES
-        ),
+        display_session_inactivity_minutes: int = (DEFAULT_DISPLAY_SESSION_INACTIVITY_MINUTES),
     ) -> None:
         self._path = Path(path or get_default_savings_storage_path())
         self._max_history_points = max_history_points
@@ -472,9 +465,7 @@ class SavingsTracker:
             )
             total_before = session["tokens_saved"] + session["total_input_tokens"]
             session["savings_percent"] = round(
-                (session["tokens_saved"] / total_before * 100)
-                if total_before > 0
-                else 0.0,
+                (session["tokens_saved"] / total_before * 100) if total_before > 0 else 0.0,
                 2,
             )
             session["last_activity_at"] = _to_utc_iso(timestamp_dt)
@@ -584,9 +575,7 @@ class SavingsTracker:
                 "lifetime": dict(self._state["lifetime"]),
                 "display_session": self._display_session_snapshot_locked(),
                 "display_session_policy": {
-                    "rollover_inactivity_minutes": (
-                        self._display_session_inactivity_minutes
-                    ),
+                    "rollover_inactivity_minutes": (self._display_session_inactivity_minutes),
                 },
                 "history": history,
                 "retention": {
@@ -645,13 +634,9 @@ class SavingsTracker:
         if isinstance(lifetime_raw, dict):
             lifetime_requests = _coerce_int(lifetime_raw.get("requests"))
             lifetime_tokens_saved = _coerce_int(lifetime_raw.get("tokens_saved"))
-            lifetime_savings_usd = _coerce_float(
-                lifetime_raw.get("compression_savings_usd")
-            )
+            lifetime_savings_usd = _coerce_float(lifetime_raw.get("compression_savings_usd"))
             lifetime_input_tokens = _coerce_int(lifetime_raw.get("total_input_tokens"))
-            lifetime_input_cost_usd = _coerce_float(
-                lifetime_raw.get("total_input_cost_usd")
-            )
+            lifetime_input_cost_usd = _coerce_float(lifetime_raw.get("total_input_cost_usd"))
 
         if normalized_history:
             last = normalized_history[-1]
@@ -686,9 +671,7 @@ class SavingsTracker:
         }
 
         if normalized_history:
-            reference_time = (
-                _parse_timestamp(normalized_history[-1]["timestamp"]) or _utc_now()
-            )
+            reference_time = _parse_timestamp(normalized_history[-1]["timestamp"]) or _utc_now()
             original_state = self._state if hasattr(self, "_state") else None
             self._state = state
             try:
@@ -706,9 +689,7 @@ class SavingsTracker:
             return
 
         if self._max_history_age_days > 0:
-            cutoff = (reference_time or _utc_now()) - timedelta(
-                days=self._max_history_age_days
-            )
+            cutoff = (reference_time or _utc_now()) - timedelta(days=self._max_history_age_days)
             filtered = [
                 item
                 for item in history
