@@ -369,7 +369,7 @@ Context compression is a new space. Here's how the approaches differ:
 
 ## OpenClaw Plugin
 
-The [`@headroom-ai/openclaw`](plugins/openclaw) plugin integrates Headroom as a ContextEngine for [OpenClaw](https://github.com/openclaw/openclaw). It compresses tool outputs, code, logs, and structured data inline — 70-90% token savings with zero LLM calls.
+The [`@headroom-ai/openclaw`](plugins/openclaw) plugin integrates Headroom as a ContextEngine for [OpenClaw](https://github.com/openclaw/openclaw). It compresses tool outputs, code, logs, and structured data inline — 70-90% token savings with zero LLM calls. The plugin can connect to a local or remote Headroom proxy and will auto-start one locally if needed.
 
 ### Install
 

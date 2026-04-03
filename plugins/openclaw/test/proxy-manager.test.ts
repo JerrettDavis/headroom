@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   ProxyManager,
   normalizeAndValidateProxyUrl,
+  isLocalProxyUrl,
   probeHeadroomProxy,
 } from "../src/proxy-manager.js";
 
@@ -15,16 +16,35 @@ describe("normalizeAndValidateProxyUrl", () => {
     expect(normalizeAndValidateProxyUrl("http://localhost:8787")).toBe("http://localhost:8787");
   });
 
-  it("rejects non-local and malformed URLs", () => {
-    expect(() => normalizeAndValidateProxyUrl("https://localhost:8787")).toThrow(
+  it("accepts remote URLs", () => {
+    expect(normalizeAndValidateProxyUrl("http://example.com:8787")).toBe("http://example.com:8787");
+    expect(normalizeAndValidateProxyUrl("https://headroom.example.com")).toBe("https://headroom.example.com");
+    expect(normalizeAndValidateProxyUrl("https://headroom.example.com:9090")).toBe("https://headroom.example.com:9090");
+  });
+
+  it("rejects malformed URLs", () => {
+    expect(() => normalizeAndValidateProxyUrl("ftp://localhost:8787")).toThrow(
       /must use http/,
-    );
-    expect(() => normalizeAndValidateProxyUrl("http://example.com:8787")).toThrow(
-      /must be localhost/,
     );
     expect(() => normalizeAndValidateProxyUrl("http://localhost:8787/path")).toThrow(
       /must not include a path/,
     );
+  });
+});
+
+describe("isLocalProxyUrl", () => {
+  it("returns true for localhost addresses", () => {
+    expect(isLocalProxyUrl("http://127.0.0.1:8787")).toBe(true);
+    expect(isLocalProxyUrl("http://localhost:8787")).toBe(true);
+  });
+
+  it("returns false for remote addresses", () => {
+    expect(isLocalProxyUrl("http://example.com:8787")).toBe(false);
+    expect(isLocalProxyUrl("https://headroom.example.com")).toBe(false);
+  });
+
+  it("returns false for invalid URLs", () => {
+    expect(isLocalProxyUrl("not-a-url")).toBe(false);
   });
 });
 
@@ -118,6 +138,33 @@ describe("ProxyManager.start", () => {
     const url = await manager.start();
     expect(url).toBe("http://127.0.0.1:8787");
     expect(startSpy).toHaveBeenCalledWith("http://127.0.0.1:8787", 8787);
+  });
+
+  it("connects to remote proxy without auto-start", async () => {
+    const manager = new ProxyManager({ proxyUrl: "http://headroom.remote.example:8787", autoStart: true });
+    const startSpy = vi.spyOn(manager as any, "startHeadroomProxy").mockResolvedValue(undefined);
+
+    // Remote probe succeeds
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 })   // /health
+      .mockResolvedValueOnce({ ok: true, status: 200 });   // /v1/retrieve/stats
+    vi.stubGlobal("fetch", fetchMock);
+
+    const url = await manager.start();
+    expect(url).toBe("http://headroom.remote.example:8787");
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails fast for unreachable remote proxy without attempting auto-start", async () => {
+    const manager = new ProxyManager({ proxyUrl: "https://headroom.remote.example:8787", autoStart: true });
+    const startSpy = vi.spyOn(manager as any, "startHeadroomProxy").mockResolvedValue(undefined);
+
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(manager.start()).rejects.toThrow(/Remote Headroom proxy not reachable/);
+    expect(startSpy).not.toHaveBeenCalled();
   });
 
   it("auto-starts when nothing is detected", async () => {

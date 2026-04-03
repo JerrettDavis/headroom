@@ -3,7 +3,7 @@
   "uiHints": {
     "proxyUrl": {
       "label": "Proxy URL",
-      "help": "Optional. URL of a Headroom proxy on localhost (example: http://127.0.0.1:8787). If omitted, plugin auto-detects defaults."
+      "help": "Optional. URL of a Headroom proxy (example: http://127.0.0.1:8787 or https://headroom.example.com). If omitted, plugin auto-detects on localhost. Auto-start only works for local addresses."
     },
     "proxyPort": {
       "label": "Proxy Port",
@@ -23,7 +23,7 @@
       },
       "proxyUrl": {
         "type": "string",
-        "pattern": "^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?\\/?$"
+        "pattern": "^https?:\\/\\/.+(:\\d+)?\\/?$"
       },
       "proxyPort": {
         "type": "integer",
@@ -50,7 +50,9 @@
     "network": {
       "allow": [
         "http://localhost:*",
-        "http://127.0.0.1:*"
+        "http://127.0.0.1:*",
+        "http://*:*",
+        "https://*:*"
       ]
     }
   }

@@ -9,7 +9,7 @@ pip install "headroom-ai[proxy]"
 openclaw plugins install --dangerously-force-unsafe-install headroom-ai/openclaw
 ```
 
-This plugin auto-starts `headroom proxy` when needed. OpenClaw treats process-launching plugins as unsafe by default, so `--dangerously-force-unsafe-install` is required.
+This plugin can auto-start a local `headroom proxy` when needed. OpenClaw treats process-launching plugins as unsafe by default, so `--dangerously-force-unsafe-install` is required even if you plan to use a remote proxy (the capability is declared at install time).
 
 ## Local Development Install (Detection-Friendly)
 
@@ -48,19 +48,35 @@ Why this matters:
 }
 ```
 
-`proxyUrl` must be localhost (`127.0.0.1` or `localhost`). If the proxy is not running, the plugin will try to start it with `headroom proxy --host ... --port ...`.
-`proxyUrl` is optional. If omitted, the plugin auto-detects on:
+`proxyUrl` is optional. If omitted, the plugin auto-detects on localhost:
 - `http://127.0.0.1:<proxyPort>`
 - `http://localhost:<proxyPort>`
+
 Default `proxyPort` is `8787`.
 
-If set, `proxyUrl` must be localhost (`127.0.0.1` or `localhost`).
-Auto-start launch order is:
+### Local proxy (auto-start)
+
+When `proxyUrl` points to localhost (or is omitted), the plugin will auto-start `headroom proxy` if no running proxy is detected. Launch order:
 1. `headroom` from `PATH`
 2. local npm bin (`node_modules/.bin/headroom`)
 3. global npm bin
 4. Python module (`python -m headroom.cli proxy ...`)
+
 If `pythonPath` is set, it is tried first in the Python fallback step.
+
+### Remote proxy (connect-only)
+
+Point `proxyUrl` to any reachable Headroom instance:
+
+```json
+{
+  "config": {
+    "proxyUrl": "https://headroom.example.com:8787"
+  }
+}
+```
+
+Remote URLs are **connect-only** — the plugin probes the URL at startup and fails fast if the proxy is not reachable. No subprocess is spawned for remote addresses.
 
 ## Required Proxy Setup
 
@@ -95,7 +111,7 @@ Compression is lossless via CCR (Compress-Cache-Retrieve): originals are stored 
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `proxyUrl` | auto-detected | Optional URL of a Headroom proxy (`http://127.0.0.1:<port>` or `http://localhost:<port>`). |
+| `proxyUrl` | auto-detected | Optional URL of a Headroom proxy. Local addresses (`http://127.0.0.1:<port>`, `http://localhost:<port>`) enable auto-start; remote URLs (`https://headroom.example.com`) are connect-only. |
 | `proxyPort` | `8787` | Port used for default auto-detect/auto-start when `proxyUrl` is not set. |
 | `pythonPath` | auto-detected | Optional Python executable override for Python fallback launcher. |
 | `autoStart` | `true` | Auto-start `headroom proxy` if not already running |
