@@ -83,8 +83,8 @@ class TestModelResolutionCaching:
         from headroom.proxy.server import CostTracker
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             # First call (bare name) fails, second call (prefixed) succeeds
             mock_litellm.cost_per_token.side_effect = [
@@ -100,8 +100,8 @@ class TestModelResolutionCaching:
         from headroom.proxy.server import CostTracker
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             mock_litellm.cost_per_token.side_effect = [
                 Exception("Unknown model"),
@@ -116,8 +116,8 @@ class TestModelResolutionCaching:
         from headroom.proxy.server import CostTracker
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             mock_litellm.cost_per_token.side_effect = [
                 Exception("Unknown model"),
@@ -132,8 +132,8 @@ class TestModelResolutionCaching:
         from headroom.proxy.server import CostTracker
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             mock_litellm.cost_per_token.side_effect = Exception("Unknown model")
 
@@ -144,7 +144,7 @@ class TestModelResolutionCaching:
         """When litellm is not available, return model as-is."""
         from headroom.proxy.server import CostTracker
 
-        with patch("headroom.proxy.server.LITELLM_AVAILABLE", False):
+        with patch("headroom.proxy.cost.LITELLM_AVAILABLE", False):
             result = CostTracker._resolve_litellm_model_uncached("claude-opus-4-6")
             assert result == "claude-opus-4-6"
 
@@ -153,8 +153,8 @@ class TestModelResolutionCaching:
         from headroom.proxy.server import CostTracker
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             mock_litellm.cost_per_token.return_value = (0.001, 0.002)
 
@@ -516,8 +516,8 @@ class TestConcurrentSessionSafety:
         CostTracker._resolved_model_cache["gpt-4o"] = "openai/gpt-4o"
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             mock_litellm.cost_per_token.return_value = (0.001, 0.002)
             mock_litellm.get_model_info.return_value = {}
@@ -555,8 +555,8 @@ class TestCostTrackingAccuracy:
         tracker = CostTracker()
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             # Setup: $10/M input, $30/M output
             def mock_cost(model, prompt_tokens, completion_tokens, **kwargs):
@@ -601,8 +601,8 @@ class TestCostTrackingAccuracy:
         tracker = CostTracker()
 
         with (
-            patch("headroom.proxy.server.LITELLM_AVAILABLE", True),
-            patch("headroom.proxy.server.litellm") as mock_litellm,
+            patch("headroom.proxy.cost.LITELLM_AVAILABLE", True),
+            patch("headroom.proxy.cost.litellm") as mock_litellm,
         ):
             mock_litellm.cost_per_token.side_effect = (
                 lambda model, prompt_tokens, completion_tokens, **kwargs: (
@@ -623,6 +623,6 @@ class TestCostTrackingAccuracy:
 
         tracker = CostTracker()
 
-        with patch("headroom.proxy.server.LITELLM_AVAILABLE", False):
+        with patch("headroom.proxy.cost.LITELLM_AVAILABLE", False):
             cost = tracker.estimate_cost("gpt-4o", input_tokens=1000, output_tokens=100)
             assert cost is None

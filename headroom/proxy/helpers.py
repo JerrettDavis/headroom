@@ -1,0 +1,195 @@
+"""Top-level helper functions and constants for the Headroom proxy.
+
+Contains lazy loaders, file logging setup, request body decompression,
+and safety-limit constants.
+
+Extracted from server.py for maintainability.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fastapi import Request
+
+logger = logging.getLogger("headroom.proxy")
+
+# Maximum request body size (100MB - increased to support image-heavy requests)
+MAX_REQUEST_BODY_SIZE = 100 * 1024 * 1024
+
+# Maximum SSE buffer size (10MB - prevents memory exhaustion from malformed streams)
+MAX_SSE_BUFFER_SIZE = 10 * 1024 * 1024
+
+# Maximum message array length (prevents DoS from deeply nested payloads)
+MAX_MESSAGE_ARRAY_LENGTH = 10000
+
+# Compression pipeline timeout in seconds
+COMPRESSION_TIMEOUT_SECONDS = 30
+
+# Maximum compression cache sessions (prevents unbounded memory growth)
+MAX_COMPRESSION_CACHE_SESSIONS = 500
+
+# Image compression (lazy-loaded to avoid heavy dependencies at startup)
+_image_compressor = None
+
+
+def _get_image_compressor():
+    """Lazy load image compressor to avoid startup overhead."""
+    global _image_compressor
+    if _image_compressor is None:
+        try:
+            from headroom.image import ImageCompressor
+
+            _image_compressor = ImageCompressor()
+            logger.info("Image compression enabled (model: chopratejas/technique-router)")
+        except ImportError as e:
+            logger.warning(f"Image compression not available: {e}")
+            _image_compressor = False  # Mark as unavailable
+    return _image_compressor if _image_compressor else None
+
+
+# Always-on file logging to ~/.headroom/logs/ for `headroom perf` analysis
+_HEADROOM_LOG_DIR = Path.home() / ".headroom" / "logs"
+
+
+def _setup_file_logging() -> None:
+    """Add a RotatingFileHandler to the headroom root logger.
+
+    Writes to ~/.headroom/logs/proxy.log with automatic rotation:
+    - Rotates at 10 MB
+    - Keeps 5 backups (~50 MB max)
+    """
+    from logging.handlers import RotatingFileHandler
+
+    try:
+        _HEADROOM_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = _HEADROOM_LOG_DIR / "proxy.log"
+        handler = RotatingFileHandler(
+            log_path,
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=5,
+            encoding="utf-8",
+        )
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        # Attach to the headroom root logger so all sub-loggers are captured
+        logging.getLogger("headroom").addHandler(handler)
+    except OSError:
+        # Non-fatal: can't write logs (read-only fs, permissions, etc.)
+        pass
+
+
+def _get_rtk_stats() -> dict[str, Any] | None:
+    """Get rtk (Rust Token Killer) savings stats if rtk is installed.
+
+    Reads from rtk's tracking database via `rtk gain --format json`.
+    Returns None if rtk is not installed.
+    """
+    import shutil
+    import subprocess as _sp
+
+    rtk_bin = shutil.which("rtk")
+    if not rtk_bin:
+        # Check headroom-managed install
+        rtk_managed = Path.home() / ".headroom" / "bin" / "rtk"
+        if rtk_managed.exists():
+            rtk_bin = str(rtk_managed)
+        else:
+            return None
+
+    try:
+        result = _sp.run(
+            [rtk_bin, "gain", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            summary = data.get("summary", {})
+            return {
+                "installed": True,
+                "total_commands": summary.get("total_commands", 0),
+                "tokens_saved": summary.get("total_saved", 0),
+                "avg_savings_pct": summary.get("avg_savings_pct", 0.0),
+            }
+    except Exception:
+        pass
+
+    return {"installed": True, "total_commands": 0, "tokens_saved": 0, "avg_savings_pct": 0.0}
+
+
+async def _read_request_json(request: Request) -> dict[str, Any]:
+    """Read and parse JSON from a request, handling compressed bodies.
+
+    Clients like OpenAI Codex may send zstd, gzip, or deflate-compressed
+    request bodies.  Starlette's ``request.json()`` does not decompress
+    automatically, causing a UnicodeDecodeError on compressed bytes.
+
+    This helper inspects ``Content-Encoding``, decompresses if needed,
+    then JSON-decodes the result.  It raises ``ValueError`` on any
+    decompression or parse failure so callers can return a clean 400.
+    """
+    encoding = (request.headers.get("content-encoding") or "").lower().strip()
+    raw = await request.body()
+
+    if encoding in ("zstd", "zstandard"):
+        try:
+            import zstandard
+
+            dctx = zstandard.ZstdDecompressor()
+            # Use stream_reader for streaming zstd frames (no content size in header).
+            # Plain decompress() fails when the frame header omits the size, which
+            # is common with clients like OpenAI Codex.
+            reader = dctx.stream_reader(raw)
+            raw = reader.read()
+            reader.close()
+        except ImportError:
+            raise ValueError(
+                "Request body is zstd-compressed but the 'zstandard' package is not installed. "
+                "Install it with: pip install zstandard"
+            ) from None
+        except Exception as exc:
+            raise ValueError(f"Failed to decompress zstd request body: {exc}") from exc
+    elif encoding == "gzip":
+        import gzip as _gzip
+
+        try:
+            raw = _gzip.decompress(raw)
+        except Exception as exc:
+            raise ValueError(f"Failed to decompress gzip request body: {exc}") from exc
+    elif encoding == "deflate":
+        import zlib
+
+        try:
+            raw = zlib.decompress(raw)
+        except Exception as exc:
+            raise ValueError(f"Failed to decompress deflate request body: {exc}") from exc
+    elif encoding == "br":
+        try:
+            import brotli
+
+            raw = brotli.decompress(raw)
+        except ImportError:
+            raise ValueError(
+                "Request body is brotli-compressed but the 'brotli' package is not installed."
+            ) from None
+        except Exception as exc:
+            raise ValueError(f"Failed to decompress brotli request body: {exc}") from exc
+    elif encoding and encoding != "identity":
+        raise ValueError(f"Unsupported Content-Encoding: {encoding}")
+
+    # Decode and parse JSON
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Request body is not valid UTF-8 (possibly compressed?): {exc}") from exc
+
+    result: dict[str, Any] = json.loads(text)
+    return result

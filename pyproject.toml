@@ -249,6 +249,12 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "headroom.proxy.server",
+    "headroom.proxy.cost",
+    "headroom.proxy.prometheus_metrics",
+    "headroom.proxy.semantic_cache",
+    "headroom.proxy.rate_limiter",
+    "headroom.proxy.request_logger",
+    "headroom.proxy.helpers",
     "headroom.integrations.langchain",
     "headroom.integrations.mcp",
     "headroom.ccr.mcp_server",
