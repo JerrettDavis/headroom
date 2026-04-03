@@ -6,7 +6,7 @@ Context compression plugin for [OpenClaw](https://github.com/openclaw/openclaw).
 
 ```bash
 pip install "headroom-ai[proxy]"
-openclaw plugins install @headroom-ai/openclaw
+openclaw plugins install headroom-ai/openclaw
 ```
 
 ## Configure
@@ -14,6 +14,14 @@ openclaw plugins install @headroom-ai/openclaw
 ```json
 {
   "plugins": {
+    "entries": {
+      "headroom": {
+        "enabled": true,
+        "config": {
+          "proxyUrl": "http://127.0.0.1:8787"
+        }
+      }
+    },
     "slots": {
       "contextEngine": "headroom"
     }
@@ -21,7 +29,25 @@ openclaw plugins install @headroom-ai/openclaw
 }
 ```
 
-That's it. The plugin auto-starts the Headroom proxy if it's not already running.
+`proxyUrl` is required and must be localhost (`127.0.0.1` or `localhost`). The plugin never starts processes and only connects to the configured local proxy.
+
+## Required Proxy Setup
+
+Run Headroom proxy yourself before launching OpenClaw.
+
+Python install:
+
+```bash
+pip install "headroom-ai[proxy]"
+headroom proxy --host 127.0.0.1 --port 8787
+```
+
+NPM install:
+
+```bash
+npm install -g headroom-ai
+headroom proxy --host 127.0.0.1 --port 8787
+```
 
 ## How It Works
 
@@ -38,10 +64,7 @@ Compression is lossless via CCR (Compress-Cache-Retrieve): originals are stored 
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `proxyUrl` | auto-detected | URL of the Headroom proxy |
-| `autoStart` | `true` | Start proxy automatically if not running |
-| `pythonPath` | auto-detected | Path to Python binary |
-| `proxyPort` | `8787` | Port for auto-started proxy |
+| `proxyUrl` | required | URL of an already running Headroom proxy (`http://127.0.0.1:<port>` or `http://localhost:<port>`) |
 
 ## Comparison with lossless-claw
 

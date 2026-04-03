@@ -6,12 +6,15 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { normalizeAndValidateProxyUrl } from "../proxy-manager.js";
 
 export interface RetrieveToolConfig {
   proxyUrl: string;
 }
 
 export function createHeadroomRetrieveTool(config: RetrieveToolConfig) {
+  const proxyOrigin = normalizeAndValidateProxyUrl(config.proxyUrl);
+
   return {
     name: "headroom_retrieve",
     description:
@@ -45,8 +48,8 @@ export function createHeadroomRetrieveTool(config: RetrieveToolConfig) {
 
       try {
         const url = query
-          ? `${config.proxyUrl}/v1/retrieve/${hash}?query=${encodeURIComponent(query)}`
-          : `${config.proxyUrl}/v1/retrieve/${hash}`;
+          ? `${proxyOrigin}/v1/retrieve/${hash}?query=${encodeURIComponent(query)}`
+          : `${proxyOrigin}/v1/retrieve/${hash}`;
 
         const resp = await fetch(url, {
           signal: AbortSignal.timeout(10_000),

@@ -3,15 +3,7 @@
   "uiHints": {
     "proxyUrl": {
       "label": "Proxy URL",
-      "help": "URL of the Headroom proxy (auto-detected or auto-started if not set)"
-    },
-    "pythonPath": {
-      "label": "Python Path",
-      "help": "Path to Python binary (auto-detected if not set)"
-    },
-    "autoStart": {
-      "label": "Auto-Start Proxy",
-      "help": "Automatically start the Headroom proxy if not already running"
+      "help": "Required. URL of an already running Headroom proxy on localhost (example: http://127.0.0.1:8787)"
     }
   },
   "configSchema": {
@@ -22,20 +14,17 @@
         "type": "boolean"
       },
       "proxyUrl": {
-        "type": "string"
-      },
-      "pythonPath": {
-        "type": "string"
-      },
-      "autoStart": {
-        "type": "boolean",
-        "default": true
-      },
-      "proxyPort": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 65535
+        "type": "string",
+        "pattern": "^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$"
       }
+    }
+  },
+  "capabilities": {
+    "network": {
+      "allow": [
+        "http://localhost:*",
+        "http://127.0.0.1:*"
+      ]
     }
   }
 }

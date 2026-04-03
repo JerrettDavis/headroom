@@ -7,12 +7,39 @@
  * Requires: Python 3 + headroom-ai[proxy] installed
  * Run: HEADROOM_INTEGRATION=1 npx vitest run test/engine.test.ts
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi, afterEach } from "vitest";
 import { HeadroomContextEngine } from "../src/engine.js";
 import { agentToOpenAI, openAIToAgent } from "../src/convert.js";
-import { ProxyManager } from "../src/proxy-manager.js";
+import { ProxyManager, probeHeadroomProxy } from "../src/proxy-manager.js";
 
 const RUN = process.env.HEADROOM_INTEGRATION === "1";
+const PROXY_URL = process.env.HEADROOM_PROXY_URL ?? "http://127.0.0.1:8787";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("Proxy probing", () => {
+  it("detects running Headroom proxy", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await probeHeadroomProxy("http://127.0.0.1:8787");
+    expect(result).toEqual({ reachable: true, isHeadroom: true });
+  });
+
+  it("flags non-headroom service at configured URL", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: false, status: 404 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const manager = new ProxyManager({ proxyUrl: "http://127.0.0.1:8787" });
+    await expect(manager.start()).rejects.toThrow(/does not appear to be a Headroom proxy/);
+  });
+});
 
 describe("AgentMessage conversion", () => {
   it("converts user message", () => {
@@ -119,11 +146,11 @@ describe("AgentMessage conversion", () => {
 });
 
 describe.skipIf(!RUN)("ProxyManager", () => {
-  it("detects running proxy or starts one", { timeout: 30000 }, async () => {
-    const manager = new ProxyManager({ autoStart: true });
+  it("connects to configured proxy URL", { timeout: 30000 }, async () => {
+    const manager = new ProxyManager({ proxyUrl: PROXY_URL });
     try {
       const url = await manager.start();
-      expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(url).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):\d+$/);
 
       // Verify health
       const resp = await fetch(`${url}/health`);
@@ -138,7 +165,7 @@ describe.skipIf(!RUN)("HeadroomContextEngine", () => {
   let engine: HeadroomContextEngine;
 
   beforeAll(async () => {
-    engine = new HeadroomContextEngine({ autoStart: true });
+    engine = new HeadroomContextEngine({ proxyUrl: PROXY_URL });
     await engine.bootstrap({
       sessionId: "test-session",
       sessionFile: "/tmp/test-session.jsonl",

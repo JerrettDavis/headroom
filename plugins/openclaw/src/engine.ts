@@ -114,7 +114,7 @@ export class HeadroomContextEngine {
         baseUrl: this.proxyUrl,
         fallback: true,
         tokenBudget: params.tokenBudget,
-      });
+      } as any);
 
       if (!result.compressed || result.tokensSaved === 0) {
         return { messages: params.messages, estimatedTokens: result.tokensBefore };

@@ -33,9 +33,23 @@
     "vitest": "^2.0.0"
   },
   "openclaw": {
+    "hooks": {
+      "contextEngine": "dist/index.js",
+      "tools": [
+        "dist/index.js"
+      ]
+    },
     "extensions": [
       "./dist/index.js"
-    ]
+    ],
+    "capabilities": {
+      "network": {
+        "allow": [
+          "http://localhost:*",
+          "http://127.0.0.1:*"
+        ]
+      }
+    }
   },
   "license": "Apache-2.0"
 }
