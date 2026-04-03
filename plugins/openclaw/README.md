@@ -78,9 +78,9 @@ Point `proxyUrl` to any reachable Headroom instance:
 
 Remote URLs are **connect-only** — the plugin probes the URL at startup and fails fast if the proxy is not reachable. No subprocess is spawned for remote addresses.
 
-## Required Proxy Setup
+## Manual Proxy Setup
 
-Optional: run Headroom proxy yourself before launching OpenClaw.
+If you prefer to manage the proxy yourself (or are running a remote instance), start it before launching OpenClaw:
 
 Python install:
 
@@ -114,7 +114,7 @@ Compression is lossless via CCR (Compress-Cache-Retrieve): originals are stored 
 | `proxyUrl` | auto-detected | Optional URL of a Headroom proxy. Local addresses (`http://127.0.0.1:<port>`, `http://localhost:<port>`) enable auto-start; remote URLs (`https://headroom.example.com`) are connect-only. |
 | `proxyPort` | `8787` | Port used for default auto-detect/auto-start when `proxyUrl` is not set. |
 | `pythonPath` | auto-detected | Optional Python executable override for Python fallback launcher. |
-| `autoStart` | `true` | Auto-start `headroom proxy` if not already running |
+| `autoStart` | `true` | Auto-start a local `headroom proxy` if not already running (local URLs only; ignored for remote proxies) |
 | `startupTimeoutMs` | `20000` | Time to wait for auto-started proxy to become healthy |
 
 ## Comparison with lossless-claw

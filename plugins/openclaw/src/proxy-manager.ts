@@ -59,14 +59,18 @@ export class ProxyManager {
   }
 
   /**
- * Ensure a proxy is available. Returns the normalized URL origin.
+   * Ensure a proxy is available. Returns the normalized URL origin.
    */
   async start(): Promise<string> {
     const port = this.getProxyPort();
-    const explicitUrl =
+    const rawExplicitUrl =
       typeof this.config.proxyUrl === "string" && this.config.proxyUrl.trim().length > 0
-        ? withDefaultPort(normalizeAndValidateProxyUrl(this.config.proxyUrl), port)
+        ? normalizeAndValidateProxyUrl(this.config.proxyUrl)
         : null;
+    // Only apply proxyPort default to local URLs — remote URLs use their protocol default
+    const explicitUrl = rawExplicitUrl
+      ? isLocalProxyUrl(rawExplicitUrl) ? withDefaultPort(rawExplicitUrl, port) : rawExplicitUrl
+      : null;
     const defaultCandidates = this.getDefaultProxyCandidates(port);
     const candidateUrls = explicitUrl ? [explicitUrl] : [...defaultCandidates];
     const probeByUrl = new Map<string, ProxyProbeResult>();

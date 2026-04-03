@@ -156,6 +156,20 @@ describe("ProxyManager.start", () => {
     expect(startSpy).not.toHaveBeenCalled();
   });
 
+  it("does not apply proxyPort default to remote URLs", async () => {
+    // Remote URL without port should use protocol default, not proxyPort
+    const manager = new ProxyManager({ proxyUrl: "https://headroom.remote.example", proxyPort: 9999 });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const url = await manager.start();
+    expect(url).toBe("https://headroom.remote.example");
+  });
+
   it("fails fast for unreachable remote proxy without attempting auto-start", async () => {
     const manager = new ProxyManager({ proxyUrl: "https://headroom.remote.example:8787", autoStart: true });
     const startSpy = vi.spyOn(manager as any, "startHeadroomProxy").mockResolvedValue(undefined);
