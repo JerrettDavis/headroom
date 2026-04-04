@@ -102,7 +102,7 @@ reports = [
 ]
 # any-llm multi-provider backend (requires Python 3.11+)
 anyllm = [
-    "any-llm-sdk>=1.0.0",
+    "any-llm-sdk>=1.0.0; python_version >= '3.11'",
 ]
 # LangChain integration
 langchain = [

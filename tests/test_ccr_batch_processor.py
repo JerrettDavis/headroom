@@ -765,6 +765,8 @@ class TestContinuationCalls:
         call_args = http_client.post.call_args
         assert "tools" in call_args.kwargs["json"]
         assert len(call_args.kwargs["json"]["tools"]) == 2
+        sent_names = [tool.get("name") for tool in call_args.kwargs["json"]["tools"]]
+        assert sent_names == sorted(sent_names)
 
     @pytest.mark.asyncio
     async def test_make_continuation_call_unknown_provider(self):

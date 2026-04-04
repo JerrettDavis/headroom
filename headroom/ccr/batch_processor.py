@@ -20,6 +20,7 @@ Each provider has different result formats, but the logic is the same:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -342,7 +343,24 @@ class BatchResultProcessor:
             "max_tokens": request_context.extras.get("max_tokens", 4096),
         }
         if tools:
-            body["tools"] = tools
+            def _tool_sort_key(tool: dict[str, Any]) -> tuple[str, str]:
+                name = (
+                    str(tool.get("name", ""))
+                    or str(tool.get("function", {}).get("name", ""))
+                    or str(tool.get("type", ""))
+                )
+                try:
+                    canonical = json.dumps(
+                        tool,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    )
+                except Exception:
+                    canonical = str(tool)
+                return (name, canonical)
+
+            body["tools"] = sorted(tools, key=_tool_sort_key)
 
         response = await self.http_client.post(
             url,

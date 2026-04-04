@@ -25,6 +25,110 @@ logger = logging.getLogger("headroom.proxy")
 class AnthropicHandlerMixin:
     """Mixin providing Anthropic API handler methods for HeadroomProxy."""
 
+    @staticmethod
+    def _tool_sort_key(tool: dict[str, Any]) -> tuple[str, str]:
+        """Deterministic sort key for Anthropic/OpenAI-style tool definitions."""
+        name = (
+            str(tool.get("name", ""))
+            or str(tool.get("function", {}).get("name", ""))
+            or str(tool.get("type", ""))
+        )
+        try:
+            canonical = json.dumps(tool, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        except Exception:
+            canonical = str(tool)
+        return (name, canonical)
+
+    @classmethod
+    def _sort_tools_deterministically(
+        cls, tools: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        """Return tools in deterministic order to preserve prompt-cache stability."""
+        if not tools:
+            return tools
+        return sorted(tools, key=cls._tool_sort_key)
+
+    @staticmethod
+    def _compress_latest_user_turn_images_cache_safe(
+        messages: list[dict[str, Any]],
+        *,
+        frozen_message_count: int,
+        compressor: Any,
+    ) -> list[dict[str, Any]]:
+        """Compress images only in the latest non-frozen user turn.
+
+        This avoids rewriting historical image bytes that may already be in the
+        provider prefix cache.
+        """
+        if not messages:
+            return messages
+
+        target_idx = len(messages) - 1
+        if target_idx < frozen_message_count:
+            return messages
+        target_msg = messages[target_idx]
+        if target_msg.get("role") != "user":
+            return messages
+        content = target_msg.get("content")
+        if not isinstance(content, list):
+            return messages
+        if not any(isinstance(block, dict) and block.get("type") == "image" for block in content):
+            return messages
+
+        compressed_one = compressor.compress([target_msg], provider="anthropic")
+        if not compressed_one:
+            return messages
+
+        if compressed_one[0] == target_msg:
+            return messages
+
+        updated = list(messages)
+        updated[target_idx] = compressed_one[0]
+        return updated
+
+    @staticmethod
+    def _append_context_to_latest_non_frozen_user_turn(
+        messages: list[dict[str, Any]],
+        context_text: str,
+        *,
+        frozen_message_count: int,
+    ) -> list[dict[str, Any]]:
+        """Append context only to the latest non-frozen user text turn.
+
+        Returns input unchanged if no eligible user text turn exists.
+        """
+        if not messages or not context_text:
+            return messages
+
+        i = len(messages) - 1
+        if i < frozen_message_count:
+            return messages
+        msg = messages[i]
+        if msg.get("role") != "user":
+            return messages
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            updated = list(messages)
+            updated[i] = {**msg, "content": content + "\n\n" + context_text}
+            return updated
+        return messages
+
+    @staticmethod
+    def _strict_previous_turn_frozen_count(
+        messages: list[dict[str, Any]],
+        base_frozen_count: int,
+    ) -> int:
+        """Freeze all prior turns; only the final turn is mutable.
+
+        If the final message is not a user turn, freeze everything.
+        """
+        if not messages:
+            return base_frozen_count
+        final_idx = len(messages) - 1
+        if messages[final_idx].get("role") == "user":
+            return max(base_frozen_count, final_idx)
+        return len(messages)
+
     async def handle_anthropic_messages(
         self,
         request: Request,
@@ -106,19 +210,6 @@ class AnthropicHandlerMixin:
         )
         if _bypass:
             logger.info(f"[{request_id}] Bypass: skipping compression (header)")
-
-        # Image compression (before text optimization)
-        if self.config.image_optimize and messages and not _bypass:
-            compressor = _get_image_compressor()
-            if compressor and compressor.has_images(messages):
-                messages = compressor.compress(messages, provider="anthropic")
-                if compressor.last_result:
-                    logger.info(
-                        f"Image compression: {compressor.last_result.technique.value} "
-                        f"({compressor.last_result.savings_percent:.0f}% saved, "
-                        f"{compressor.last_result.original_tokens} -> "
-                        f"{compressor.last_result.compressed_tokens} tokens)"
-                    )
 
         # Extract headers and tags
         headers = dict(request.headers.items())
@@ -213,6 +304,28 @@ class AnthropicHandlerMixin:
         session_id = self.session_tracker_store.compute_session_id(request, model, messages)
         prefix_tracker = self.session_tracker_store.get_or_create(session_id, "anthropic")
         frozen_message_count = prefix_tracker.get_frozen_message_count()
+        frozen_message_count = self._strict_previous_turn_frozen_count(
+            messages,
+            frozen_message_count,
+        )
+
+        # Image compression (cache-safe): only compress latest non-frozen user turn.
+        # Rewriting historical image bytes can invalidate Anthropic prompt caches.
+        if self.config.image_optimize and messages and not _bypass:
+            compressor = _get_image_compressor()
+            if compressor and compressor.has_images(messages):
+                messages = self._compress_latest_user_turn_images_cache_safe(
+                    messages,
+                    frozen_message_count=frozen_message_count,
+                    compressor=compressor,
+                )
+                if compressor.last_result:
+                    logger.info(
+                        f"Image compression: {compressor.last_result.technique.value} "
+                        f"({compressor.last_result.savings_percent:.0f}% saved, "
+                        f"{compressor.last_result.original_tokens} -> "
+                        f"{compressor.last_result.compressed_tokens} tokens)"
+                    )
 
         _compression_failed = False
         original_messages = messages  # Preserve for 400-retry fallback
@@ -235,7 +348,13 @@ class AnthropicHandlerMixin:
                     working_messages = comp_cache.apply_cached(messages)
 
                     # Re-freeze boundary: consecutive stable messages from start
-                    frozen_message_count = comp_cache.compute_frozen_count(messages)
+                    # Safety: never freeze beyond provider-confirmed cached prefix.
+                    cache_frozen_count = comp_cache.compute_frozen_count(messages)
+                    frozen_message_count = min(frozen_message_count, cache_frozen_count)
+                    frozen_message_count = self._strict_previous_turn_frozen_count(
+                        messages,
+                        frozen_message_count,
+                    )
 
                     result = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -323,11 +442,18 @@ class AnthropicHandlerMixin:
         if (
             self.config.ccr_inject_tool or self.config.ccr_inject_system_instructions
         ) and not _bypass:
+            inject_system_instructions = self.config.ccr_inject_system_instructions
+            if inject_system_instructions and frozen_message_count > 0:
+                logger.info(
+                    f"[{request_id}] CCR: skipping system instruction injection "
+                    f"(frozen prefix={frozen_message_count}) to preserve cache"
+                )
+                inject_system_instructions = False
             # Create fresh injector to avoid state leakage between requests
             injector = CCRToolInjector(
                 provider="anthropic",
                 inject_tool=self.config.ccr_inject_tool,
-                inject_system_instructions=self.config.ccr_inject_system_instructions,
+                inject_system_instructions=inject_system_instructions,
             )
             optimized_messages, tools, was_injected = injector.process_request(
                 optimized_messages, tools
@@ -392,15 +518,11 @@ class AnthropicHandlerMixin:
                             f"[{request_id}] CCR: Proactively expanded {len(expansions)} context(s) "
                             f"based on query relevance"
                         )
-                        # Append to the last user message
-                        if optimized_messages and optimized_messages[-1].get("role") == "user":
-                            last_msg = optimized_messages[-1]
-                            content = last_msg.get("content", "")
-                            if isinstance(content, str):
-                                optimized_messages[-1] = {
-                                    **last_msg,
-                                    "content": content + "\n\n" + expansion_text,
-                                }
+                        optimized_messages = self._append_context_to_latest_non_frozen_user_turn(
+                            optimized_messages,
+                            expansion_text,
+                            frozen_message_count=frozen_message_count,
+                        )
 
         # Traffic Learner: Extract patterns from inbound tool results
         if self.traffic_learner:
@@ -440,12 +562,23 @@ class AnthropicHandlerMixin:
                         memory_user_id, optimized_messages
                     )
                     if memory_context:
-                        optimized_messages = self._inject_system_context(
-                            optimized_messages, memory_context, body=body
-                        )
-                        logger.info(
-                            f"[{request_id}] Memory: Injected {len(memory_context)} chars of context"
-                        )
+                        if frozen_message_count > 0:
+                            optimized_messages = self._append_context_to_latest_non_frozen_user_turn(
+                                optimized_messages,
+                                memory_context,
+                                frozen_message_count=frozen_message_count,
+                            )
+                            logger.info(
+                                f"[{request_id}] Memory: Appended {len(memory_context)} chars "
+                                f"to latest non-frozen user turn (prefix cache-safe)"
+                            )
+                        else:
+                            optimized_messages = self._inject_system_context(
+                                optimized_messages, memory_context, body=body
+                            )
+                            logger.info(
+                                f"[{request_id}] Memory: Injected {len(memory_context)} chars of context"
+                            )
                 except Exception as e:
                     logger.warning(f"[{request_id}] Memory: Context injection failed: {e}")
 
@@ -482,6 +615,7 @@ class AnthropicHandlerMixin:
         # Update body
         body["messages"] = optimized_messages
         if tools is not None:
+            tools = self._sort_tools_deterministically(tools)
             body["tools"] = tools
 
         # Forward request - use Bedrock backend if configured, otherwise direct API
@@ -1079,12 +1213,21 @@ class AnthropicHandlerMixin:
         for batch_req in requests_list:
             custom_id = batch_req.get("custom_id", "")
             params = batch_req.get("params", {})
+            canonical_params = dict(params)
+            canonical_tools = canonical_params.get("tools")
+            if canonical_tools is not None:
+                canonical_params["tools"] = self._sort_tools_deterministically(canonical_tools)
             messages = params.get("messages", [])
             model = params.get("model", "unknown")
 
             if not messages or not self.config.optimize:
                 # No messages or optimization disabled - pass through unchanged
-                compressed_requests.append(batch_req)
+                compressed_requests.append(
+                    {
+                        "custom_id": custom_id,
+                        "params": canonical_params,
+                    }
+                )
                 continue
 
             # Apply optimization
@@ -1095,6 +1238,7 @@ class AnthropicHandlerMixin:
                     model=model,
                     model_limit=context_limit,
                     context=extract_user_query(messages),
+                    frozen_message_count=self._strict_previous_turn_frozen_count(messages, 0),
                 )
 
                 optimized_messages = result.messages
@@ -1109,7 +1253,7 @@ class AnthropicHandlerMixin:
                 total_tokens_saved += tokens_saved
 
                 # CCR Tool Injection: Inject retrieval tool if compression occurred
-                tools = params.get("tools")
+                tools = canonical_params.get("tools")
                 if self.config.ccr_inject_tool and tokens_saved > 0:
                     injector = CCRToolInjector(
                         provider="anthropic",
@@ -1127,7 +1271,7 @@ class AnthropicHandlerMixin:
                 # Create compressed batch request
                 compressed_params = {**params, "messages": optimized_messages}
                 if tools is not None:
-                    compressed_params["tools"] = tools
+                    compressed_params["tools"] = self._sort_tools_deterministically(tools)
                 compressed_requests.append(
                     {
                         "custom_id": custom_id,
