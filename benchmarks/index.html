@@ -2743,7 +2743,82 @@
 </span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
 </span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="c1"># Run compression benchmark</span>
 </span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;from headroom import compress; print(compress([{&#39;role&#39;:&#39;user&#39;,&#39;content&#39;:&#39;test&#39;}]))&quot;</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># Run local proxy mode benchmark (no API calls)</span>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>python<span class="w"> </span>benchmarks/proxy_mode_benchmark.py<span class="w"> </span>--turns<span class="w"> </span><span class="m">12</span><span class="w"> </span>--show-real-harness
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Replay local Claude Code transcripts (no API calls)</span>
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>python<span class="w"> </span>benchmarks/claude_session_mode_benchmark.py<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span>
+</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>
+</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="c1"># Compare two refs on the same local Claude transcript corpus</span>
+</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>python<span class="w"> </span>benchmarks/claude_session_branch_compare.py<span class="w"> </span>--left-ref<span class="w"> </span>upstream/main<span class="w"> </span>--right-ref<span class="w"> </span>HEAD<span class="w"> </span>--recent-turns-per-session<span class="w"> </span><span class="m">200</span><span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span>
 </span></code></pre></div>
+<p>This benchmark compares <code>token</code> vs <code>cache</code> proxy modes on the same synthetic conversation:</p>
+<ul>
+<li><code>token</code> should show higher compression.</li>
+<li><code>cache</code> should preserve prior-turn stability and can win in long sessions with strong prefix-cache reuse.</li>
+</ul>
+<p><code>--show-real-harness</code> prints optional steps for running the same comparison with Claude Code, but does not call APIs by default.</p>
+<p><code>claude_session_branch_compare.py</code> runs the real local session replay benchmark twice, once per git ref, in isolated worktrees. It writes:</p>
+<ul>
+<li>per-ref replay outputs under <code>benchmark_results/branch_compare/&lt;label&gt;/</code></li>
+<li>a combined comparison report under <code>benchmark_results/branch_compare/</code></li>
+</ul>
+<p>Use it when you want a clean PR-vs-<code>main</code> comparison on the same transcript slice.</p>
+<p>For a deterministic cache-busting proof case, run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>benchmarks/synthetic_token_cache_bust_report.py
+</span></code></pre></div>
+<p>That synthetic replay forces <code>token</code> mode to retroactively rewrite a prior tool result on the second turn while <code>cache</code> mode remains stable. Use it to verify the simulator can distinguish:</p>
+<ul>
+<li><code>token</code>: history rewrite + cache bust</li>
+<li><code>cache</code>: no rewrite + no bust</li>
+</ul>
+<p>For a reproducible local report bundle that combines:</p>
+<ul>
+<li>full real-session replay summaries</li>
+<li>local-only processed real input/output excerpts</li>
+<li>synthetic token-bust proof</li>
+<li>synthetic long-form stress tests</li>
+</ul>
+<p>run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>benchmarks/cache_validation_bundle.py<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output-dir<span class="w"> </span>benchmark_results/cache_validation_bundle_full
+</span></code></pre></div>
+<p>Notes:</p>
+<ul>
+<li>By default the bundle is redaction-safe for sharing:</li>
+<li>real processed reports redact transcript-derived content excerpts</li>
+<li>manifest paths are redacted</li>
+<li>To include local processed content excerpts for private review on your own machine:</li>
+</ul>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>benchmarks/cache_validation_bundle.py<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span><span class="w"> </span>--include-content
+</span></code></pre></div>
+<ul>
+<li>The bundle writes:</li>
+<li><code>index.html</code> / <code>index.md</code>: top-level summary and links</li>
+<li><code>bundle_manifest.json</code>: runtime metadata + corpus fingerprint</li>
+<li><code>real/</code>: full real-session replay reports</li>
+<li><code>real_processed/</code>: processed before/after excerpts from real transcripts</li>
+<li><code>synthetic_token_bust/</code>: minimal explicit cache-bust proof</li>
+<li><code>synthetic_long_suite/</code>: long deterministic rewrite/TTL scenarios</li>
+<li>Checkpoints are scoped under the bundle output directory and fingerprinted by the selected corpus so stale runs do not contaminate new results.</li>
+</ul>
+<p>The Claude session benchmark replays local transcript data from <code>~/.claude/projects</code>
+through <code>baseline</code>, <code>token</code>, and <code>cache</code> modes. It estimates raw tokens, cache
+read/write tokens, paid input/output costs, and prompt-window winners under two
+assumptions:</p>
+<ul>
+<li>cached tokens count against the model window</li>
+<li>cache reads do not count against the model window</li>
+</ul>
+<p>Notes:</p>
+<ul>
+<li>It writes local output to <code>benchmark_results/</code>, which is gitignored.</li>
+<li>It is intentionally conservative on memory. Run with <code>--workers 1</code> for the
+  most stable full-corpus replay. Higher worker counts increase memory use.</li>
+<li>It uses transcript-visible messages only. Hidden Claude Code system/tool schemas
+  are not available in the local <code>.jsonl</code> files, so the numbers are comparative
+  estimates rather than exact provider billing replicas.</li>
+</ul>
 
 
 
