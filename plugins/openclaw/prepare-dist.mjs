@@ -22,6 +22,7 @@ const distPackage = {
   peerDependencies: rootPackage.peerDependencies,
   peerDependenciesMeta: rootPackage.peerDependenciesMeta,
   openclaw: {
+    hooks: ["./hook-shim"],
     extensions: ["./index.js"],
     capabilities: rootPackage.openclaw?.capabilities ?? {},
   },
@@ -40,4 +41,16 @@ await Promise.all([
     path.join(distDir, "openclaw.plugin.json"),
   ),
   fs.copyFile(path.join(rootDir, "README.md"), path.join(distDir, "README.md")),
+  fs.mkdir(path.join(distDir, "hook-shim"), { recursive: true }),
+]);
+
+await Promise.all([
+  fs.copyFile(
+    path.join(rootDir, "hook-shim", "HOOK.md"),
+    path.join(distDir, "hook-shim", "HOOK.md"),
+  ),
+  fs.copyFile(
+    path.join(rootDir, "hook-shim", "handler.js"),
+    path.join(distDir, "hook-shim", "handler.js"),
+  ),
 ]);

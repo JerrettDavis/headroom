@@ -7,6 +7,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "hook-shim",
     "openclaw.plugin.json",
     "README.md"
   ],
@@ -34,6 +35,9 @@
     "vitest": "^2.0.0"
   },
   "openclaw": {
+    "hooks": [
+      "./hook-shim"
+    ],
     "extensions": [
       "./dist/index.js"
     ],
