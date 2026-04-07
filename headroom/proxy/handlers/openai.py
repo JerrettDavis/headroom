@@ -512,12 +512,16 @@ class OpenAIHandlerMixin:
                     messages=optimized_messages,
                 )
 
+                # OpenAI has no write penalty — uncached = total - cached
+                uncached_input_tokens = max(0, total_input_tokens - cache_read_tokens)
+
                 if self.cost_tracker:
                     self.cost_tracker.record_tokens(
                         model,
                         tokens_saved,
                         optimized_tokens,
                         cache_read_tokens=cache_read_tokens,
+                        uncached_tokens=uncached_input_tokens,
                     )
 
                 # Cache
@@ -537,6 +541,7 @@ class OpenAIHandlerMixin:
                     pipeline_timing=pipeline_timing,
                     waste_signals=waste_signals_dict,
                     cache_read_tokens=cache_read_tokens,
+                    uncached_input_tokens=uncached_input_tokens,
                 )
 
                 if tokens_saved > 0:
