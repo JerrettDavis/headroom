@@ -540,7 +540,7 @@ def load_bfcl(
 
     # Download questions + function schemas (JSONL)
     try:
-        raw = urllib.request.urlopen(f"{base_url}/{data_file}").read().decode("utf-8")
+        raw = urllib.request.urlopen(f"{base_url}/{data_file}").read().decode("utf-8")  # nosec B310
         items = [json.loads(line) for line in raw.strip().split("\n") if line.strip()]
     except Exception as e:
         raise ValueError(f"Failed to download BFCL dataset '{data_file}': {e}") from e
@@ -548,7 +548,7 @@ def load_bfcl(
     # Download ground truth (JSONL, keyed by id)
     gt_by_id: dict[str, str] = {}
     try:
-        gt_raw = urllib.request.urlopen(f"{base_url}/{gt_file}").read().decode("utf-8")
+        gt_raw = urllib.request.urlopen(f"{base_url}/{gt_file}").read().decode("utf-8")  # nosec B310
         for line in gt_raw.strip().split("\n"):
             if line.strip():
                 obj = json.loads(line)

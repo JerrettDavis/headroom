@@ -331,7 +331,7 @@ class SQLiteMemoryStore:
 
         with self._get_conn() as conn:
             cursor = conn.execute(
-                f"SELECT * FROM memories WHERE id IN ({placeholders})",
+                f"SELECT * FROM memories WHERE id IN ({placeholders})",  # nosec B608
                 memory_ids,
             )
 
@@ -370,7 +370,7 @@ class SQLiteMemoryStore:
 
         with self._get_conn() as conn:
             cursor = conn.execute(
-                f"DELETE FROM memories WHERE id IN ({placeholders})",
+                f"DELETE FROM memories WHERE id IN ({placeholders})",  # nosec B608
                 memory_ids,
             )
             conn.commit()
@@ -742,7 +742,7 @@ class SQLiteMemoryStore:
 
         with self._get_conn() as conn:
             cursor = conn.execute(
-                f"DELETE FROM memories WHERE {where_clause}",
+                f"DELETE FROM memories WHERE {where_clause}",  # nosec B608
                 params,
             )
             conn.commit()

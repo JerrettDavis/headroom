@@ -369,7 +369,7 @@ class SQLiteGraphStore:
 
                 where_clause = " AND ".join(conditions)
                 cursor = conn.execute(
-                    f"SELECT * FROM relationships WHERE {where_clause}",
+                    f"SELECT * FROM relationships WHERE {where_clause}",  # nosec B608
                     params,
                 )
 
