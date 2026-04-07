@@ -17,6 +17,7 @@ import json
 import logging
 import time
 import uuid
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -383,7 +384,8 @@ class LoCoMoEvaluatorV2:
                 self._backend = self._config.backend_factory(self._current_user_id)
             else:
                 # Default to LocalBackend
-                db_path = self._config.db_path or f"/tmp/locomo_v2_{uuid.uuid4().hex[:8]}.db"
+                db_dir = tempfile.gettempdir()
+                db_path = self._config.db_path or f"{db_dir}/locomo_v2_{uuid.uuid4().hex[:8]}.db"
                 backend_config = LocalBackendConfig(db_path=db_path)
                 self._backend = LocalBackend(backend_config)
 

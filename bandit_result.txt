@@ -1,0 +1,544 @@
+Working... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:02
+Run started:2026-04-07 07:00:45.850410+00:00
+
+Test results:
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/cache/base.py:323:15
+322	
+323	        return hashlib.md5(content.encode()).hexdigest()[:12]
+324	
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/cache/compression_cache.py:138:15
+137	            raw = content
+138	        return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
+139	
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/cache/compression_store.py:209:19
+208	        # - 96 bits: ~280 trillion entries for 50% collision
+209	        hash_key = hashlib.md5(original.encode()).hexdigest()[:24]
+210	
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/cache/prefix_tracker.py:308:15
+307	        key = f"{model}:{system_content}"
+308	        return hashlib.md5(key.encode()).hexdigest()[:16]
+309	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:74:9
+73	
+74	    ds = load_dataset("hotpotqa/hotpot_qa", "fullwiki", split=split)
+75	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:126:9
+125	
+126	    ds = load_dataset("google-research-datasets/natural_questions", "default", split=split)
+127	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:203:9
+202	
+203	    ds = load_dataset("trivia_qa", subset, split=split)
+204	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:274:9
+273	
+274	    ds = load_dataset("microsoft/ms_marco", "v2.1", split=split)
+275	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:342:9
+341	
+342	    ds = load_dataset("rajpurkar/squad_v2", split=split)
+343	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:404:13
+403	    try:
+404	        ds = load_dataset("THUDM/LongBench", task, split="test")
+405	    except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:463:9
+462	
+463	    ds = load_dataset("deepmind/narrativeqa", split=split)
+464	
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: headroom/evals/datasets.py:543:14
+542	    try:
+543	        raw = urllib.request.urlopen(f"{base_url}/{data_file}").read().decode("utf-8")
+544	        items = [json.loads(line) for line in raw.strip().split("\n") if line.strip()]
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: headroom/evals/datasets.py:551:17
+550	    try:
+551	        gt_raw = urllib.request.urlopen(f"{base_url}/{gt_file}").read().decode("utf-8")
+552	        for line in gt_raw.strip().split("\n"):
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:627:13
+626	    try:
+627	        ds = load_dataset("ToolBench/ToolBench", category, split="test")
+628	    except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:710:13
+709	    try:
+710	        ds = load_dataset("code_search_net", language, split=split)
+711	    except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/datasets.py:765:9
+764	
+765	    ds = load_dataset("openai_humaneval", split="test")
+766	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/html_oss_benchmarks.py:158:14
+157	    logger.info("Loading Scrapinghub article extraction benchmark...")
+158	    dataset = load_dataset("allenai/scrapinghub-article-extraction-benchmark")
+159	    samples = dataset["train"]
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/html_oss_benchmarks.py:290:18
+289	    if dataset_name == "squad":
+290	        dataset = load_dataset("rajpurkar/squad_v2", split="validation")
+291	    elif dataset_name == "hotpotqa":
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in load_dataset()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/evals/html_oss_benchmarks.py:292:18
+291	    elif dataset_name == "hotpotqa":
+292	        dataset = load_dataset("hotpotqa/hotpot_qa", "fullwiki", split="validation")
+293	    else:
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: headroom/evals/memory/locomo.py:235:4
+234	    logger.info(f"Downloading LoCoMo dataset from {LOCOMO_URL}...")
+235	    urllib.request.urlretrieve(LOCOMO_URL, cache_path)
+236	    logger.info(f"Downloaded to {cache_path}")
+
+--------------------------------------------------
+>> Issue: [B108:hardcoded_tmp_directory] Probable insecure usage of temp file/directory.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-377 (https://cwe.mitre.org/data/definitions/377.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html
+   Location: headroom/evals/memory/runner_v2.py:386:52
+385	                # Default to LocalBackend
+386	                db_path = self._config.db_path or f"/tmp/locomo_v2_{uuid.uuid4().hex[:8]}.db"
+387	                backend_config = LocalBackendConfig(db_path=db_path)
+
+--------------------------------------------------
+>> Issue: [B108:hardcoded_tmp_directory] Probable insecure usage of temp file/directory.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-377 (https://cwe.mitre.org/data/definitions/377.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b108_hardcoded_tmp_directory.html
+   Location: headroom/evals/memory/runner_v3.py:264:52
+263	            else:
+264	                db_path = self._config.db_path or f"/tmp/locomo_v3_{uuid.uuid4().hex[:8]}.db"
+265	                self._backend = LocalBackend(LocalBackendConfig(db_path=db_path))
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html
+   Location: headroom/memory/adapters/fts5.py:239:20
+238	            cursor = conn.execute(
+239	                f"""
+240	                SELECT memory_id, content, user_id, session_id, category,
+241	                       bm25(memory_fts) as rank
+242	                FROM memory_fts
+243	                WHERE {where_sql}
+244	                ORDER BY rank
+245	                LIMIT ?
+246	                """,
+247	                params,
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html
+   Location: headroom/memory/adapters/sqlite.py:334:18
+333	            cursor = conn.execute(
+334	                f"SELECT * FROM memories WHERE id IN ({placeholders})",
+335	                memory_ids,
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html
+   Location: headroom/memory/adapters/sqlite.py:373:18
+372	            cursor = conn.execute(
+373	                f"DELETE FROM memories WHERE id IN ({placeholders})",
+374	                memory_ids,
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html
+   Location: headroom/memory/adapters/sqlite.py:745:18
+744	            cursor = conn.execute(
+745	                f"DELETE FROM memories WHERE {where_clause}",
+746	                params,
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html
+   Location: headroom/memory/adapters/sqlite_graph.py:372:22
+371	                cursor = conn.execute(
+372	                    f"SELECT * FROM relationships WHERE {where_clause}",
+373	                    params,
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/memory/backends/direct_mem0.py:278:24
+277	                "created_at": _utcnow().isoformat(),
+278	                "hash": hashlib.md5(fact.encode()).hexdigest(),
+279	                **(metadata or {}),
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/models/ml_models.py:151:24
+150	
+151	                model = AutoModel.from_pretrained(model_name)
+152	                processor = AutoProcessor.from_pretrained(model_name)
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/models/ml_models.py:152:28
+151	                model = AutoModel.from_pretrained(model_name)
+152	                processor = AutoProcessor.from_pretrained(model_name)
+153	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/models/ml_models.py:239:28
+238	
+239	                tokenizer = AutoTokenizer.from_pretrained(model_path)
+240	                model = AutoModelForSequenceClassification.from_pretrained(model_path)
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/models/ml_models.py:240:24
+239	                tokenizer = AutoTokenizer.from_pretrained(model_path)
+240	                model = AutoModelForSequenceClassification.from_pretrained(model_path)
+241	
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/parser.py:36:11
+35	    """Compute hash of text, truncated to 16 chars."""
+36	    return hashlib.md5(text.encode()).hexdigest()[:16]
+37	
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/prediction/feature_extractor.py:2141:31
+2140	        # Prompt hash
+2141	        features.prompt_hash = hashlib.md5(text.encode()).hexdigest()[:16]
+2142	        features.prompt_signature = self._compute_signature(text)
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/prediction/feature_extractor.py:2327:20
+2326	        # Check cache
+2327	        cache_key = hashlib.md5(f"{prompt}:{model}:{system_prompt}".encode()).hexdigest()
+2328	
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: headroom/rtk/installer.py:79:17
+78	        try:
+79	            with urlopen(url, timeout=30) as response:
+80	                data = response.read()
+
+--------------------------------------------------
+>> Issue: [B310:blacklist] Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.
+   Severity: Medium   Confidence: High
+   CWE: CWE-22 (https://cwe.mitre.org/data/definitions/22.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen
+   Location: headroom/rtk/installer.py:86:21
+85	                ctx.verify_mode = ssl.CERT_NONE
+86	                with urlopen(url, timeout=30, context=ctx) as response:
+87	                    data = response.read()
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html
+   Location: headroom/storage/sqlite.py:233:16
+232	        cursor.execute(
+233	            f"""
+234	            SELECT
+235	                COUNT(*) as total_requests,
+236	                SUM(tokens_input_before) as total_tokens_before,
+237	                SUM(tokens_input_after) as total_tokens_after,
+238	                SUM(tokens_input_before - tokens_input_after) as total_tokens_saved,
+239	                AVG(tokens_input_before - tokens_input_after) as avg_tokens_saved,
+240	                AVG(cache_alignment_score) as avg_cache_alignment,
+241	                SUM(CASE WHEN mode = 'audit' THEN 1 ELSE 0 END) as audit_count,
+242	                SUM(CASE WHEN mode = 'optimize' THEN 1 ELSE 0 END) as optimize_count
+243	            FROM requests
+244	            {where_clause}
+245	            """,
+246	            params,
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/tokenizers/huggingface.py:119:15
+118	    try:
+119	        return AutoTokenizer.from_pretrained(
+120	            tokenizer_name,
+121	            trust_remote_code=True,
+122	        )
+123	    except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/transforms/anchor_selector.py:337:11
+336	        content = str(item)
+337	    return hashlib.md5(content.encode()).hexdigest()[:16]
+338	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/transforms/kompress_compressor.py:82:27
+81	            super().__init__()
+82	            self.encoder = AutoModel.from_pretrained(model_name, attn_implementation="eager")
+83	            hidden_size = self.encoder.config.hidden_size  # 768
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in hf_hub_download()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/transforms/kompress_compressor.py:180:20
+179	        logger.info("Downloading Kompress ONNX model from %s ...", HF_MODEL_ID)
+180	        onnx_path = hf_hub_download(HF_MODEL_ID, "onnx/kompress-int8.onnx")
+181	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/transforms/kompress_compressor.py:184:20
+183	        model = _OnnxModel(session)
+184	        tokenizer = AutoTokenizer.from_pretrained("answerdotai/ModernBERT-base")
+185	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in hf_hub_download()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/transforms/kompress_compressor.py:207:23
+206	        logger.info("Downloading Kompress PyTorch model from %s ...", HF_MODEL_ID)
+207	        weights_path = hf_hub_download(HF_MODEL_ID, "model.safetensors")
+208	
+
+--------------------------------------------------
+>> Issue: [B615:huggingface_unsafe_download] Unsafe Hugging Face Hub download without revision pinning in from_pretrained()
+   Severity: Medium   Confidence: High
+   CWE: CWE-494 (https://cwe.mitre.org/data/definitions/494.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b615_huggingface_unsafe_download.html
+   Location: headroom/transforms/kompress_compressor.py:228:20
+227	
+228	        tokenizer = AutoTokenizer.from_pretrained("answerdotai/ModernBERT-base")
+229	
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/transforms/smart_crusher.py:1765:28
+1764	                    content = str(item)
+1765	                item_hash = hashlib.md5(content.encode()).hexdigest()[:16]
+1766	            except (TypeError, ValueError, RecursionError) as e:
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/transforms/smart_crusher.py:1835:36
+1834	                        content = str(item)
+1835	                    seen_hashes.add(hashlib.md5(content.encode()).hexdigest()[:16])
+1836	                except (TypeError, ValueError, RecursionError):
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/transforms/smart_crusher.py:1868:32
+1867	                        content = str(item)
+1868	                    item_hash = hashlib.md5(content.encode()).hexdigest()[:16]
+1869	                except (TypeError, ValueError, RecursionError):
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/transforms/smart_crusher.py:3339:27
+3338	                msg = str(item.get(message_field, ""))[:50]
+3339	                msg_hash = hashlib.md5(msg.encode()).hexdigest()[:8]
+3340	                if msg_hash not in clusters:
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: headroom/utils.py:43:11
+42	        data = data.encode("utf-8")
+43	    return hashlib.md5(data).hexdigest()[:length]
+44	
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 82757
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 105
+		Medium: 38
+		High: 14
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 2
+		Medium: 10
+		High: 145
+Files skipped (0):

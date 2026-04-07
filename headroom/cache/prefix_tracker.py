@@ -305,7 +305,7 @@ class SessionTrackerStore:
                 break
 
         key = f"{model}:{system_content}"
-        return hashlib.md5(key.encode()).hexdigest()[:16]
+        return hashlib.md5(key.encode()).hexdigest()[:16]  # nosec B324
 
     def _maybe_cleanup(self) -> None:
         """Remove expired trackers periodically."""

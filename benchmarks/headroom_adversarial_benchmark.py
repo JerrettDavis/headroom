@@ -174,7 +174,7 @@ def generate_code_diff(num_files: int = 15, changes_per_file: int = 20) -> dict:
         filename = f"src/module_{file_idx}/handler.{ext}"
 
         diff_output += f"diff --git a/{filename} b/{filename}\n"
-        diff_output += f"index {hashlib.md5(f'{file_idx}a'.encode()).hexdigest()[:7]}..{hashlib.md5(f'{file_idx}b'.encode()).hexdigest()[:7]} 100644\n"
+        diff_output += f"index {hashlib.md5(f'{file_idx}a'.encode()).hexdigest()[:7]}..{hashlib.md5(f'{file_idx}b'.encode()).hexdigest()[:7]} 100644\n"  # nosec B324
         diff_output += f"--- a/{filename}\n"
         diff_output += f"+++ b/{filename}\n"
 
@@ -227,7 +227,7 @@ def generate_encrypted_data(size_kb: int = 20) -> dict:
     return {
         "tool": "encrypted_blob",
         "result": {
-            "blob_id": f"enc_{hashlib.md5(encoded[:100].encode()).hexdigest()[:16]}",
+            "blob_id": f"enc_{hashlib.md5(encoded[:100].encode()).hexdigest()[:16]}",  # nosec B324
             "encryption": "AES-256-GCM",
             "content": encoded,
             "size_bytes": len(random_bytes),
@@ -246,7 +246,7 @@ def generate_tiny_dataset(num_items: int = 5) -> dict:
                 "id": i + 1,
                 "name": f"Item {chr(65 + i)}",
                 "value": random.randint(100, 999),
-                "note": f"Unique note for item {i + 1}: {hashlib.md5(str(i).encode()).hexdigest()[:20]}",
+                "note": f"Unique note for item {i + 1}: {hashlib.md5(str(i).encode()).hexdigest()[:20]}",  # nosec B324
             }
         )
 
@@ -422,7 +422,7 @@ def run_scenario(
 
     # Add tool results
     for tool_output in scenario.tools:
-        tool_call_id = f"call_{hashlib.md5(tool_output['tool'].encode()).hexdigest()[:8]}"
+        tool_call_id = f"call_{hashlib.md5(tool_output['tool'].encode()).hexdigest()[:8]}"  # nosec B324
         messages.append(
             {
                 "role": "assistant",

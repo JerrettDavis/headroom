@@ -1762,7 +1762,7 @@ class SmartCrusher(Transform):
                 else:
                     # Non-dict items: use string representation
                     content = str(item)
-                item_hash = hashlib.md5(content.encode()).hexdigest()[:16]
+                item_hash = hashlib.md5(content.encode()).hexdigest()[:16]  # nosec B324
             except (TypeError, ValueError, RecursionError) as e:
                 # Serialization failed - keep the item (fail-safe)
                 logger.debug("Dedup hash failed for item at index %d: %s. Keeping item.", idx, e)
@@ -1832,7 +1832,7 @@ class SmartCrusher(Transform):
                         content = json.dumps(item, sort_keys=True, default=str)
                     else:
                         content = str(item)
-                    seen_hashes.add(hashlib.md5(content.encode()).hexdigest()[:16])
+                    seen_hashes.add(hashlib.md5(content.encode()).hexdigest()[:16])  # nosec B324
                 except (TypeError, ValueError, RecursionError):
                     pass  # Skip hash computation failures
 
@@ -1865,7 +1865,7 @@ class SmartCrusher(Transform):
                         content = json.dumps(item, sort_keys=True, default=str)
                     else:
                         content = str(item)
-                    item_hash = hashlib.md5(content.encode()).hexdigest()[:16]
+                    item_hash = hashlib.md5(content.encode()).hexdigest()[:16]  # nosec B324
                 except (TypeError, ValueError, RecursionError):
                     # Hash failure - use index as unique hash (fail-safe)
                     item_hash = f"__idx_{idx}__"
@@ -3336,7 +3336,7 @@ class SmartCrusher(Transform):
             clusters: dict[str, list[int]] = {}
             for i, item in enumerate(items):
                 msg = str(item.get(message_field, ""))[:50]
-                msg_hash = hashlib.md5(msg.encode()).hexdigest()[:8]
+                msg_hash = hashlib.md5(msg.encode()).hexdigest()[:8]  # nosec B324
                 if msg_hash not in clusters:
                     clusters[msg_hash] = []
                 clusters[msg_hash].append(i)

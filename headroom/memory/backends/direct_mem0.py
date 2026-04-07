@@ -275,7 +275,7 @@ class DirectMem0Adapter:
                 "user_id": user_id,
                 "importance": importance,
                 "created_at": _utcnow().isoformat(),
-                "hash": hashlib.md5(fact.encode()).hexdigest(),
+                "hash": hashlib.md5(fact.encode()).hexdigest(),  # nosec B324
                 **(metadata or {}),
             }
 

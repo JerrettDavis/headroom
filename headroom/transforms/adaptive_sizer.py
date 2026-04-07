@@ -200,7 +200,7 @@ def _simhash(text: str) -> int:
     # Character 4-grams
     for i in range(max(1, len(text_lower) - 3)):
         gram = text_lower[i : i + 4]
-        h = int(hashlib.md5(gram.encode(), usedforsecurity=False).hexdigest()[:16], 16)
+        h = int(hashlib.md5(gram.encode(), usedforsecurity=False).hexdigest()[:16], 16)  # nosec B324
         for j in range(64):
             if h & (1 << j):
                 v[j] += 1

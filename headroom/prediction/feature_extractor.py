@@ -2138,7 +2138,7 @@ class MetaExtractor(BaseFeatureExtractor):
                 features.available_output_tokens = min(features.available_output_tokens, max_tokens)
 
         # Prompt hash
-        features.prompt_hash = hashlib.md5(text.encode()).hexdigest()[:16]
+        features.prompt_hash = hashlib.md5(text.encode()).hexdigest()[:16]  # nosec B324
         features.prompt_signature = self._compute_signature(text)
 
         # Conversation features
@@ -2324,7 +2324,7 @@ class PromptFeatureExtractor:
             PromptFeatures containing all extracted features.
         """
         # Check cache
-        cache_key = hashlib.md5(f"{prompt}:{model}:{system_prompt}".encode()).hexdigest()
+        cache_key = hashlib.md5(f"{prompt}:{model}:{system_prompt}".encode()).hexdigest()  # nosec B324
 
         if use_cache and cache_key in self._cache:
             return self._cache[cache_key]

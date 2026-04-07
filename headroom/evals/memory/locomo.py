@@ -232,7 +232,7 @@ def download_locomo(cache_dir: Path | None = None) -> Path:
         return cache_path
 
     logger.info(f"Downloading LoCoMo dataset from {LOCOMO_URL}...")
-    urllib.request.urlretrieve(LOCOMO_URL, cache_path)
+    urllib.request.urlretrieve(LOCOMO_URL, cache_path)  # nosec B310
     logger.info(f"Downloaded to {cache_path}")
 
     return cache_path

@@ -74,6 +74,10 @@ def download_rtk(version: str | None = None) -> Path:
     logger.info("Downloading rtk %s from %s ...", version, url)
 
     try:
+        # Validate URL scheme to prevent B310 warning
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"Invalid URL scheme in {url}")
+            
         # Try default SSL first, fall back to unverified for macOS framework Python
         try:
             with urlopen(url, timeout=30) as response:

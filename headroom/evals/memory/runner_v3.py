@@ -22,6 +22,7 @@ import json
 import logging
 import time
 import uuid
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -261,7 +262,8 @@ class LoCoMoEvaluatorV3:
                 graph_status = "with graph" if self._config.mem0_enable_graph else "vector-only"
                 logger.info(f"Using Mem0 backend ({self._config.mem0_mode} mode, {graph_status})")
             else:
-                db_path = self._config.db_path or f"/tmp/locomo_v3_{uuid.uuid4().hex[:8]}.db"
+                db_dir = tempfile.gettempdir()
+                db_path = self._config.db_path or f"{db_dir}/locomo_v3_{uuid.uuid4().hex[:8]}.db"
                 self._backend = LocalBackend(LocalBackendConfig(db_path=db_path))
                 logger.info("Using LocalBackend")
 

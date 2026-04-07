@@ -40,7 +40,7 @@ def fast_hash(data: str | bytes, length: int = 16) -> str:
     """
     if isinstance(data, str):
         data = data.encode("utf-8")
-    return hashlib.md5(data).hexdigest()[:length]
+    return hashlib.md5(data).hexdigest()[:length]  # nosec B324
 
 
 def extract_user_query(messages: list[dict[str, Any]]) -> str:

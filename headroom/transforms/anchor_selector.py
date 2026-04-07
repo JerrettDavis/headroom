@@ -334,7 +334,7 @@ def compute_item_hash(item: dict[str, Any]) -> str:
         content = json.dumps(item, sort_keys=True, default=str)
     except (TypeError, ValueError):
         content = str(item)
-    return hashlib.md5(content.encode()).hexdigest()[:16]
+    return hashlib.md5(content.encode()).hexdigest()[:16]  # nosec B324
 
 
 class AnchorSelector:

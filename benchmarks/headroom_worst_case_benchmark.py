@@ -100,14 +100,14 @@ def generate_unique_support_tickets(num_tickets: int = 50) -> dict:
             days=random.randint(2, 14),
             from_plan=random.choice(["Enterprise", "Pro"]),
             to_plan=random.choice(["Starter", "Team"]),
-            user_id=f"usr_{hashlib.md5(str(i).encode()).hexdigest()[:8]}",
+            user_id=f"usr_{hashlib.md5(str(i).encode()).hexdigest()[:8]}",  # nosec B324
         )
 
         tickets.append(
             {
                 "ticket_id": f"TKT-{20000 + i}",
                 "customer": {
-                    "id": f"cust_{hashlib.md5(f'customer{i}'.encode()).hexdigest()[:8]}",
+                    "id": f"cust_{hashlib.md5(f'customer{i}'.encode()).hexdigest()[:8]}",  # nosec B324
                     "name": f"Customer {i + 1}",
                     "company": f"Company {chr(65 + (i % 26))}{i // 26 + 1} Inc.",
                     "plan": random.choice(products),
@@ -159,7 +159,7 @@ def generate_unique_error_traces(num_traces: int = 30) -> dict:
 
         traces.append(
             {
-                "error_id": f"err_{hashlib.md5(str(i).encode()).hexdigest()[:12]}",
+                "error_id": f"err_{hashlib.md5(str(i).encode()).hexdigest()[:12]}",  # nosec B324
                 "timestamp": f"2024-01-17T{10 + (i % 12):02d}:{(i * 7) % 60:02d}:00Z",
                 "service": random.choice(["api", "worker", "scheduler", "gateway"]),
                 "environment": "production",
@@ -169,7 +169,7 @@ def generate_unique_error_traces(num_traces: int = 30) -> dict:
                 "stack_trace": trace["stack"],
                 "context": {
                     "user_id": f"user_{random.randint(10000, 99999)}",
-                    "request_id": hashlib.md5(f"req{i}".encode()).hexdigest()[:16],
+                    "request_id": hashlib.md5(f"req{i}".encode()).hexdigest()[:16],  # nosec B324
                     "endpoint": trace.get("endpoint", "/api/unknown"),
                 },
                 "occurrence_count": random.randint(1, 5),  # Low count - each is unique
@@ -630,7 +630,7 @@ def run_scenario(
 
     # Add tool results with proper format
     for tool_output in scenario.tools:
-        tool_call_id = f"call_{hashlib.md5(tool_output['tool'].encode()).hexdigest()[:8]}"
+        tool_call_id = f"call_{hashlib.md5(tool_output['tool'].encode()).hexdigest()[:8]}"  # nosec B324
         messages.append(
             {
                 "role": "assistant",

@@ -33,7 +33,7 @@ RAG_PATTERN = re.compile("|".join(RAG_MARKERS), re.IGNORECASE)
 
 def compute_hash(text: str) -> str:
     """Compute hash of text, truncated to 16 chars."""
-    return hashlib.md5(text.encode()).hexdigest()[:16]
+    return hashlib.md5(text.encode()).hexdigest()[:16]  # nosec B324
 
 
 def detect_waste_signals(text: str, tokenizer: Tokenizer) -> WasteSignals:

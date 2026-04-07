@@ -159,7 +159,7 @@ def generate_log_data(
             entry = random.choice(log_templates).copy()
 
         entry["timestamp"] = f"2024-01-15T{10 + (i // 60):02d}:{i % 60:02d}:00Z"
-        entry["request_id"] = f"req-{hashlib.md5(str(i).encode()).hexdigest()[:8]}"
+        entry["request_id"] = f"req-{hashlib.md5(str(i).encode()).hexdigest()[:8]}"  # nosec B324
         logs.append(entry)
 
     # Questions designed to test different approaches

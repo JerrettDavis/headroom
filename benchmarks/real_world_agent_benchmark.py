@@ -386,7 +386,7 @@ def generate_log_search(query: str, num_entries: int = 300) -> dict:
                 "level": level,
                 "service": service,
                 "message": message,
-                "trace_id": hashlib.md5(f"{i}".encode()).hexdigest()[:16],
+                "trace_id": hashlib.md5(f"{i}".encode()).hexdigest()[:16],  # nosec B324
                 "metadata": {
                     "host": f"pod-{service}-{random.randint(1, 5)}",
                     "region": random.choice(["us-east-1", "us-west-2", "eu-west-1"]),
@@ -518,7 +518,7 @@ def run_agent_scenario(
 
     # Add tool results with proper OpenAI format
     for tool_output in scenario.tools:
-        tool_call_id = f"call_{hashlib.md5(tool_output['tool'].encode()).hexdigest()[:8]}"
+        tool_call_id = f"call_{hashlib.md5(tool_output['tool'].encode()).hexdigest()[:8]}"  # nosec B324
         # Assistant message with tool_calls (required by OpenAI)
         messages.append(
             {

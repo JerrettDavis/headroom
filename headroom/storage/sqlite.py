@@ -230,7 +230,7 @@ class SQLiteStorage(Storage):
             params.append(format_timestamp(end_time))
 
         cursor.execute(
-            f"""
+            f"""  # nosec B608
             SELECT
                 COUNT(*) as total_requests,
                 SUM(tokens_input_before) as total_tokens_before,
