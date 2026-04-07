@@ -9,7 +9,7 @@
 
 import { compress } from "headroom-ai";
 import { ProxyManager, defaultLogger, type ProxyManagerConfig, type ProxyManagerLogger } from "./proxy-manager.js";
-import { agentToOpenAI, openAIToAgent } from "./convert.js";
+import { agentToOpenAI, normalizeAgentMessages, openAIToAgent } from "./convert.js";
 
 export interface HeadroomEngineConfig extends ProxyManagerConfig {
   enabled?: boolean;
@@ -96,7 +96,7 @@ export class HeadroomContextEngine {
   }> {
     if (!this.proxyUrl || this.config.enabled === false) {
       // Fallback: return messages unchanged
-      return { messages: params.messages, estimatedTokens: 0 };
+      return { messages: normalizeAgentMessages(params.messages), estimatedTokens: 0 };
     }
 
     try {
@@ -112,7 +112,10 @@ export class HeadroomContextEngine {
       } as any);
 
       if (!result.compressed || result.tokensSaved === 0) {
-        return { messages: params.messages, estimatedTokens: result.tokensBefore };
+        return {
+          messages: normalizeAgentMessages(params.messages),
+          estimatedTokens: result.tokensBefore,
+        };
       }
 
       // Convert back to AgentMessage format
@@ -138,7 +141,7 @@ export class HeadroomContextEngine {
     } catch (error) {
       this.logger.error(`Assemble failed: ${error}`);
       // Graceful fallback: return original messages
-      return { messages: params.messages, estimatedTokens: 0 };
+      return { messages: normalizeAgentMessages(params.messages), estimatedTokens: 0 };
     }
   }
 

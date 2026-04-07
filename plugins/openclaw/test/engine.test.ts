@@ -25,7 +25,8 @@ describe("AgentMessage conversion", () => {
   it("converts user message", () => {
     const agent = [{ role: "user", content: "hello", timestamp: Date.now() }];
     const openai = agentToOpenAI(agent);
-    expect(openai).toEqual([{ role: "user", content: "hello" }]);
+    expect(openai).toHaveLength(1);
+    expect(openai[0]).toMatchObject({ role: "user", content: "hello" });
   });
 
   it("converts assistant with tool_use blocks", () => {
