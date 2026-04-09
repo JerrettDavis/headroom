@@ -1103,7 +1103,7 @@ class OpenAIHandlerMixin:
                 tokens_saved = 0
 
             # --- Connect to upstream OpenAI WebSocket ---
-            logger.debug(f"[{request_id}] WS connecting to {upstream_url}")
+            logger.info(f"[{request_id}] WS /v1/responses connecting to {upstream_url}")
 
             # Use ssl=True to let the websockets library handle SSL natively.
             # Manual ssl.create_default_context() + certifi doesn't load the
@@ -1162,6 +1162,10 @@ class OpenAIHandlerMixin:
                         _client_to_upstream(),
                         _upstream_to_client(),
                         return_exceptions=True,
+                    )
+
+                    logger.info(
+                        f"[{request_id}] WS /v1/responses completed (tokens_saved={tokens_saved})"
                     )
 
             except Exception as ws_err:
