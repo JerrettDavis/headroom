@@ -393,7 +393,7 @@ class HeadroomMCPServer:
             "tokens_saved": max(0, input_tokens - output_tokens),
             "savings_percent": savings_pct,
             "transforms": result.transforms_applied,
-            "note": f"Original stored with hash={hash_key}. Use headroom_retrieve to get full content later.",
+            "note": f"Original stored with hash={hash_key}. Use mcp__headroom__{CCR_TOOL_NAME} to get full content later.",
         }
 
     async def _retrieve_content(
@@ -481,7 +481,7 @@ class HeadroomMCPServer:
                         "Compress content to save context window space. "
                         "Use this on large tool outputs, file contents, search results, "
                         "or any content you want to shrink before reasoning over it. "
-                        "The original is stored and can be retrieved later via headroom_retrieve. "
+                        f"The original is stored and can be retrieved later via mcp__headroom__{CCR_TOOL_NAME}. "
                         "Returns compressed text + a hash for retrieval."
                     ),
                     inputSchema={
@@ -547,7 +547,7 @@ class HeadroomMCPServer:
                             "Read a file with smart caching. First read returns full content "
                             "and caches it. Subsequent reads of the same unchanged file return "
                             "a lightweight cache marker (~20 tokens instead of thousands). "
-                            "Use headroom_retrieve with the hash to get full content if needed. "
+                            f"Use mcp__headroom__{CCR_TOOL_NAME} with the hash to get full content if needed. "
                             "Use this INSTEAD of the built-in Read tool for significant token savings."
                         ),
                         inputSchema={
@@ -789,7 +789,7 @@ class HeadroomMCPServer:
                                     "note": (
                                         f"File unchanged since first read ({cached_lines} lines, "
                                         f"~{cached_tokens} tokens). Content already in your context "
-                                        f"from the first read. Call headroom_retrieve(hash='{ccr_hash}') "
+                                        f"from the first read. Call mcp__headroom__{CCR_TOOL_NAME}(hash='{ccr_hash}') "
                                         f"if you need the full content again."
                                     ),
                                 },
