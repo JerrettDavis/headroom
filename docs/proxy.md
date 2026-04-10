@@ -125,7 +125,52 @@ headroom proxy --llmlingua --llmlingua-rate 0.5
 
 ## API Endpoints
 
-### Health Check
+### Liveness
+
+```bash
+curl http://localhost:8787/livez
+```
+
+Response:
+```json
+{
+  "service": "headroom-proxy",
+  "status": "healthy",
+  "alive": true,
+  "version": "0.5.21",
+  "timestamp": "2026-04-10T16:36:25Z",
+  "uptime_seconds": 12.483
+}
+```
+
+### Readiness
+
+```bash
+curl http://localhost:8787/readyz
+```
+
+Response:
+```json
+{
+  "service": "headroom-proxy",
+  "status": "healthy",
+  "ready": true,
+  "version": "0.5.21",
+  "timestamp": "2026-04-10T16:36:25Z",
+  "uptime_seconds": 12.483,
+  "checks": {
+    "startup": {"enabled": true, "ready": true, "status": "healthy"},
+    "http_client": {"enabled": true, "ready": true, "status": "healthy"},
+    "cache": {"enabled": true, "ready": true, "status": "healthy"},
+    "rate_limiter": {"enabled": true, "ready": true, "status": "healthy"},
+    "memory": {"enabled": false, "ready": true, "status": "disabled"}
+  }
+}
+```
+
+`/readyz` returns HTTP 503 when Headroom has not completed startup or a required enabled subsystem is unavailable. This is the endpoint used by the container health checks.
+
+### Aggregate Health
 
 ```bash
 curl http://localhost:8787/health
@@ -135,11 +180,16 @@ Response:
 ```json
 {
   "status": "healthy",
-  "optimize": true,
-  "stats": {
-    "total_requests": 42,
-    "tokens_saved": 15000,
-    "savings_percent": 45.2
+  "ready": true,
+  "version": "0.5.21",
+  "config": {
+    "optimize": true,
+    "cache": true,
+    "rate_limit": true
+  },
+  "checks": {
+    "startup": {"enabled": true, "ready": true, "status": "healthy"},
+    "http_client": {"enabled": true, "ready": true, "status": "healthy"}
   }
 }
 ```

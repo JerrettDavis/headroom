@@ -221,10 +221,14 @@ class DirectMem0Adapter:
             self._mem0_client = await asyncio.to_thread(Mem0Memory.from_config, mem0_config)
         except ImportError:
             raise ImportError(
-                "mem0 package not installed. Install with: pip install mem0ai"
+                "mem0 package not installed. Install with: pip install 'headroom-ai[memory-stack]'"
             ) from None
 
         self._initialized = True
+
+    async def ensure_initialized(self) -> None:
+        """Public initialization hook for callers that need readiness guarantees."""
+        await self._ensure_initialized()
 
     def _embed(self, text: str) -> list[float]:
         """Generate embedding for text using OpenAI."""

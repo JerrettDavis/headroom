@@ -371,7 +371,9 @@ Usage:
   Codex / OpenAI: OPENAI_BASE_URL=http://{config.host}:{config.port}/v1 your-app
 {memory_section}
 Endpoints:
-  GET  /health     Health check
+  GET  /livez      Process liveness
+  GET  /readyz     Traffic readiness
+  GET  /health     Aggregate health
   GET  /stats      Detailed statistics
   GET  /stats-history Durable compression history + display session
   GET  /metrics    Prometheus metrics

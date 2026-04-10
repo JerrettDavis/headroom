@@ -31,6 +31,7 @@ import os
 import random
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -45,7 +46,7 @@ try:
     import uvicorn
     from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, PlainTextResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -612,6 +613,16 @@ class HeadroomProxy(
         if eager_status.get("magika") == "enabled":
             logger.info("Magika: ENABLED (ML content detection)")
 
+        if self.memory_handler:
+            await self.memory_handler.ensure_initialized()
+            memory_status = self.memory_handler.health_status()
+            logger.info(
+                "Memory: ENABLED "
+                f"(backend={memory_status['backend']}, initialized={memory_status['initialized']})"
+            )
+        else:
+            logger.info("Memory: DISABLED")
+
         # CCR status
         ccr_features = []
         if self.config.ccr_inject_tool:
@@ -641,6 +652,10 @@ class HeadroomProxy(
         """Cleanup async resources."""
         if self.http_client:
             await self.http_client.aclose()
+            self.http_client = None
+
+        if self.memory_handler and hasattr(self.memory_handler, "close"):
+            await self.memory_handler.close()
 
         # Print final stats
         self._print_summary()
@@ -927,24 +942,34 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             LangfuseTracingConfig.from_env(default_service_name="headroom-proxy")
         )
 
+        app.state.started_at = time.time()
+        app.state.ready = False
+        app.state.startup_error = None
+
         try:
-            # Startup
-            await proxy.startup()
-            asyncio.create_task(_log_toin_stats_periodically())
-            if proxy.usage_reporter:
-                await proxy.usage_reporter.start(proxy)
-            if proxy.traffic_learner:
-                await proxy.traffic_learner.start()
+            try:
+                # Startup
+                await proxy.startup()
+                asyncio.create_task(_log_toin_stats_periodically())
+                if proxy.usage_reporter:
+                    await proxy.usage_reporter.start(proxy)
+                if proxy.traffic_learner:
+                    await proxy.traffic_learner.start()
 
-            # Only start beacon if we acquire the lock (first worker wins)
-            _beacon_is_owner[0] = _try_acquire_beacon_lock()
-            if _beacon_is_owner[0]:
-                await _beacon.start()
-            else:
-                logger.debug("Beacon: skipping (another worker owns the lock)")
+                # Only start beacon if we acquire the lock (first worker wins)
+                _beacon_is_owner[0] = _try_acquire_beacon_lock()
+                if _beacon_is_owner[0]:
+                    await _beacon.start()
+                else:
+                    logger.debug("Beacon: skipping (another worker owns the lock)")
 
-            yield
+                app.state.ready = True
+                yield
+            except Exception as exc:
+                app.state.startup_error = str(exc)
+                raise
         finally:
+            app.state.ready = False
             # Shutdown
             if _beacon_is_owner[0]:
                 await _beacon.stop()
@@ -964,6 +989,94 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.proxy = proxy
+    app.state.started_at = None
+    app.state.ready = False
+    app.state.startup_error = None
+
+    def _iso_utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _uptime_seconds() -> float:
+        started_at = getattr(app.state, "started_at", None)
+        if not isinstance(started_at, (int, float)):
+            return 0.0
+        return round(max(0.0, time.time() - float(started_at)), 3)
+
+    def _component_health(
+        *,
+        enabled: bool,
+        ready: bool,
+        **details: Any,
+    ) -> dict[str, Any]:
+        status = "disabled" if not enabled else ("healthy" if ready else "unhealthy")
+        return {
+            "enabled": enabled,
+            "ready": (ready if enabled else True),
+            "status": status,
+            **details,
+        }
+
+    def _health_checks() -> dict[str, dict[str, Any]]:
+        memory_status = (
+            proxy.memory_handler.health_status()
+            if proxy.memory_handler
+            else {
+                "enabled": False,
+                "backend": None,
+                "initialized": False,
+                "native_tool": False,
+                "bridge_enabled": False,
+            }
+        )
+        memory_enabled = bool(memory_status.get("enabled", False))
+        memory_initialized = bool(memory_status.get("initialized", False))
+        return {
+            "startup": _component_health(
+                enabled=True,
+                ready=bool(getattr(app.state, "ready", False)),
+                error=getattr(app.state, "startup_error", None),
+            ),
+            "http_client": _component_health(
+                enabled=True,
+                ready=proxy.http_client is not None,
+            ),
+            "cache": _component_health(
+                enabled=config.cache_enabled,
+                ready=(proxy.cache is not None),
+            ),
+            "rate_limiter": _component_health(
+                enabled=config.rate_limit_enabled,
+                ready=(proxy.rate_limiter is not None),
+            ),
+            "memory": _component_health(
+                enabled=memory_enabled,
+                ready=memory_initialized,
+                backend=memory_status["backend"],
+                initialized=memory_initialized,
+                native_tool=bool(memory_status.get("native_tool", False)),
+                bridge_enabled=bool(memory_status.get("bridge_enabled", False)),
+            ),
+        }
+
+    def _health_payload(*, include_config: bool) -> dict[str, Any]:
+        checks = _health_checks()
+        ready = all(check["ready"] for check in checks.values())
+        payload: dict[str, Any] = {
+            "service": "headroom-proxy",
+            "status": "healthy" if ready else "unhealthy",
+            "ready": ready,
+            "version": __version__,
+            "timestamp": _iso_utc_now(),
+            "uptime_seconds": _uptime_seconds(),
+            "checks": checks,
+        }
+        if include_config:
+            payload["config"] = {
+                "optimize": config.optimize,
+                "cache": config.cache_enabled,
+                "rate_limit": config.rate_limit_enabled,
+            }
+        return payload
 
     # CORS
     app.add_middleware(
@@ -975,17 +1088,29 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     )
 
     # Health & Metrics
+    @app.get("/livez")
+    async def livez():
+        return JSONResponse(
+            status_code=200,
+            content={
+                "service": "headroom-proxy",
+                "status": "healthy",
+                "alive": True,
+                "version": __version__,
+                "timestamp": _iso_utc_now(),
+                "uptime_seconds": _uptime_seconds(),
+            },
+        )
+
+    @app.get("/readyz")
+    async def readyz():
+        payload = _health_payload(include_config=False)
+        return JSONResponse(status_code=200 if payload["ready"] else 503, content=payload)
+
     @app.get("/health")
     async def health():
-        return {
-            "status": "healthy",
-            "version": __version__,
-            "config": {
-                "optimize": config.optimize,
-                "cache": config.cache_enabled,
-                "rate_limit": config.rate_limit_enabled,
-            },
-        }
+        payload = _health_payload(include_config=True)
+        return JSONResponse(status_code=200, content=payload)
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard():
@@ -2177,7 +2302,9 @@ def run_server(
 ║    Cursor:        Set base URL in settings                           ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  ENDPOINTS:                                                          ║
-║    /health                  Health check                             ║
+║    /livez                   Process liveness                         ║
+║    /readyz                  Traffic readiness                        ║
+║    /health                  Aggregate health                         ║
 ║    /stats                   Detailed statistics                      ║
 ║    /metrics                 Prometheus metrics                       ║
 ║    /cache/clear             Clear response cache                     ║
