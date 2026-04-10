@@ -1091,13 +1091,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#architecture" class="md-nav__link">
+  <a href="#architecture-plugin-system" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Architecture
+        Architecture (Plugin System)
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Architecture (Plugin System)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-support-for-a-new-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding Support for a New Agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1109,6 +1126,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="CLI Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2176,13 +2210,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#architecture" class="md-nav__link">
+  <a href="#architecture-plugin-system" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Architecture
+        Architecture (Plugin System)
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Architecture (Plugin System)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-support-for-a-new-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding Support for a New Agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2194,6 +2245,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="CLI Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2244,16 +2312,18 @@
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>headroom<span class="w"> </span>learn<span class="w"> </span>--all<span class="w"> </span>--apply
 </span></code></pre></div>
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Past Sessions → Scanner → Analyzer → Writer → CLAUDE.md / MEMORY.md
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Past Sessions → Plugin → Analyzer → Writer → Agent-native context file
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                  │           │          │
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>                  │           │          └─ Writes marker-delimited sections
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>                  │           │             (replaced on re-run, not duplicated)
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                  │           │
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                  │           └─ Success Correlation: for each failure,
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                  │              finds what succeeded and extracts the diff
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                  │           └─ LLM-based analysis: finds failure patterns,
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                  │              success correlations, and actionable rules
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>                  │
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                  └─ Reads ~/.claude/projects/*.jsonl
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                     (extensible to Cursor, Codex, etc.)
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                  └─ Plugin reads agent-specific logs:
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                     • Claude Code: ~/.claude/projects/*.jsonl
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                     • Codex:       ~/.codex/sessions/*.json
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                     • Gemini CLI:  ~/.gemini/tmp/*/chats/session-*.json
 </span></code></pre></div>
 <h3 id="success-correlation">Success Correlation<a class="headerlink" href="#success-correlation" title="Permanent link">&para;</a></h3>
 <p>The core innovation. Instead of cataloging failures ("Read failed 5 times"), Headroom finds what the model did to fix each failure:</p>
@@ -2300,24 +2370,27 @@
 <thead>
 <tr>
 <th>Pattern</th>
-<th>Destination</th>
-<th>Why</th>
+<th>Claude Code</th>
+<th>Codex</th>
+<th>Gemini CLI</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Environment, paths, search scope, commands, large files</td>
+<td>Environment, paths, commands</td>
 <td><strong>CLAUDE.md</strong></td>
-<td>Stable project facts, version-controllable</td>
+<td><strong>AGENTS.md</strong></td>
+<td><strong>GEMINI.md</strong></td>
 </tr>
 <tr>
-<td>Missing paths, retry patterns, permissions</td>
+<td>Retry patterns, permissions</td>
 <td><strong>MEMORY.md</strong></td>
-<td>May change, agent-specific</td>
+<td><strong>instructions.md</strong></td>
+<td><strong>GEMINI.md</strong></td>
 </tr>
 </tbody>
 </table>
-<p>CLAUDE.md lives in your project directory. MEMORY.md lives in <code>~/.claude/projects/*/memory/</code>.</p>
+<p>Output files are agent-native: Claude Code uses CLAUDE.md/MEMORY.md, Codex uses AGENTS.md, Gemini uses GEMINI.md. The same learnings, written to the format each agent reads.</p>
 <h2 id="marker-based-updates">Marker-Based Updates<a class="headerlink" href="#marker-based-updates" title="Permanent link">&para;</a></h2>
 <p>Headroom manages a clearly-delimited section in each file:</p>
 <div class="language-markdown highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>&lt;!-- headroom:learn:start --&gt;
@@ -2327,30 +2400,66 @@
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>&lt;!-- headroom:learn:end --&gt;
 </span></code></pre></div>
 <p>On re-run, only the content between markers is replaced. Your existing file content is preserved.</p>
-<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Scanner (adapter)  →  Analyzer (generic)  →  Writer (adapter)
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── ClaudeCodeScanner   ├── EnvironmentAnalyzer   ├── ClaudeCodeWriter
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>├── (CursorScanner)     ├── StructureAnalyzer     ├── (CursorWriter)
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>└── (GenericScanner)    ├── CommandAnalyzer        └── (GenericWriter)
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>                        ├── RetryAnalyzer
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>                        └── CrossSessionAnalyzer
+<h2 id="architecture-plugin-system">Architecture (Plugin System)<a class="headerlink" href="#architecture-plugin-system" title="Permanent link">&para;</a></h2>
+<p>Headroom Learn uses a plugin architecture where each agent is a self-contained plugin:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Plugin Registry (auto-discovered)
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── ClaudeCodePlugin  →  Analyzer (LLM)  →  ClaudeCodeWriter  →  CLAUDE.md / MEMORY.md
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>├── CodexPlugin       →  Analyzer (LLM)  →  CodexWriter       →  AGENTS.md / instructions.md
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>├── GeminiPlugin      →  Analyzer (LLM)  →  GeminiWriter      →  GEMINI.md
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>└── (your plugin)     →  Analyzer (LLM)  →  (your writer)     →  (your file)
 </span></code></pre></div>
-<p><strong>Scanners</strong> read tool-specific log formats and produce normalized <code>ToolCall</code> sequences.
-<strong>Analyzers</strong> work on <code>ToolCall</code> — same analysis for any agent system.
-<strong>Writers</strong> output to tool-specific context injection mechanisms.</p>
-<p>To add support for a new agent (e.g., Cursor):
-1. Write <code>CursorScanner(ConversationScanner)</code> — reads Cursor's log format
-2. Write <code>CursorWriter(ContextWriter)</code> — writes to <code>.cursorrules</code>
-3. Same analyzers, same models, same recommendations</p>
+<p><strong>Plugins</strong> bundle scanning, detection, and writing for one agent. Built-in plugins are auto-discovered from <code>headroom.learn.plugins.*</code>. External plugins register via the <code>headroom.learn_plugin</code> entry point.</p>
+<p><strong>The Analyzer</strong> is shared — it uses an LLM (Sonnet, GPT-4o, or Gemini Flash) to find patterns. Same analysis for any agent.</p>
+<h3 id="adding-support-for-a-new-agent">Adding Support for a New Agent<a class="headerlink" href="#adding-support-for-a-new-agent" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Create <code>headroom/learn/plugins/myagent.py</code></li>
+<li>Implement <code>LearnPlugin</code> + <code>ConversationScanner</code> (scanner + writer + detection)</li>
+<li>Add <code>plugin = MyAgentPlugin()</code> at module scope</li>
+<li>Done — <code>headroom learn --agent myagent</code> works automatically</li>
+</ol>
+<p>Or install an external plugin: <code>pip install headroom-learn-cursor</code> (registers via entry point).</p>
 <h2 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>headroom learn [OPTIONS]
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>Options:
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  --project PATH    Project directory to analyze (default: current directory)
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>  --all             Analyze all discovered projects
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  --apply           Write recommendations (default: dry-run)
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  --claude-dir PATH Path to .claude directory (default: ~/.claude)
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  --project PATH               Project directory (default: current directory)
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>  --all                        Analyze all discovered projects
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  --apply                      Write recommendations (default: dry-run)
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  --agent [auto|claude|codex|gemini]
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>                               Which agent to analyze (default: auto-detect)
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  --model TEXT                 LLM for analysis (default: auto from API keys)
 </span></code></pre></div>
+<h3 id="supported-agents">Supported Agents<a class="headerlink" href="#supported-agents" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Scanner</th>
+<th>Writer</th>
+<th>Output Files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Claude Code</strong></td>
+<td>Reads <code>~/.claude/projects/*.jsonl</code></td>
+<td>ClaudeCodeWriter</td>
+<td>CLAUDE.md, MEMORY.md</td>
+</tr>
+<tr>
+<td><strong>OpenAI Codex</strong></td>
+<td>Reads <code>~/.codex/sessions/*.json</code></td>
+<td>CodexWriter</td>
+<td>AGENTS.md, instructions.md</td>
+</tr>
+<tr>
+<td><strong>Gemini CLI</strong></td>
+<td>Reads <code>~/.gemini/tmp/*/chats/session-*.json</code></td>
+<td>GeminiWriter</td>
+<td>GEMINI.md</td>
+</tr>
+</tbody>
+</table>
 <h2 id="real-world-results">Real-World Results<a class="headerlink" href="#real-world-results" title="Permanent link">&para;</a></h2>
 <p>Tested on 67,583 tool calls across 23 projects:</p>
 <table>
