@@ -110,8 +110,8 @@ class ProxyConfig:
     ccr_proactive_expansion: bool = True
     ccr_max_proactive_expansions: int = 2
 
-    # Code-aware compression
-    code_aware_enabled: bool = True
+    # Code-aware compression (disabled by default — use code graph tools instead)
+    code_aware_enabled: bool = False
 
     # Per-tool compression profiles
     tool_profiles: dict[str, Any] | None = None

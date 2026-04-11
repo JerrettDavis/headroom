@@ -388,7 +388,7 @@ class ContentRouterConfig:
     """
 
     # Enable/disable specific compressors
-    enable_code_aware: bool = True
+    enable_code_aware: bool = False  # Disabled: use code graph MCP tools instead
     enable_kompress: bool = True  # Kompress: ModernBERT token compressor
     enable_smart_crusher: bool = True
     enable_search_compressor: bool = True
@@ -397,7 +397,7 @@ class ContentRouterConfig:
     enable_image_optimizer: bool = True  # Image token optimization
 
     # Routing preferences
-    prefer_code_aware_for_code: bool = True
+    prefer_code_aware_for_code: bool = False  # Disabled: let code pass through unmangled
     mixed_content_threshold: int = 2  # Min types to consider mixed
     min_section_tokens: int = 20  # Min tokens to compress a section
 
