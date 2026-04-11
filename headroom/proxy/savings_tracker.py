@@ -30,18 +30,24 @@ DEFAULT_MAX_HISTORY_AGE_DAYS = 365
 DEFAULT_DISPLAY_SESSION_INACTIVITY_MINUTES = 60
 
 LITELLM_AVAILABLE = importlib.util.find_spec("litellm") is not None
+litellm: Any | None = None
 
 
 def _get_litellm_module() -> Any | None:
     """Import LiteLLM only when cost metadata is requested."""
+    global litellm
+
+    if litellm is not None:
+        return litellm
     if not LITELLM_AVAILABLE:
         return None
 
     try:
-        import litellm
+        import litellm as imported_litellm
     except ImportError:
         return None
 
+    litellm = imported_litellm
     return litellm
 
 

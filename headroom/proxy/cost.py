@@ -20,18 +20,24 @@ if TYPE_CHECKING:
     from headroom.proxy.prometheus_metrics import PrometheusMetrics
 
 LITELLM_AVAILABLE = importlib.util.find_spec("litellm") is not None
+litellm: Any | None = None
 
 
 def _get_litellm_module() -> Any | None:
     """Import LiteLLM only when pricing data is actually requested."""
+    global litellm
+
+    if litellm is not None:
+        return litellm
     if not LITELLM_AVAILABLE:
         return None
 
     try:
-        import litellm
+        import litellm as imported_litellm
     except ImportError:
         return None
 
+    litellm = imported_litellm
     return litellm
 
 logger = logging.getLogger("headroom.proxy")

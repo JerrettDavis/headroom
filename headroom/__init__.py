@@ -73,6 +73,7 @@ from __future__ import annotations
 from importlib import import_module
 
 from ._version import __version__  # noqa: F401
+from .compress import CompressResult, compress
 
 __all__ = [
     # Main client
@@ -256,7 +257,6 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "reset_otel_metrics": ("headroom.observability", "reset_otel_metrics"),
     # One-function API
     "compress": ("headroom.compress", "compress"),
-    "CompressResult": ("headroom.compress", "CompressResult"),
     # Hooks
     "CompressionHooks": ("headroom.hooks", "CompressionHooks"),
     "CompressContext": ("headroom.hooks", "CompressContext"),

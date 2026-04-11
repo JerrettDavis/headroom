@@ -149,6 +149,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("headroom.proxy")
 
+# Preserve module-level backend symbols for tests and patch-based integrations
+# while still importing the actual backend implementations lazily at runtime.
+AnyLLMBackend = None
+LiteLLMBackend = None
+
 # Always-on file logging to ~/.headroom/logs/ for `headroom perf` analysis
 _setup_file_logging()
 
@@ -350,7 +355,11 @@ class HeadroomProxy(
             if backend == "anyllm" or backend.startswith("anyllm-"):
                 provider = config.anyllm_provider
                 try:
-                    from headroom.backends.anyllm import AnyLLMBackend
+                    global AnyLLMBackend
+                    if AnyLLMBackend is None:
+                        from headroom.backends.anyllm import AnyLLMBackend as ImportedAnyLLMBackend
+
+                        AnyLLMBackend = ImportedAnyLLMBackend
 
                     self.anthropic_backend = AnyLLMBackend(provider=provider)
                     logger.info(f"any-llm backend enabled (provider={provider})")
@@ -366,7 +375,11 @@ class HeadroomProxy(
                 provider = backend.replace("litellm-", "")
 
                 try:
-                    from headroom.backends.litellm import LiteLLMBackend
+                    global LiteLLMBackend
+                    if LiteLLMBackend is None:
+                        from headroom.backends.litellm import LiteLLMBackend as ImportedLiteLLMBackend
+
+                        LiteLLMBackend = ImportedLiteLLMBackend
 
                     self.anthropic_backend = LiteLLMBackend(
                         provider=provider,
