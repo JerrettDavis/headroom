@@ -361,7 +361,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/" class="md-tabs__link">
+        <a href="../cli/" class="md-tabs__link">
           
   
   
@@ -490,6 +490,8 @@
       
         
       
+        
+      
     
     
     
@@ -580,6 +582,34 @@
     
   
     Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker-Native Install
   
 
     
@@ -1135,6 +1165,34 @@
     <span class="md-ellipsis">
       
         Supported Agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llm-backend-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM Backend Selection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LLM Backend Selection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-without-an-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using without an API key
       
     </span>
   </a>
@@ -1741,6 +1799,8 @@
       
         
       
+        
+      
     
     
     
@@ -1787,6 +1847,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2266,6 +2354,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#llm-backend-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM Backend Selection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LLM Backend Selection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-without-an-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using without an API key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#real-world-results" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2427,7 +2543,7 @@
 </span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  --apply                      Write recommendations (default: dry-run)
 </span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  --agent [auto|claude|codex|gemini]
 </span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>                               Which agent to analyze (default: auto-detect)
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  --model TEXT                 LLM for analysis (default: auto from API keys)
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  --model TEXT                 LLM for analysis (default: auto from API keys or CLI)
 </span></code></pre></div>
 <h3 id="supported-agents">Supported Agents<a class="headerlink" href="#supported-agents" title="Permanent link">&para;</a></h3>
 <table>
@@ -2460,6 +2576,52 @@
 </tr>
 </tbody>
 </table>
+<h2 id="llm-backend-selection">LLM Backend Selection<a class="headerlink" href="#llm-backend-selection" title="Permanent link">&para;</a></h2>
+<p><code>headroom learn</code> needs an LLM to analyze your sessions. It picks one automatically using this priority:</p>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Source</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>--model</code> flag</td>
+<td><code>headroom learn --model gpt-4o</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>API key env var</td>
+<td><code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>HEADROOM_LEARN_CLI</code> env var</td>
+<td><code>export HEADROOM_LEARN_CLI=gemini</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Auto-detect installed CLIs</td>
+<td>Checks PATH for <code>claude</code>, <code>gemini</code>, <code>codex</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="using-without-an-api-key">Using without an API key<a class="headerlink" href="#using-without-an-api-key" title="Permanent link">&para;</a></h3>
+<p>If you use Claude Code, Gemini CLI, or Codex via subscription (no raw API key), <code>headroom learn</code> can call them directly:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Auto-detects claude in PATH — no API key needed</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>headroom<span class="w"> </span>learn
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Explicitly select a CLI backend</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>headroom<span class="w"> </span>learn<span class="w"> </span>--model<span class="w"> </span>gemini-cli
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Pin a CLI via environment variable</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_LEARN_CLI</span><span class="o">=</span>codex
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>headroom<span class="w"> </span>learn
+</span></code></pre></div>
+<p>Valid values for <code>HEADROOM_LEARN_CLI</code>: <code>claude</code>, <code>gemini</code>, <code>codex</code>.</p>
 <h2 id="real-world-results">Real-World Results<a class="headerlink" href="#real-world-results" title="Permanent link">&para;</a></h2>
 <p>Tested on 67,583 tool calls across 23 projects:</p>
 <table>

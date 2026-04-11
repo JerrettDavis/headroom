@@ -355,7 +355,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/" class="md-tabs__link">
+        <a href="../cli/" class="md-tabs__link">
           
   
   
@@ -484,6 +484,8 @@
       
         
       
+        
+      
     
     
     
@@ -574,6 +576,34 @@
     
   
     Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker-Native Install
   
 
     
@@ -1463,6 +1493,8 @@
       
         
       
+        
+      
     
     
     
@@ -1509,6 +1541,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2149,7 +2209,7 @@
 <h2 id="zero-dependencies">Zero Dependencies<a class="headerlink" href="#zero-dependencies" title="Permanent link">&para;</a></h2>
 <p>The <code>headroom-ai</code> package has no runtime dependencies. Framework SDKs (Vercel AI, OpenAI, Anthropic) are optional peer dependencies — only install what you use.</p>
 <h2 id="openclaw-plugin">OpenClaw Plugin<a class="headerlink" href="#openclaw-plugin" title="Permanent link">&para;</a></h2>
-<p>The TypeScript SDK powers the <a href="https://www.npmjs.com/package/headroom-openclaw"><code>headroom-openclaw</code></a> plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents. The plugin uses <code>HeadroomClient</code> internally to compress context during the <code>assemble()</code> lifecycle hook. Install it with <code>openclaw plugins install headroom-openclaw</code>. See the <a href="https://github.com/chopratejas/headroom/tree/main/plugins/openclaw">plugin source</a> for details.</p>
+<p>The TypeScript SDK powers the <a href="https://www.npmjs.com/package/headroom-openclaw"><code>headroom-openclaw</code></a> plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents. The plugin uses <code>HeadroomClient</code> internally to compress context during the <code>assemble()</code> lifecycle hook. The preferred install flow is <code>headroom wrap openclaw</code>; the direct plugin command is <code>openclaw plugins install --dangerously-force-unsafe-install headroom-ai/openclaw</code>. See the <a href="https://github.com/chopratejas/headroom/tree/main/plugins/openclaw">plugin source</a> for details.</p>
 <h2 id="comparison-with-python-sdk">Comparison with Python SDK<a class="headerlink" href="#comparison-with-python-sdk" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

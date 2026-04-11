@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://chopratejas.github.io/headroom/llmlingua/">
+        <link rel="canonical" href="https://chopratejas.github.io/headroom/docker-install/">
       
       
-        <link rel="prev" href="../text-compression/">
+        <link rel="prev" href="../getting-started/">
       
       
-        <link rel="next" href="../benchmarks/">
+        <link rel="next" href="../configuration/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>LLMLingua - Headroom</title>
+        <title>Docker-Native Install - Headroom</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#llmlingua-2-integration" class="md-skip">
+        <a href="#docker-native-install" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              LLMLingua
+              Docker-Native Install
             
           </span>
         </div>
@@ -245,10 +245,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../quickstart/" class="md-tabs__link">
           
   
@@ -311,12 +313,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../ARCHITECTURE/" class="md-tabs__link">
           
   
@@ -479,8 +479,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -496,21 +498,22 @@
     
     
       
+        
+        
+      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   
@@ -528,7 +531,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -599,10 +602,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../docker-install/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker-Native Install
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -618,6 +648,176 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#one-line-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-line install
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="One-line install">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#macos-linux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS / Linux
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-powershell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows PowerShell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-installer-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the installer does
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-wrapper-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the wrapper behaves
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How the wrapper behaves">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#native-headroom-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native Headroom commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wrap-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wrap commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-compose-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose support
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Docker Compose support">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#macos-linux_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS / Linux
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-powershell_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows PowerShell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-passthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment passthrough
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1148,10 +1348,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -1167,22 +1365,21 @@
     
     
       
-        
-        
-      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -1200,7 +1397,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1299,37 +1496,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    LLMLingua
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../llmlingua/" class="md-nav__link">
         
   
   
@@ -1345,197 +1515,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#when-to-use-llmlingua-2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When to Use LLMLingua-2
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Installation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Basic Usage
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#content-aware-compression" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Content-Aware Compression
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#memory-management" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Memory Management
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#device-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Device Configuration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#use-in-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use in Pipeline
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#proxy-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proxy Integration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#configuration-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Reference
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#why-opt-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why Opt-In?
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Troubleshooting">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#model-not-found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        "Model not found"
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cuda-out-of-memory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        "CUDA out of memory"
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#slow-compression" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        "Slow compression"
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2064,143 +2043,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#when-to-use-llmlingua-2" class="md-nav__link">
+  <a href="#one-line-install" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When to Use LLMLingua-2
+        One-line install
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Installation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Basic Usage
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#content-aware-compression" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Content-Aware Compression
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#memory-management" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Memory Management
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#device-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Device Configuration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#use-in-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use in Pipeline
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#proxy-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proxy Integration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#configuration-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Reference
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#why-opt-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why Opt-In?
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Troubleshooting">
+    <nav class="md-nav" aria-label="One-line install">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#model-not-found" class="md-nav__link">
+  <a href="#macos-linux" class="md-nav__link">
     <span class="md-ellipsis">
       
-        "Model not found"
+        macOS / Linux
       
     </span>
   </a>
@@ -2208,21 +2066,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#cuda-out-of-memory" class="md-nav__link">
+  <a href="#windows-powershell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        "CUDA out of memory"
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#slow-compression" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        "Slow compression"
+        Windows PowerShell
       
     </span>
   </a>
@@ -2231,6 +2078,117 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-installer-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the installer does
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-wrapper-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the wrapper behaves
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How the wrapper behaves">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#native-headroom-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native Headroom commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wrap-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wrap commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-compose-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose support
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Docker Compose support">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#macos-linux_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS / Linux
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-powershell_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows PowerShell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-passthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment passthrough
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2254,256 +2212,104 @@
   
 
 
-<h1 id="llmlingua-2-integration">LLMLingua-2 Integration<a class="headerlink" href="#llmlingua-2-integration" title="Permanent link">&para;</a></h1>
-<p>For maximum compression, Headroom integrates with <strong>LLMLingua-2</strong>, Microsoft's BERT-based token classifier trained via GPT-4 distillation. It achieves <strong>up to 20x compression</strong> while preserving semantic meaning.</p>
-<h2 id="when-to-use-llmlingua-2">When to Use LLMLingua-2<a class="headerlink" href="#when-to-use-llmlingua-2" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Approach</th>
-<th>Best For</th>
-<th>Compression</th>
-<th>Speed</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>SmartCrusher</strong></td>
-<td>JSON tool outputs</td>
-<td>70-90%</td>
-<td>~1ms</td>
-</tr>
-<tr>
-<td><strong>Text Utilities</strong></td>
-<td>Search/logs</td>
-<td>50-90%</td>
-<td>~1ms</td>
-</tr>
-<tr>
-<td><strong>LLMLingua-2</strong></td>
-<td>Any text, max compression</td>
-<td>80-95%</td>
-<td>~50-200ms</td>
-</tr>
-</tbody>
-</table>
-<p>LLMLingua-2 is ideal when you need maximum compression and can tolerate slightly higher latency (e.g., compressing large tool outputs before storage, offline processing).</p>
-<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Adds ~2GB of model weights</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;headroom-ai[llmlingua]&quot;</span>
+<h1 id="docker-native-install">Docker-Native Install<a class="headerlink" href="#docker-native-install" title="Permanent link">&para;</a></h1>
+<p>Run Headroom without installing Python or Node.js on the host. The install scripts add a native <code>headroom</code> wrapper that keeps <strong>Headroom itself</strong> in Docker while orchestrating the rest of your workflow on the host OS.</p>
+<h2 id="one-line-install">One-line install<a class="headerlink" href="#one-line-install" title="Permanent link">&para;</a></h2>
+<h3 id="macos-linux">macOS / Linux<a class="headerlink" href="#macos-linux" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/chopratejas/headroom/main/scripts/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
 </span></code></pre></div>
-<h2 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMLinguaCompressor</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># Create compressor (model loaded lazily on first use)</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">compressor</span> <span class="o">=</span> <span class="n">LLMLinguaCompressor</span><span class="p">()</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># Compress any text</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">long_output</span> <span class="o">=</span> <span class="s2">&quot;The function processUserData takes a user object and validates...&quot;</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">result</span> <span class="o">=</span> <span class="n">compressor</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">long_output</span><span class="p">)</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Before: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">original_tokens</span><span class="si">}</span><span class="s2"> tokens&quot;</span><span class="p">)</span>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;After: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">compressed_tokens</span><span class="si">}</span><span class="s2"> tokens&quot;</span><span class="p">)</span>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saved: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">savings_percentage</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">compressed</span><span class="p">)</span>
+<h3 id="windows-powershell">Windows PowerShell<a class="headerlink" href="#windows-powershell" title="Permanent link">&para;</a></h3>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">irm </span><span class="n">https</span><span class="p">://</span><span class="n">raw</span><span class="p">.</span><span class="n">githubusercontent</span><span class="p">.</span><span class="n">com</span><span class="p">/</span><span class="n">chopratejas</span><span class="p">/</span><span class="n">headroom</span><span class="p">/</span><span class="n">main</span><span class="p">/</span><span class="n">scripts</span><span class="p">/</span><span class="n">install</span><span class="p">.</span><span class="n">ps1</span> <span class="p">|</span> <span class="nb">iex</span>
 </span></code></pre></div>
-<h2 id="content-aware-compression">Content-Aware Compression<a class="headerlink" href="#content-aware-compression" title="Permanent link">&para;</a></h2>
-<p>LLMLingua-2 automatically adjusts compression based on content type:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMLinguaCompressor</span><span class="p">,</span> <span class="n">LLMLinguaConfig</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Conservative for code (keep 40% of tokens)</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">LLMLinguaConfig</span><span class="p">(</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">code_compression_rate</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span>    <span class="c1"># More conservative</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">json_compression_rate</span><span class="o">=</span><span class="mf">0.35</span><span class="p">,</span>   <span class="c1"># Moderate</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">text_compression_rate</span><span class="o">=</span><span class="mf">0.25</span><span class="p">,</span>   <span class="c1"># Aggressive</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">)</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">compressor</span> <span class="o">=</span> <span class="n">LLMLinguaCompressor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># Auto-detects content type</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">code_result</span> <span class="o">=</span> <span class="n">compressor</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="s2">&quot;def calculate(x): return x * 2&quot;</span><span class="p">)</span>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">text_result</span> <span class="o">=</span> <span class="n">compressor</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="s2">&quot;This is a verbose explanation...&quot;</span><span class="p">)</span>
-</span></code></pre></div>
-<h2 id="memory-management">Memory Management<a class="headerlink" href="#memory-management" title="Permanent link">&para;</a></h2>
-<p>The model uses ~1GB RAM. Unload it when done:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">LLMLinguaCompressor</span><span class="p">,</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">unload_llmlingua_model</span><span class="p">,</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">is_llmlingua_model_loaded</span><span class="p">,</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">compressor</span> <span class="o">=</span> <span class="n">LLMLinguaCompressor</span><span class="p">()</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">result</span> <span class="o">=</span> <span class="n">compressor</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>  <span class="c1"># Model loaded here</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="c1"># Check if loaded</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="nb">print</span><span class="p">(</span><span class="n">is_llmlingua_model_loaded</span><span class="p">())</span>  <span class="c1"># True</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="c1"># Free memory when done</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="n">unload_llmlingua_model</span><span class="p">()</span>  <span class="c1"># Frees ~1GB</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="nb">print</span><span class="p">(</span><span class="n">is_llmlingua_model_loaded</span><span class="p">())</span>  <span class="c1"># False</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Next compression will reload automatically</span>
-</span></code></pre></div>
-<h2 id="device-configuration">Device Configuration<a class="headerlink" href="#device-configuration" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMLinguaConfig</span><span class="p">,</span> <span class="n">LLMLinguaCompressor</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># Force CPU (slower but works everywhere)</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">LLMLinguaConfig</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="c1"># Force GPU (faster but needs CUDA)</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">config</span> <span class="o">=</span> <span class="n">LLMLinguaConfig</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="c1"># Auto-detect (default): uses CUDA &gt; MPS &gt; CPU</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">config</span> <span class="o">=</span> <span class="n">LLMLinguaConfig</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">)</span>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
-</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">compressor</span> <span class="o">=</span> <span class="n">LLMLinguaCompressor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
-</span></code></pre></div>
-<h2 id="use-in-pipeline">Use in Pipeline<a class="headerlink" href="#use-in-pipeline" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="n">TransformPipeline</span><span class="p">,</span> <span class="n">LLMLinguaCompressor</span><span class="p">,</span> <span class="n">SmartCrusher</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># Combine with other transforms</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">TransformPipeline</span><span class="p">([</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">SmartCrusher</span><span class="p">(),</span>        <span class="c1"># First: compress JSON</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">LLMLinguaCompressor</span><span class="p">(),</span> <span class="c1"># Then: ML compression on remaining text</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">])</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">result</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">messages</span><span class="p">,</span> <span class="n">tokenizer</span><span class="p">)</span>
-</span></code></pre></div>
-<h2 id="proxy-integration">Proxy Integration<a class="headerlink" href="#proxy-integration" title="Permanent link">&para;</a></h2>
-<p>Enable LLMLingua in the proxy server for automatic ML compression:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Enable LLMLingua in proxy (requires: pip install headroom-ai[llmlingua,proxy])</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--llmlingua
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># With custom settings</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--llmlingua<span class="w"> </span>--llmlingua-device<span class="w"> </span>cuda<span class="w"> </span>--llmlingua-rate<span class="w"> </span><span class="m">0</span>.4
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># The proxy shows LLMLingua status at startup:</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="c1">#   LLMLingua: ENABLED  (device=cuda, rate=0.4)</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="c1">#</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># If llmlingua is installed but not enabled, you&#39;ll see a helpful hint:</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c1">#   LLMLingua: available (enable with --llmlingua for ML compression)</span>
-</span></code></pre></div>
-<h2 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Option</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>device</code></td>
-<td><code>"auto"</code></td>
-<td>Device to run model on: auto, cpu, cuda, mps</td>
-</tr>
-<tr>
-<td><code>code_compression_rate</code></td>
-<td><code>0.4</code></td>
-<td>Keep 40% of tokens for code</td>
-</tr>
-<tr>
-<td><code>json_compression_rate</code></td>
-<td><code>0.35</code></td>
-<td>Keep 35% of tokens for JSON</td>
-</tr>
-<tr>
-<td><code>text_compression_rate</code></td>
-<td><code>0.25</code></td>
-<td>Keep 25% of tokens for text</td>
-</tr>
-<tr>
-<td><code>force_tokens</code></td>
-<td><code>[]</code></td>
-<td>Tokens to always preserve</td>
-</tr>
-<tr>
-<td><code>drop_consecutive</code></td>
-<td><code>True</code></td>
-<td>Drop consecutive whitespace</td>
-</tr>
-</tbody>
-</table>
-<h2 id="performance-characteristics">Performance Characteristics<a class="headerlink" href="#performance-characteristics" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Metric</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Model size</td>
-<td>~500MB</td>
-</tr>
-<tr>
-<td>Memory usage</td>
-<td>~1GB RAM</td>
-</tr>
-<tr>
-<td>Cold start</td>
-<td>10-30s (first load)</td>
-</tr>
-<tr>
-<td>Inference</td>
-<td>50-200ms per request</td>
-</tr>
-<tr>
-<td>Compression</td>
-<td>80-95%</td>
-</tr>
-</tbody>
-</table>
-<h2 id="why-opt-in">Why Opt-In?<a class="headerlink" href="#why-opt-in" title="Permanent link">&para;</a></h2>
-<p>LLMLingua adds significant dependencies and overhead:</p>
-<table>
-<thead>
-<tr>
-<th>Aspect</th>
-<th>Default Proxy</th>
-<th>With LLMLingua</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Dependencies</td>
-<td>~50MB</td>
-<td>~2GB</td>
-</tr>
-<tr>
-<td>Cold start</td>
-<td>&lt;1s</td>
-<td>10-30s</td>
-</tr>
-<tr>
-<td>Per-request</td>
-<td>~1-5ms</td>
-<td>~50-200ms</td>
-</tr>
-<tr>
-<td>Compression</td>
-<td>70-90%</td>
-<td>80-95%</td>
-</tr>
-</tbody>
-</table>
-<p>The default proxy is lightweight and fast. Enable LLMLingua when you need maximum compression and can accept the tradeoffs.</p>
-<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<h3 id="model-not-found">"Model not found"<a class="headerlink" href="#model-not-found" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Ensure llmlingua extra is installed</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;headroom-ai[llmlingua]&quot;</span>
-</span></code></pre></div>
-<h3 id="cuda-out-of-memory">"CUDA out of memory"<a class="headerlink" href="#cuda-out-of-memory" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Force CPU mode</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">config</span> <span class="o">=</span> <span class="n">LLMLinguaConfig</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
-</span></code></pre></div>
-<h3 id="slow-compression">"Slow compression"<a class="headerlink" href="#slow-compression" title="Permanent link">&para;</a></h3>
+<h2 id="what-the-installer-does">What the installer does<a class="headerlink" href="#what-the-installer-does" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Verifies Docker is installed and available.</li>
+<li>Pulls <code>ghcr.io/chopratejas/headroom:latest</code>.</li>
+<li>Installs a <code>headroom</code> wrapper into <code>~/.local/bin</code> or <code>~/bin</code>.</li>
+<li>Updates shell startup files so the wrapper directory is on <code>PATH</code>.</li>
+</ol>
+<p>The wrapper keeps Headroom inside Docker and mounts host state back into the container so native behavior stays consistent:</p>
 <ul>
-<li>Use GPU if available: <code>device="cuda"</code></li>
-<li>Batch multiple compressions</li>
-<li>Consider using SmartCrusher for JSON (faster, similar results)</li>
+<li>project workspace -&gt; <code>/workspace</code></li>
+<li><code>~/.headroom</code></li>
+<li><code>~/.claude</code></li>
+<li><code>~/.codex</code></li>
+<li><code>~/.gemini</code></li>
+</ul>
+<p>Port <code>8787</code> stays the default, so <code>http://localhost:8787</code> works the same way as a native install.</p>
+<h2 id="how-the-wrapper-behaves">How the wrapper behaves<a class="headerlink" href="#how-the-wrapper-behaves" title="Permanent link">&para;</a></h2>
+<h3 id="native-headroom-commands">Native Headroom commands<a class="headerlink" href="#native-headroom-commands" title="Permanent link">&para;</a></h3>
+<p>These run directly inside the container:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>headroom<span class="w"> </span>proxy
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>headroom<span class="w"> </span>learn
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>headroom<span class="w"> </span>mcp<span class="w"> </span>install
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>headroom<span class="w"> </span>memory<span class="w"> </span>list
+</span></code></pre></div>
+<p>For <code>proxy</code>, the wrapper publishes the selected port back to the host:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8787</span>:8787<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">:/workspace&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>-w<span class="w"> </span>/workspace<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>ghcr.io/chopratejas/headroom:latest<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>headroom<span class="w"> </span>proxy<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8787</span>
+</span></code></pre></div>
+<h3 id="wrap-commands"><code>wrap</code> commands<a class="headerlink" href="#wrap-commands" title="Permanent link">&para;</a></h3>
+<p><code>wrap</code> is host-oriented in Docker-native mode:</p>
+<ul>
+<li>the wrapper starts the Headroom proxy in Docker</li>
+<li>container-side prep writes Headroom config, memory, and <code>rtk</code> guidance into mounted host files</li>
+<li>the target CLI itself is launched on the host by the wrapper</li>
+</ul>
+<p>Supported host wrap flows:</p>
+<ul>
+<li><code>headroom wrap claude</code></li>
+<li><code>headroom wrap codex</code></li>
+<li><code>headroom wrap aider</code></li>
+<li><code>headroom wrap cursor</code></li>
+<li><code>headroom wrap openclaw</code></li>
+<li><code>headroom unwrap openclaw</code></li>
+</ul>
+<p>OpenClaw remains host-native in Docker-native mode:</p>
+<ul>
+<li>the host must already have the <code>openclaw</code> CLI installed</li>
+<li><code>headroom wrap openclaw</code> installs/configures the Headroom plugin through the host <code>openclaw</code> CLI</li>
+<li>plugin auto-start still launches the installed host <code>headroom</code> wrapper from <code>PATH</code>, which then runs Headroom in Docker</li>
+<li>local plugin source mode (<code>--plugin-path</code>) is also supported, but it may require host <code>npm</code> when build steps are needed</li>
+</ul>
+<h2 id="docker-compose-support">Docker Compose support<a class="headerlink" href="#docker-compose-support" title="Permanent link">&para;</a></h2>
+<p>Use <code>docker/docker-compose.native.yml</code> when you want an explicit compose-managed proxy or CLI shell.</p>
+<h3 id="macos-linux_1">macOS / Linux<a class="headerlink" href="#macos-linux_1" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_HOST_HOME</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">&quot;</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_WORKSPACE</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">&quot;</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/docker-compose.native.yml<span class="w"> </span>up<span class="w"> </span>proxy
+</span></code></pre></div>
+<h3 id="windows-powershell_1">Windows PowerShell<a class="headerlink" href="#windows-powershell_1" title="Permanent link">&para;</a></h3>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">$env:HEADROOM_HOST_HOME</span> <span class="p">=</span> <span class="nv">$HOME</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nv">$env:HEADROOM_WORKSPACE</span> <span class="p">=</span> <span class="p">(</span><span class="nb">Get-Location</span><span class="p">).</span><span class="n">Path</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">docker</span> <span class="n">compose</span> <span class="o">-f</span> <span class="n">docker</span><span class="p">/</span><span class="n">docker-compose</span><span class="p">.</span><span class="n">native</span><span class="p">.</span><span class="n">yml</span> <span class="n">up</span> <span class="n">proxy</span>
+</span></code></pre></div>
+<p>You can also run one-off CLI commands through compose:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/docker-compose.native.yml<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>cli<span class="w"> </span>learn
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/docker-compose.native.yml<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>cli<span class="w"> </span>mcp<span class="w"> </span>install
+</span></code></pre></div>
+<h2 id="environment-passthrough">Environment passthrough<a class="headerlink" href="#environment-passthrough" title="Permanent link">&para;</a></h2>
+<p>The wrapper forwards Headroom and provider environment variables into the container, including common prefixes such as:</p>
+<ul>
+<li><code>HEADROOM_</code></li>
+<li><code>ANTHROPIC_</code></li>
+<li><code>OPENAI_</code></li>
+<li><code>GEMINI_</code></li>
+<li><code>AWS_</code></li>
+<li><code>GOOGLE_</code> / <code>GOOGLE_CLOUD_</code></li>
+<li><code>AZURE_</code></li>
+<li><code>OTEL_</code></li>
+</ul>
+<p>That keeps provider auth and runtime config working without maintaining a separate env file for the container.</p>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Docker is the only required Headroom runtime dependency on the host.</li>
+<li>Wrapped tools like Claude Code, Codex CLI, Aider, and Cursor still run on the host when you use <code>headroom wrap ...</code>.</li>
+<li>The install scripts are idempotent: rerunning them refreshes the wrapper and image without duplicating shell profile blocks.</li>
 </ul>
 
 

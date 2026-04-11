@@ -361,7 +361,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/" class="md-tabs__link">
+        <a href="../cli/" class="md-tabs__link">
           
   
   
@@ -490,6 +490,8 @@
       
         
       
+        
+      
     
     
     
@@ -580,6 +582,34 @@
     
   
     Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker-Native Install
   
 
     
@@ -1735,6 +1765,8 @@
       
         
       
+        
+      
     
     
     
@@ -1781,6 +1813,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2312,9 +2372,9 @@
 <td>1 line</td>
 </tr>
 <tr>
-<td>Claude Code / Cursor</td>
+<td>Claude Code / Cursor / Copilot CLI</td>
 <td><a href="#proxy">Headroom proxy</a></td>
-<td>1 env var</td>
+<td>1 command or env var</td>
 </tr>
 <tr>
 <td>Agno agents</td>
@@ -2475,91 +2535,101 @@
 - <code>x-headroom-tokens-saved: 1234</code> — tokens removed</p>
 <hr />
 <h2 id="proxy">Proxy<a class="headerlink" href="#proxy" title="Permanent link">&para;</a></h2>
-<p>The Headroom proxy is a standalone HTTP server. Best for non-Python apps or tools that only support base URL configuration (Claude Code, Cursor).</p>
+<p>The Headroom proxy is a standalone HTTP server. Best for non-Python apps or tools that only support base URL configuration (Claude Code, Cursor, GitHub Copilot CLI).</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;headroom-ai[all]&quot;</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--port<span class="w"> </span><span class="m">8787</span>
 </span></code></pre></div>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Claude Code</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nv">ANTHROPIC_BASE_URL</span><span class="o">=</span>http://localhost:8787<span class="w"> </span>claude
 </span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Cursor / Any OpenAI client</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="nv">OPENAI_BASE_URL</span><span class="o">=</span>http://localhost:8787/v1<span class="w"> </span>cursor
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># GitHub Copilot CLI</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>headroom<span class="w"> </span>wrap<span class="w"> </span>copilot<span class="w"> </span>--<span class="w"> </span>--model<span class="w"> </span>claude-sonnet-4-20250514
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Cursor / Any OpenAI client</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nv">OPENAI_BASE_URL</span><span class="o">=</span>http://localhost:8787/v1<span class="w"> </span>cursor
 </span></code></pre></div>
+<p>For translated backends, the Copilot wrapper can switch to Headroom's OpenAI-compatible route:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>headroom<span class="w"> </span>wrap<span class="w"> </span>copilot<span class="w"> </span>--backend<span class="w"> </span>anyllm<span class="w"> </span>--anyllm-provider<span class="w"> </span>groq<span class="w"> </span>--<span class="w"> </span>--model<span class="w"> </span>gpt-4o
+</span></code></pre></div>
+<p>By default, <code>headroom wrap copilot</code> installs <code>rtk</code> and appends token-optimized shell guidance to <code>.github/copilot-instructions.md</code> so Copilot sessions reuse the same command-saving conventions as other wrapped agent CLIs. Use <code>--no-rtk</code> to skip that step.</p>
 <h3 id="with-cloud-providers">With Cloud Providers<a class="headerlink" href="#with-cloud-providers" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># AWS Bedrock</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>bedrock<span class="w"> </span>--region<span class="w"> </span>us-east-1
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># Google Vertex AI</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>vertex_ai<span class="w"> </span>--region<span class="w"> </span>us-central1
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># Azure OpenAI</span>
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>azure
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="c1"># OpenRouter (400+ models)</span>
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="nv">OPENROUTER_API_KEY</span><span class="o">=</span>sk-or-...<span class="w"> </span>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>openrouter
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># AWS Bedrock</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>bedrock<span class="w"> </span>--region<span class="w"> </span>us-east-1
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Google Vertex AI</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>vertex_ai<span class="w"> </span>--region<span class="w"> </span>us-central1
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c1"># Azure OpenAI</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>azure
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="c1"># OpenRouter (400+ models)</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="nv">OPENROUTER_API_KEY</span><span class="o">=</span>sk-or-...<span class="w"> </span>headroom<span class="w"> </span>proxy<span class="w"> </span>--backend<span class="w"> </span>openrouter
 </span></code></pre></div>
 <p>See <a href="../proxy/">Proxy Documentation</a> for all options.</p>
 <hr />
 <h2 id="agno">Agno<a class="headerlink" href="#agno" title="Permanent link">&para;</a></h2>
 <p>Full integration with the Agno agent framework.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agno.agent</span><span class="w"> </span><span class="kn">import</span> <span class="n">Agent</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agno.models.anthropic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Claude</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.integrations.agno</span><span class="w"> </span><span class="kn">import</span> <span class="n">HeadroomAgnoModel</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">model</span> <span class="o">=</span> <span class="n">HeadroomAgnoModel</span><span class="p">(</span><span class="n">Claude</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;claude-sonnet-4-20250514&quot;</span><span class="p">))</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">your_tools</span><span class="p">])</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">response</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;Investigate the issue&quot;</span><span class="p">)</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tokens saved: </span><span class="si">{</span><span class="n">model</span><span class="o">.</span><span class="n">total_tokens_saved</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agno.agent</span><span class="w"> </span><span class="kn">import</span> <span class="n">Agent</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agno.models.anthropic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Claude</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.integrations.agno</span><span class="w"> </span><span class="kn">import</span> <span class="n">HeadroomAgnoModel</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">model</span> <span class="o">=</span> <span class="n">HeadroomAgnoModel</span><span class="p">(</span><span class="n">Claude</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="s2">&quot;claude-sonnet-4-20250514&quot;</span><span class="p">))</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">your_tools</span><span class="p">])</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">response</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;Investigate the issue&quot;</span><span class="p">)</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tokens saved: </span><span class="si">{</span><span class="n">model</span><span class="o">.</span><span class="n">total_tokens_saved</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <p>See <a href="../agno/">Agno Guide</a> for hooks, multi-provider, and streaming.</p>
 <hr />
 <h2 id="langchain">LangChain<a class="headerlink" href="#langchain" title="Permanent link">&para;</a></h2>
 <p>Full integration with LangChain — chat models, memory, retrievers, tool wrappers, and streaming.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langchain_openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChatOpenAI</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.integrations</span><span class="w"> </span><span class="kn">import</span> <span class="n">HeadroomChatModel</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">HeadroomChatModel</span><span class="p">(</span><span class="n">ChatOpenAI</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">))</span>
-</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">response</span> <span class="o">=</span> <span class="n">llm</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="s2">&quot;Hello!&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langchain_openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChatOpenAI</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom.integrations</span><span class="w"> </span><span class="kn">import</span> <span class="n">HeadroomChatModel</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">HeadroomChatModel</span><span class="p">(</span><span class="n">ChatOpenAI</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">))</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">response</span> <span class="o">=</span> <span class="n">llm</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="s2">&quot;Hello!&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <p>See <a href="../langchain/">LangChain Guide</a> for details and known limitations.</p>
 <hr />
 <h2 id="typescript-sdk">TypeScript SDK<a class="headerlink" href="#typescript-sdk" title="Permanent link">&para;</a></h2>
 <p>For Node.js, Next.js, and any TypeScript/JavaScript application.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>npm<span class="w"> </span>install<span class="w"> </span>headroom-ai
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>npm<span class="w"> </span>install<span class="w"> </span>headroom-ai
 </span></code></pre></div>
 <p>See the <a href="../typescript-sdk/">TypeScript SDK Guide</a> for full documentation including Vercel AI SDK middleware, OpenAI SDK wrapper, and Anthropic SDK wrapper.</p>
 <hr />
 <h2 id="openclaw">OpenClaw<a class="headerlink" href="#openclaw" title="Permanent link">&para;</a></h2>
 <p>Context compression plugin for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;headroom-ai[proxy]&quot;</span>
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>openclaw<span class="w"> </span>plugins<span class="w"> </span>install<span class="w"> </span>headroom-openclaw
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>headroom<span class="w"> </span>wrap<span class="w"> </span>openclaw
 </span></code></pre></div>
 <p>Configure as context engine:
-<div class="language-json highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;plugins&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;contextEngine&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;headroom&quot;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;plugins&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;contextEngine&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;headroom&quot;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
 </span></code></pre></div></p>
+<p>Manual install remains available when you are not using the CLI wrapper:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;headroom-ai[proxy]&quot;</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>openclaw<span class="w"> </span>plugins<span class="w"> </span>install<span class="w"> </span>--dangerously-force-unsafe-install<span class="w"> </span>headroom-ai/openclaw
+</span></code></pre></div>
 <p>The plugin auto-detects a running Headroom proxy or starts one. Compression happens in <code>assemble()</code> — zero changes to the agent's behavior.</p>
 <p>See the <a href="https://github.com/chopratejas/headroom/tree/main/plugins/openclaw">OpenClaw plugin documentation</a> for full setup.</p>
 <hr />
 <h2 id="compression-hooks-advanced">Compression Hooks (Advanced)<a class="headerlink" href="#compression-hooks-advanced" title="Permanent link">&para;</a></h2>
 <p>Customize compression behavior without modifying Headroom's code:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom</span><span class="w"> </span><span class="kn">import</span> <span class="n">compress</span><span class="p">,</span> <span class="n">CompressionHooks</span><span class="p">,</span> <span class="n">CompressContext</span>
-</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
-</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyHooks</span><span class="p">(</span><span class="n">CompressionHooks</span><span class="p">):</span>
-</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">pre_compress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">messages</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
-</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>        <span class="c1"># Modify messages before compression (dedup, filter, inject)</span>
-</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>        <span class="k">return</span> <span class="n">messages</span>
-</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>
-</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">compute_biases</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">messages</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
-</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>        <span class="c1"># Per-message compression aggressiveness</span>
-</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>        <span class="c1"># &gt;1.0 = keep more, &lt;1.0 = compress more</span>
-</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>        <span class="k">return</span> <span class="p">{</span><span class="mi">5</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span> <span class="mi">6</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">}</span>  <span class="c1"># Keep message 5, compress message 6</span>
-</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>
-</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">post_compress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
-</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a>        <span class="c1"># Observe results (logging, analytics, learning)</span>
-</span><span id="__span-18-15"><a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saved </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">tokens_saved</span><span class="si">}</span><span class="s2"> tokens&quot;</span><span class="p">)</span>
-</span><span id="__span-18-16"><a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>
-</span><span id="__span-18-17"><a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a><span class="n">result</span> <span class="o">=</span> <span class="n">compress</span><span class="p">(</span><span class="n">messages</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span> <span class="n">hooks</span><span class="o">=</span><span class="n">MyHooks</span><span class="p">())</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">headroom</span><span class="w"> </span><span class="kn">import</span> <span class="n">compress</span><span class="p">,</span> <span class="n">CompressionHooks</span><span class="p">,</span> <span class="n">CompressContext</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyHooks</span><span class="p">(</span><span class="n">CompressionHooks</span><span class="p">):</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">pre_compress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">messages</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>        <span class="c1"># Modify messages before compression (dedup, filter, inject)</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>        <span class="k">return</span> <span class="n">messages</span>
+</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>
+</span><span id="__span-20-8"><a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">compute_biases</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">messages</span><span class="p">,</span> <span class="n">ctx</span><span class="p">):</span>
+</span><span id="__span-20-9"><a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>        <span class="c1"># Per-message compression aggressiveness</span>
+</span><span id="__span-20-10"><a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>        <span class="c1"># &gt;1.0 = keep more, &lt;1.0 = compress more</span>
+</span><span id="__span-20-11"><a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>        <span class="k">return</span> <span class="p">{</span><span class="mi">5</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span> <span class="mi">6</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">}</span>  <span class="c1"># Keep message 5, compress message 6</span>
+</span><span id="__span-20-12"><a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>
+</span><span id="__span-20-13"><a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">post_compress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">):</span>
+</span><span id="__span-20-14"><a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>        <span class="c1"># Observe results (logging, analytics, learning)</span>
+</span><span id="__span-20-15"><a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Saved </span><span class="si">{</span><span class="n">event</span><span class="o">.</span><span class="n">tokens_saved</span><span class="si">}</span><span class="s2"> tokens&quot;</span><span class="p">)</span>
+</span><span id="__span-20-16"><a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>
+</span><span id="__span-20-17"><a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="n">result</span> <span class="o">=</span> <span class="n">compress</span><span class="p">(</span><span class="n">messages</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span> <span class="n">hooks</span><span class="o">=</span><span class="n">MyHooks</span><span class="p">())</span>
 </span></code></pre></div>
 <p>See <a href="../ARCHITECTURE/">Architecture</a> for how hooks integrate with the pipeline.</p>
 <hr />
