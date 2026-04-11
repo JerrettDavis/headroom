@@ -71,13 +71,15 @@ Supported host wrap flows:
 - `headroom wrap codex`
 - `headroom wrap aider`
 - `headroom wrap cursor`
-
-Not yet supported in Docker-native mode:
-
 - `headroom wrap openclaw`
 - `headroom unwrap openclaw`
 
-Those still require a native Headroom install because OpenClaw plugin install and gateway lifecycle management are host-native operations.
+OpenClaw remains host-native in Docker-native mode:
+
+- the host must already have the `openclaw` CLI installed
+- `headroom wrap openclaw` installs/configures the Headroom plugin through the host `openclaw` CLI
+- plugin auto-start still launches the installed host `headroom` wrapper from `PATH`, which then runs Headroom in Docker
+- local plugin source mode (`--plugin-path`) is also supported, but it may require host `npm` when build steps are needed
 
 ## Docker Compose support
 

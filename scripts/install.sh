@@ -338,6 +338,451 @@ run_host_tool() {
   "${binary}" "$@"
 }
 
+contains_help_flag() {
+  local arg
+  for arg in "$@"; do
+    if [[ "${arg}" == "--help" || "${arg}" == "-?" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+parse_openclaw_wrap_args() {
+  local -n out_plugin_path=$1
+  local -n out_plugin_spec=$2
+  local -n out_skip_build=$3
+  local -n out_copy=$4
+  local -n out_proxy_port=$5
+  local -n out_startup_timeout_ms=$6
+  local -n out_gateway_provider_ids=$7
+  local -n out_python_path=$8
+  local -n out_no_auto_start=$9
+  local -n out_no_restart=${10}
+  local -n out_verbose=${11}
+  shift 11
+
+  out_plugin_path=""
+  out_plugin_spec="headroom-ai/openclaw"
+  out_skip_build=0
+  out_copy=0
+  out_proxy_port=8787
+  out_startup_timeout_ms=20000
+  out_gateway_provider_ids=()
+  out_python_path=""
+  out_no_auto_start=0
+  out_no_restart=0
+  out_verbose=0
+
+  while (($#)); do
+    case "$1" in
+      --plugin-path)
+        out_plugin_path="$2"
+        shift 2
+        ;;
+      --plugin-path=*)
+        out_plugin_path="${1#*=}"
+        shift
+        ;;
+      --plugin-spec)
+        out_plugin_spec="$2"
+        shift 2
+        ;;
+      --plugin-spec=*)
+        out_plugin_spec="${1#*=}"
+        shift
+        ;;
+      --skip-build)
+        out_skip_build=1
+        shift
+        ;;
+      --copy)
+        out_copy=1
+        shift
+        ;;
+      --proxy-port)
+        out_proxy_port="$2"
+        shift 2
+        ;;
+      --proxy-port=*)
+        out_proxy_port="${1#*=}"
+        shift
+        ;;
+      --startup-timeout-ms)
+        out_startup_timeout_ms="$2"
+        shift 2
+        ;;
+      --startup-timeout-ms=*)
+        out_startup_timeout_ms="${1#*=}"
+        shift
+        ;;
+      --gateway-provider-id)
+        out_gateway_provider_ids+=("$2")
+        shift 2
+        ;;
+      --gateway-provider-id=*)
+        out_gateway_provider_ids+=("${1#*=}")
+        shift
+        ;;
+      --python-path)
+        out_python_path="$2"
+        shift 2
+        ;;
+      --python-path=*)
+        out_python_path="${1#*=}"
+        shift
+        ;;
+      --no-auto-start)
+        out_no_auto_start=1
+        shift
+        ;;
+      --no-restart)
+        out_no_restart=1
+        shift
+        ;;
+      --verbose|-v)
+        out_verbose=1
+        shift
+        ;;
+      *)
+        die "Unsupported option for 'headroom wrap openclaw': $1"
+        ;;
+    esac
+  done
+}
+
+parse_openclaw_unwrap_args() {
+  local -n out_no_restart=$1
+  local -n out_verbose=$2
+  shift 2
+
+  out_no_restart=0
+  out_verbose=0
+
+  while (($#)); do
+    case "$1" in
+      --no-restart)
+        out_no_restart=1
+        shift
+        ;;
+      --verbose|-v)
+        out_verbose=1
+        shift
+        ;;
+      *)
+        die "Unsupported option for 'headroom unwrap openclaw': $1"
+        ;;
+    esac
+  done
+}
+
+get_openclaw_existing_entry_json() {
+  local output=""
+  if output="$(openclaw config get plugins.entries.headroom 2>/dev/null)"; then
+    printf '%s' "${output}"
+  fi
+}
+
+prepare_openclaw_entry_json() {
+  local existing_entry_json="$1"
+  local proxy_port="$2"
+  local startup_timeout_ms="$3"
+  local python_path="$4"
+  local no_auto_start="$5"
+  shift 5
+  local gateway_provider_ids=("$@")
+  local args=()
+  args=(docker run --rm)
+  append_common_container_args args
+  args+=(--entrypoint headroom "${HEADROOM_IMAGE}" wrap openclaw --prepare-only)
+  args+=(--proxy-port "${proxy_port}" --startup-timeout-ms "${startup_timeout_ms}")
+
+  if [[ -n "${existing_entry_json}" ]]; then
+    args+=(--existing-entry-json "${existing_entry_json}")
+  fi
+  if [[ -n "${python_path}" ]]; then
+    args+=(--python-path "${python_path}")
+  fi
+  if [[ "${no_auto_start}" -eq 1 ]]; then
+    args+=(--no-auto-start)
+  fi
+
+  local provider_id
+  for provider_id in "${gateway_provider_ids[@]}"; do
+    args+=(--gateway-provider-id "${provider_id}")
+  done
+
+  "${args[@]}"
+}
+
+prepare_openclaw_unwrap_entry_json() {
+  local existing_entry_json="$1"
+  local args=()
+  args=(docker run --rm)
+  append_common_container_args args
+  args+=(--entrypoint headroom "${HEADROOM_IMAGE}" unwrap openclaw --prepare-only)
+  if [[ -n "${existing_entry_json}" ]]; then
+    args+=(--existing-entry-json "${existing_entry_json}")
+  fi
+  "${args[@]}"
+}
+
+run_openclaw_checked() {
+  local action="$1"
+  shift
+  local output=""
+
+  if ! output="$("$@" 2>&1)"; then
+    output="${output//$'\r'/}"
+    die "${action} failed: ${output:-unknown error}"
+  fi
+
+  printf '%s' "${output//$'\r'/}"
+}
+
+run_openclaw_checked_in_dir() {
+  local action="$1"
+  local cwd="$2"
+  shift 2
+  local output=""
+
+  if ! output="$(cd "${cwd}" && "$@" 2>&1)"; then
+    output="${output//$'\r'/}"
+    die "${action} failed: ${output:-unknown error}"
+  fi
+
+  printf '%s' "${output//$'\r'/}"
+}
+
+resolve_openclaw_extensions_dir() {
+  local config_output
+  config_output="$(run_openclaw_checked "openclaw config file" openclaw config file)"
+  local config_path
+  config_path="$(printf '%s\n' "${config_output}" | tail -n 1)"
+  [[ -n "${config_path}" ]] || die "Unable to resolve OpenClaw config path."
+  printf '%s\n' "$(dirname "${config_path}")/extensions"
+}
+
+copy_openclaw_plugin_into_extensions() {
+  local plugin_dir="$1"
+  local dist_dir="${plugin_dir}/dist"
+  local hook_shim_dir="${plugin_dir}/hook-shim"
+  [[ -d "${dist_dir}" ]] || die "Plugin dist folder missing at ${dist_dir}. Build the plugin first."
+  [[ -d "${hook_shim_dir}" ]] || die "Plugin hook-shim folder missing at ${hook_shim_dir}. Build the plugin first."
+
+  local extensions_dir
+  extensions_dir="$(resolve_openclaw_extensions_dir)"
+  local target_dir="${extensions_dir}/headroom"
+  mkdir -p "${target_dir}"
+  rm -rf "${target_dir}/dist" "${target_dir}/hook-shim"
+  cp -R "${dist_dir}" "${target_dir}/dist"
+  cp -R "${hook_shim_dir}" "${target_dir}/hook-shim"
+
+  local filename
+  for filename in openclaw.plugin.json package.json README.md; do
+    if [[ -f "${plugin_dir}/${filename}" ]]; then
+      cp "${plugin_dir}/${filename}" "${target_dir}/${filename}"
+    fi
+  done
+
+  printf '%s\n' "${target_dir}"
+}
+
+install_openclaw_plugin() {
+  local plugin_path="$1"
+  local plugin_spec="$2"
+  local skip_build="$3"
+  local copy_mode="$4"
+  local verbose="$5"
+
+  local local_source_mode=0
+  if [[ -n "${plugin_path}" ]]; then
+    local_source_mode=1
+    [[ -d "${plugin_path}" ]] || die "Plugin path not found: ${plugin_path}."
+    [[ -f "${plugin_path}/package.json" ]] || die "Invalid plugin path (missing package.json): ${plugin_path}"
+    [[ -f "${plugin_path}/openclaw.plugin.json" ]] || die "Invalid plugin path (missing openclaw.plugin.json): ${plugin_path}"
+  fi
+
+  if [[ "${local_source_mode}" -eq 1 && "${skip_build}" -eq 0 ]]; then
+    require_cmd npm
+    info "Building OpenClaw plugin (npm install + npm run build)..."
+    run_openclaw_checked_in_dir "npm install" "${plugin_path}" npm install >/dev/null
+    run_openclaw_checked_in_dir "npm run build" "${plugin_path}" npm run build >/dev/null
+  fi
+
+  local install_output=""
+  local install_status=0
+  set +e
+  if [[ "${local_source_mode}" -eq 1 ]]; then
+    if [[ "${copy_mode}" -eq 1 ]]; then
+      install_output="$(openclaw plugins install --dangerously-force-unsafe-install "${plugin_path}" 2>&1)"
+      install_status=$?
+    else
+      install_output="$(cd "${plugin_path}" && openclaw plugins install --dangerously-force-unsafe-install --link . 2>&1)"
+      install_status=$?
+    fi
+  else
+    install_output="$(openclaw plugins install --dangerously-force-unsafe-install "${plugin_spec}" 2>&1)"
+    install_status=$?
+  fi
+  set -e
+  install_output="${install_output//$'\r'/}"
+
+  if [[ "${install_status}" -eq 0 ]]; then
+    if [[ "${verbose}" -eq 1 && -n "${install_output}" ]]; then
+      printf '%s\n' "${install_output}"
+    fi
+    return
+  fi
+
+  local lower_output="${install_output,,}"
+  if [[ "${lower_output}" == *"plugin already exists"* ]]; then
+    info "Plugin already installed; continuing with configuration/update steps."
+    return
+  fi
+
+  if [[ "${lower_output}" == *"also not a valid hook pack"* && "${local_source_mode}" -eq 1 && "${copy_mode}" -eq 0 ]]; then
+    info "OpenClaw linked-path install bug detected; applying extension-path fallback..."
+    local target_dir
+    target_dir="$(copy_openclaw_plugin_into_extensions "${plugin_path}")"
+    info "Fallback plugin copy completed: ${target_dir}"
+    return
+  fi
+
+  die "openclaw plugins install failed: ${install_output:-exit code ${install_status}}"
+}
+
+restart_or_start_openclaw_gateway() {
+  local output=""
+  if output="$(openclaw gateway restart 2>&1)"; then
+    OPENCLAW_GATEWAY_ACTION="restarted"
+    OPENCLAW_GATEWAY_OUTPUT="${output//$'\r'/}"
+    return
+  fi
+
+  OPENCLAW_GATEWAY_OUTPUT="$(run_openclaw_checked "openclaw gateway start" openclaw gateway start)"
+  OPENCLAW_GATEWAY_ACTION="started"
+}
+
+wrap_openclaw_host() {
+  local plugin_path plugin_spec skip_build copy_mode proxy_port startup_timeout_ms python_path
+  local no_auto_start no_restart verbose
+  local gateway_provider_ids=()
+
+  parse_openclaw_wrap_args \
+    plugin_path \
+    plugin_spec \
+    skip_build \
+    copy_mode \
+    proxy_port \
+    startup_timeout_ms \
+    gateway_provider_ids \
+    python_path \
+    no_auto_start \
+    no_restart \
+    verbose \
+    "$@"
+
+  require_cmd openclaw
+  local existing_entry_json=""
+  existing_entry_json="$(get_openclaw_existing_entry_json)"
+  local entry_json
+  entry_json="$(prepare_openclaw_entry_json "${existing_entry_json}" "${proxy_port}" "${startup_timeout_ms}" "${python_path}" "${no_auto_start}" "${gateway_provider_ids[@]}")"
+
+  printf '\n  ╔═══════════════════════════════════════════════╗\n'
+  printf '  ║           HEADROOM WRAP: OPENCLAW             ║\n'
+  printf '  ╚═══════════════════════════════════════════════╝\n\n'
+  if [[ -n "${plugin_path}" ]]; then
+    printf '  Plugin source: local (%s)\n' "${plugin_path}"
+  else
+    printf '  Plugin source: npm (%s)\n' "${plugin_spec}"
+  fi
+
+  printf '  Writing plugin configuration...\n'
+  run_openclaw_checked \
+    "openclaw config set plugins.entries.headroom" \
+    openclaw config set plugins.entries.headroom "${entry_json}" --strict-json >/dev/null
+
+  printf '  Installing OpenClaw plugin with required unsafe-install flag...\n'
+  install_openclaw_plugin "${plugin_path}" "${plugin_spec}" "${skip_build}" "${copy_mode}" "${verbose}"
+
+  run_openclaw_checked \
+    "openclaw config set plugins.slots.contextEngine" \
+    openclaw config set plugins.slots.contextEngine '"headroom"' --strict-json >/dev/null
+  run_openclaw_checked "openclaw config validate" openclaw config validate >/dev/null
+
+  if [[ "${no_restart}" -eq 1 ]]; then
+    printf '  Skipping gateway restart (--no-restart).\n'
+    printf '  Run `openclaw gateway restart` (or `openclaw gateway start`) to apply plugin changes.\n'
+  else
+    printf '  Applying plugin changes to OpenClaw gateway...\n'
+    restart_or_start_openclaw_gateway
+    printf '  Gateway %s.\n' "${OPENCLAW_GATEWAY_ACTION}"
+    if [[ "${verbose}" -eq 1 && -n "${OPENCLAW_GATEWAY_OUTPUT}" ]]; then
+      printf '%s\n' "${OPENCLAW_GATEWAY_OUTPUT}"
+    fi
+  fi
+
+  local inspect_output=""
+  inspect_output="$(run_openclaw_checked "openclaw plugins inspect headroom" openclaw plugins inspect headroom)"
+  if [[ "${verbose}" -eq 1 && -n "${inspect_output}" ]]; then
+    printf '%s\n' "${inspect_output}"
+  fi
+
+  printf '\n✓ OpenClaw is configured to use Headroom context compression.\n'
+  printf '  Plugin: headroom\n'
+  printf '  Slot:   plugins.slots.contextEngine = headroom\n\n'
+}
+
+unwrap_openclaw_host() {
+  local no_restart verbose
+  parse_openclaw_unwrap_args no_restart verbose "$@"
+
+  require_cmd openclaw
+  local existing_entry_json=""
+  existing_entry_json="$(get_openclaw_existing_entry_json)"
+  local entry_json
+  entry_json="$(prepare_openclaw_unwrap_entry_json "${existing_entry_json}")"
+
+  printf '\n  ╔═══════════════════════════════════════════════╗\n'
+  printf '  ║          HEADROOM UNWRAP: OPENCLAW            ║\n'
+  printf '  ╚═══════════════════════════════════════════════╝\n\n'
+  printf '  Disabling Headroom plugin and removing engine mapping...\n'
+
+  run_openclaw_checked \
+    "openclaw config set plugins.entries.headroom" \
+    openclaw config set plugins.entries.headroom "${entry_json}" --strict-json >/dev/null
+  run_openclaw_checked \
+    "openclaw config set plugins.slots.contextEngine" \
+    openclaw config set plugins.slots.contextEngine '"legacy"' --strict-json >/dev/null
+  run_openclaw_checked "openclaw config validate" openclaw config validate >/dev/null
+
+  if [[ "${no_restart}" -eq 1 ]]; then
+    printf '  Skipping gateway restart (--no-restart).\n'
+    printf '  Run `openclaw gateway restart` (or `openclaw gateway start`) to apply unwrap changes.\n'
+  else
+    printf '  Applying unwrap changes to OpenClaw gateway...\n'
+    restart_or_start_openclaw_gateway
+    printf '  Gateway %s.\n' "${OPENCLAW_GATEWAY_ACTION}"
+    if [[ "${verbose}" -eq 1 && -n "${OPENCLAW_GATEWAY_OUTPUT}" ]]; then
+      printf '%s\n' "${OPENCLAW_GATEWAY_OUTPUT}"
+    fi
+  fi
+
+  if [[ "${verbose}" -eq 1 ]]; then
+    local inspect_output=""
+    inspect_output="$(run_openclaw_checked "openclaw plugins inspect headroom" openclaw plugins inspect headroom)"
+    if [[ -n "${inspect_output}" ]]; then
+      printf '%s\n' "${inspect_output}"
+    fi
+  fi
+
+  printf '\n✓ OpenClaw Headroom wrap removed.\n'
+  printf '  Plugin: headroom (installed, disabled)\n'
+  printf '  Slot:   plugins.slots.contextEngine = legacy\n\n'
+}
+
 main() {
   require_cmd docker
 
@@ -348,9 +793,18 @@ main() {
 
   case "$1" in
     wrap)
-      (($# >= 2)) || die "Usage: headroom wrap <claude|codex|aider|cursor> [...]"
+      (($# >= 2)) || die "Usage: headroom wrap <claude|codex|aider|cursor|openclaw> [...]"
       local tool="$2"
       shift 2
+
+      if [[ "${tool}" == "openclaw" ]]; then
+        if contains_help_flag "$@"; then
+          run_headroom wrap openclaw "$@"
+          return
+        fi
+        wrap_openclaw_host "$@"
+        return
+      fi
 
       local known_args host_args port no_rtk no_proxy learn backend anyllm region
       parse_wrap_args known_args host_args port no_rtk no_proxy learn backend anyllm region "$@"
@@ -371,9 +825,6 @@ main() {
 
       case "${tool}" in
         claude|codex|aider|cursor)
-          ;;
-        openclaw)
-          die "Docker-native install does not support 'headroom wrap openclaw' yet. Use a native Headroom install for OpenClaw plugin management."
           ;;
         *)
           die "Unsupported wrap target: ${tool}"
@@ -424,7 +875,13 @@ EOF
       ;;
     unwrap)
       if (($# >= 2)) && [[ "$2" == "openclaw" ]]; then
-        die "Docker-native install does not support 'headroom unwrap openclaw' yet. Use a native Headroom install for OpenClaw plugin management."
+        shift 2
+        if contains_help_flag "$@"; then
+          run_headroom unwrap openclaw "$@"
+          return
+        fi
+        unwrap_openclaw_host "$@"
+        return
       fi
       run_headroom "$@"
       ;;

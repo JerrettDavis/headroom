@@ -32,8 +32,8 @@ This page is the authoritative reference for the **Python Headroom CLI** exposed
 | `headroom wrap codex` | Start proxy and launch Codex CLI | **host-bridged** |
 | `headroom wrap aider` | Start proxy and launch Aider | **host-bridged** |
 | `headroom wrap cursor` | Start proxy and print Cursor config guidance | **host-bridged** |
-| `headroom wrap openclaw` | Install and configure the OpenClaw plugin | **unsupported in Docker-native mode** |
-| `headroom unwrap openclaw` | Disable the Headroom OpenClaw plugin | **unsupported in Docker-native mode** |
+| `headroom wrap openclaw` | Install and configure the OpenClaw plugin | **host-bridged** |
+| `headroom unwrap openclaw` | Disable the Headroom OpenClaw plugin | **host-bridged** |
 
 ## Captured `--help` output
 
@@ -650,7 +650,7 @@ headroom wrap openclaw --plugin-path ./plugins/openclaw
 | `--no-restart` | off | Do not restart the OpenClaw gateway |
 | `--verbose`, `-v` | off | Verbose output |
 
-Requires the `openclaw` binary on the host, and local-source mode may also require `npm`.
+Requires the `openclaw` binary on the host, and local-source mode may also require `npm`. In Docker-native mode, the installed host wrapper drives the host `openclaw` CLI while the plugin auto-starts the host `headroom` wrapper from `PATH`.
 
 ## `headroom unwrap`
 
@@ -678,8 +678,6 @@ Legend:
 
 - **native in container** — the command runs entirely inside the Headroom container
 - **host-bridged** — Headroom runs in Docker, but the wrapped external tool still runs on the host
-- **unsupported** — use a native Python install of Headroom
-
 | Command path | Python CLI | Docker-native wrapper | Parity |
 |---|---|---|---|
 | `headroom proxy` | native | native in container | full |
@@ -696,8 +694,8 @@ Legend:
 | `headroom wrap codex` | native | host-bridged | partial |
 | `headroom wrap aider` | native | host-bridged | partial |
 | `headroom wrap cursor` | native | host-bridged | partial |
-| `headroom wrap openclaw` | native | unsupported | none |
-| `headroom unwrap openclaw` | native | unsupported | none |
+| `headroom wrap openclaw` | native | host-bridged | partial |
+| `headroom unwrap openclaw` | native | host-bridged | partial |
 
 For the Docker-native execution model itself, see [Docker-Native Install](docker-install.md).
 

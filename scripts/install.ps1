@@ -265,6 +265,496 @@ function Invoke-WithTemporaryEnv {
     }
 }
 
+function Test-HelpFlag {
+    param([string[]]$Arguments)
+
+    foreach ($arg in $Arguments) {
+        if ($arg -eq '--help' -or $arg -eq '-?') {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Parse-OpenClawWrapArgs {
+    param([string[]]$Arguments)
+
+    $gatewayProviderIds = New-Object System.Collections.Generic.List[string]
+    $pluginPath = $null
+    $pluginSpec = 'headroom-ai/openclaw'
+    $skipBuild = $false
+    $copy = $false
+    $proxyPort = 8787
+    $startupTimeoutMs = 20000
+    $pythonPath = $null
+    $noAutoStart = $false
+    $noRestart = $false
+    $verbose = $false
+
+    $i = 0
+    while ($i -lt $Arguments.Count) {
+        $arg = $Arguments[$i]
+        switch -Regex ($arg) {
+            '^--plugin-path$' {
+                $pluginPath = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--plugin-path=' {
+                $pluginPath = $arg -replace '^--plugin-path=', ''
+                $i += 1
+                continue
+            }
+            '^--plugin-spec$' {
+                $pluginSpec = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--plugin-spec=' {
+                $pluginSpec = $arg -replace '^--plugin-spec=', ''
+                $i += 1
+                continue
+            }
+            '^--skip-build$' {
+                $skipBuild = $true
+                $i += 1
+                continue
+            }
+            '^--copy$' {
+                $copy = $true
+                $i += 1
+                continue
+            }
+            '^--proxy-port$' {
+                $proxyPort = [int]$Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--proxy-port=' {
+                $proxyPort = [int]($arg -replace '^--proxy-port=', '')
+                $i += 1
+                continue
+            }
+            '^--startup-timeout-ms$' {
+                $startupTimeoutMs = [int]$Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--startup-timeout-ms=' {
+                $startupTimeoutMs = [int]($arg -replace '^--startup-timeout-ms=', '')
+                $i += 1
+                continue
+            }
+            '^--gateway-provider-id$' {
+                $gatewayProviderIds.Add($Arguments[$i + 1])
+                $i += 2
+                continue
+            }
+            '^--gateway-provider-id=' {
+                $gatewayProviderIds.Add($arg -replace '^--gateway-provider-id=', '')
+                $i += 1
+                continue
+            }
+            '^--python-path$' {
+                $pythonPath = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--python-path=' {
+                $pythonPath = $arg -replace '^--python-path=', ''
+                $i += 1
+                continue
+            }
+            '^--no-auto-start$' {
+                $noAutoStart = $true
+                $i += 1
+                continue
+            }
+            '^--no-restart$' {
+                $noRestart = $true
+                $i += 1
+                continue
+            }
+            '^--verbose$|^-v$' {
+                $verbose = $true
+                $i += 1
+                continue
+            }
+            default {
+                Fail "Unsupported option for 'headroom wrap openclaw': $arg"
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        PluginPath = $pluginPath
+        PluginSpec = $pluginSpec
+        SkipBuild = $skipBuild
+        Copy = $copy
+        ProxyPort = $proxyPort
+        StartupTimeoutMs = $startupTimeoutMs
+        GatewayProviderIds = $gatewayProviderIds.ToArray()
+        PythonPath = $pythonPath
+        NoAutoStart = $noAutoStart
+        NoRestart = $noRestart
+        Verbose = $verbose
+    }
+}
+
+function Parse-OpenClawUnwrapArgs {
+    param([string[]]$Arguments)
+
+    $noRestart = $false
+    $verbose = $false
+    $i = 0
+    while ($i -lt $Arguments.Count) {
+        $arg = $Arguments[$i]
+        switch -Regex ($arg) {
+            '^--no-restart$' {
+                $noRestart = $true
+                $i += 1
+                continue
+            }
+            '^--verbose$|^-v$' {
+                $verbose = $true
+                $i += 1
+                continue
+            }
+            default {
+                Fail "Unsupported option for 'headroom unwrap openclaw': $arg"
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        NoRestart = $noRestart
+        Verbose = $verbose
+    }
+}
+
+function Invoke-CapturedCommand {
+    param(
+        [string]$Action,
+        [string]$Command,
+        [string[]]$Arguments,
+        [string]$WorkingDirectory
+    )
+
+    $previous = $null
+    try {
+        if ($WorkingDirectory) {
+            $previous = Get-Location
+            Set-Location $WorkingDirectory
+        }
+
+        $output = (& $Command @Arguments 2>&1 | Out-String).Trim()
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($previous) {
+            Set-Location $previous
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        if (-not $output) {
+            $output = "exit code $exitCode"
+        }
+        Fail "$Action failed: $output"
+    }
+
+    return $output
+}
+
+function Get-OpenClawExistingEntryJson {
+    $output = (& openclaw config get plugins.entries.headroom 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    return $output
+}
+
+function Invoke-OpenClawPrepareEntryJson {
+    param(
+        [string]$ExistingEntryJson,
+        [pscustomobject]$Parsed
+    )
+
+    $dockerArgs = New-Object System.Collections.Generic.List[string]
+    $dockerArgs.AddRange(@('run','--rm'))
+    $dockerArgs.AddRange((Get-SharedDockerArgs))
+    $dockerArgs.Add('--entrypoint')
+    $dockerArgs.Add('headroom')
+    $dockerArgs.Add($HeadroomImage)
+    $dockerArgs.AddRange(@('wrap','openclaw','--prepare-only','--proxy-port',"$($Parsed.ProxyPort)",'--startup-timeout-ms',"$($Parsed.StartupTimeoutMs)"))
+    if ($ExistingEntryJson) {
+        $dockerArgs.Add('--existing-entry-json')
+        $dockerArgs.Add($ExistingEntryJson)
+    }
+    if ($Parsed.PythonPath) {
+        $dockerArgs.Add('--python-path')
+        $dockerArgs.Add($Parsed.PythonPath)
+    }
+    if ($Parsed.NoAutoStart) {
+        $dockerArgs.Add('--no-auto-start')
+    }
+    foreach ($providerId in $Parsed.GatewayProviderIds) {
+        $dockerArgs.Add('--gateway-provider-id')
+        $dockerArgs.Add($providerId)
+    }
+
+    $output = (& docker @dockerArgs 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Failed to prepare docker-native OpenClaw config: $output"
+    }
+
+    return $output
+}
+
+function Invoke-OpenClawPrepareUnwrapEntryJson {
+    param([string]$ExistingEntryJson)
+
+    $dockerArgs = New-Object System.Collections.Generic.List[string]
+    $dockerArgs.AddRange(@('run','--rm'))
+    $dockerArgs.AddRange((Get-SharedDockerArgs))
+    $dockerArgs.Add('--entrypoint')
+    $dockerArgs.Add('headroom')
+    $dockerArgs.Add($HeadroomImage)
+    $dockerArgs.AddRange(@('unwrap','openclaw','--prepare-only'))
+    if ($ExistingEntryJson) {
+        $dockerArgs.Add('--existing-entry-json')
+        $dockerArgs.Add($ExistingEntryJson)
+    }
+
+    $output = (& docker @dockerArgs 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Failed to prepare docker-native OpenClaw unwrap config: $output"
+    }
+
+    return $output
+}
+
+function Resolve-OpenClawExtensionsDir {
+    $configOutput = Invoke-CapturedCommand -Action 'openclaw config file' -Command 'openclaw' -Arguments @('config','file')
+    $configPath = ($configOutput -split "`r?`n")[-1].Trim()
+    if (-not $configPath) {
+        Fail 'Unable to resolve OpenClaw config path.'
+    }
+    return (Join-Path (Split-Path -Parent $configPath) 'extensions')
+}
+
+function Copy-OpenClawPluginIntoExtensions {
+    param([string]$PluginPath)
+
+    $distDir = Join-Path $PluginPath 'dist'
+    $hookShimDir = Join-Path $PluginPath 'hook-shim'
+    if (-not (Test-Path $distDir)) {
+        Fail "Plugin dist folder missing at $distDir. Build the plugin first."
+    }
+    if (-not (Test-Path $hookShimDir)) {
+        Fail "Plugin hook-shim folder missing at $hookShimDir. Build the plugin first."
+    }
+
+    $extensionsDir = Resolve-OpenClawExtensionsDir
+    $targetDir = Join-Path $extensionsDir 'headroom'
+    $targetDist = Join-Path $targetDir 'dist'
+    $targetHookShim = Join-Path $targetDir 'hook-shim'
+    New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+    if (Test-Path $targetDist) { Remove-Item -Recurse -Force $targetDist }
+    if (Test-Path $targetHookShim) { Remove-Item -Recurse -Force $targetHookShim }
+    Copy-Item -Recurse -Force $distDir $targetDist
+    Copy-Item -Recurse -Force $hookShimDir $targetHookShim
+
+    foreach ($fileName in @('openclaw.plugin.json','package.json','README.md')) {
+        $source = Join-Path $PluginPath $fileName
+        if (Test-Path $source) {
+            Copy-Item -Force $source (Join-Path $targetDir $fileName)
+        }
+    }
+
+    return $targetDir
+}
+
+function Install-OpenClawPlugin {
+    param([pscustomobject]$Parsed)
+
+    if ($Parsed.PluginPath) {
+        if (-not (Test-Path $Parsed.PluginPath)) {
+            Fail "Plugin path not found: $($Parsed.PluginPath)."
+        }
+        if (-not (Test-Path (Join-Path $Parsed.PluginPath 'package.json'))) {
+            Fail "Invalid plugin path (missing package.json): $($Parsed.PluginPath)"
+        }
+        if (-not (Test-Path (Join-Path $Parsed.PluginPath 'openclaw.plugin.json'))) {
+            Fail "Invalid plugin path (missing openclaw.plugin.json): $($Parsed.PluginPath)"
+        }
+    }
+
+    if ($Parsed.PluginPath -and -not $Parsed.SkipBuild) {
+        Require-Command npm
+        Write-Host '  Building OpenClaw plugin (npm install + npm run build)...'
+        [void](Invoke-CapturedCommand -Action 'npm install' -Command 'npm' -Arguments @('install') -WorkingDirectory $Parsed.PluginPath)
+        [void](Invoke-CapturedCommand -Action 'npm run build' -Command 'npm' -Arguments @('run','build') -WorkingDirectory $Parsed.PluginPath)
+    }
+
+    if ($Parsed.PluginPath) {
+        if ($Parsed.Copy) {
+            $arguments = @('plugins','install','--dangerously-force-unsafe-install',$Parsed.PluginPath)
+            $workingDirectory = $null
+        } else {
+            $arguments = @('plugins','install','--dangerously-force-unsafe-install','--link','.')
+            $workingDirectory = $Parsed.PluginPath
+        }
+    } else {
+        $arguments = @('plugins','install','--dangerously-force-unsafe-install',$Parsed.PluginSpec)
+        $workingDirectory = $null
+    }
+
+    $previous = $null
+    try {
+        if ($workingDirectory) {
+            $previous = Get-Location
+            Set-Location $workingDirectory
+        }
+        $installOutput = (& openclaw @arguments 2>&1 | Out-String).Trim()
+        $installExitCode = $LASTEXITCODE
+    } finally {
+        if ($previous) {
+            Set-Location $previous
+        }
+    }
+
+    if ($installExitCode -eq 0) {
+        if ($Parsed.Verbose -and $installOutput) {
+            Write-Host $installOutput
+        }
+        return
+    }
+
+    $lowerOutput = $installOutput.ToLowerInvariant()
+    if ($lowerOutput.Contains('plugin already exists')) {
+        Write-Host '  Plugin already installed; continuing with configuration/update steps.'
+        return
+    }
+
+    if ($Parsed.PluginPath -and -not $Parsed.Copy -and $lowerOutput.Contains('also not a valid hook pack')) {
+        Write-Host '  OpenClaw linked-path install bug detected; applying extension-path fallback...'
+        $targetDir = Copy-OpenClawPluginIntoExtensions -PluginPath $Parsed.PluginPath
+        Write-Host "  Fallback plugin copy completed: $targetDir"
+        return
+    }
+
+    if (-not $installOutput) {
+        $installOutput = "exit code $installExitCode"
+    }
+    Fail "openclaw plugins install failed: $installOutput"
+}
+
+function Restart-OrStartOpenClawGateway {
+    $restartOutput = (& openclaw gateway restart 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0) {
+        return [pscustomobject]@{ Action = 'restarted'; Output = $restartOutput }
+    }
+
+    $startOutput = Invoke-CapturedCommand -Action 'openclaw gateway start' -Command 'openclaw' -Arguments @('gateway','start')
+    return [pscustomobject]@{ Action = 'started'; Output = $startOutput }
+}
+
+function Invoke-OpenClawWrap {
+    param([string[]]$Arguments)
+
+    Require-Command openclaw
+    $parsed = Parse-OpenClawWrapArgs -Arguments $Arguments
+    $existingEntryJson = Get-OpenClawExistingEntryJson
+    $entryJson = Invoke-OpenClawPrepareEntryJson -ExistingEntryJson $existingEntryJson -Parsed $parsed
+
+    Write-Host ""
+    Write-Host "  ╔═══════════════════════════════════════════════╗"
+    Write-Host "  ║           HEADROOM WRAP: OPENCLAW             ║"
+    Write-Host "  ╚═══════════════════════════════════════════════╝"
+    Write-Host ""
+    if ($parsed.PluginPath) {
+        Write-Host "  Plugin source: local ($($parsed.PluginPath))"
+    } else {
+        Write-Host "  Plugin source: npm ($($parsed.PluginSpec))"
+    }
+
+    Write-Host '  Writing plugin configuration...'
+    [void](Invoke-CapturedCommand -Action 'openclaw config set plugins.entries.headroom' -Command 'openclaw' -Arguments @('config','set','plugins.entries.headroom',$entryJson,'--strict-json'))
+    Write-Host '  Installing OpenClaw plugin with required unsafe-install flag...'
+    Install-OpenClawPlugin -Parsed $parsed
+    [void](Invoke-CapturedCommand -Action 'openclaw config set plugins.slots.contextEngine' -Command 'openclaw' -Arguments @('config','set','plugins.slots.contextEngine','"headroom"','--strict-json'))
+    [void](Invoke-CapturedCommand -Action 'openclaw config validate' -Command 'openclaw' -Arguments @('config','validate'))
+
+    if ($parsed.NoRestart) {
+        Write-Host '  Skipping gateway restart (--no-restart).'
+        Write-Host '  Run `openclaw gateway restart` (or `openclaw gateway start`) to apply plugin changes.'
+    } else {
+        Write-Host '  Applying plugin changes to OpenClaw gateway...'
+        $gatewayResult = Restart-OrStartOpenClawGateway
+        Write-Host "  Gateway $($gatewayResult.Action)."
+        if ($parsed.Verbose -and $gatewayResult.Output) {
+            Write-Host $gatewayResult.Output
+        }
+    }
+
+    $inspectOutput = Invoke-CapturedCommand -Action 'openclaw plugins inspect headroom' -Command 'openclaw' -Arguments @('plugins','inspect','headroom')
+    if ($parsed.Verbose -and $inspectOutput) {
+        Write-Host $inspectOutput
+    }
+
+    Write-Host ""
+    Write-Host "✓ OpenClaw is configured to use Headroom context compression."
+    Write-Host "  Plugin: headroom"
+    Write-Host "  Slot:   plugins.slots.contextEngine = headroom"
+    Write-Host ""
+}
+
+function Invoke-OpenClawUnwrap {
+    param([string[]]$Arguments)
+
+    Require-Command openclaw
+    $parsed = Parse-OpenClawUnwrapArgs -Arguments $Arguments
+    $existingEntryJson = Get-OpenClawExistingEntryJson
+    $entryJson = Invoke-OpenClawPrepareUnwrapEntryJson -ExistingEntryJson $existingEntryJson
+
+    Write-Host ""
+    Write-Host "  ╔═══════════════════════════════════════════════╗"
+    Write-Host "  ║          HEADROOM UNWRAP: OPENCLAW            ║"
+    Write-Host "  ╚═══════════════════════════════════════════════╝"
+    Write-Host ""
+    Write-Host '  Disabling Headroom plugin and removing engine mapping...'
+
+    [void](Invoke-CapturedCommand -Action 'openclaw config set plugins.entries.headroom' -Command 'openclaw' -Arguments @('config','set','plugins.entries.headroom',$entryJson,'--strict-json'))
+    [void](Invoke-CapturedCommand -Action 'openclaw config set plugins.slots.contextEngine' -Command 'openclaw' -Arguments @('config','set','plugins.slots.contextEngine','"legacy"','--strict-json'))
+    [void](Invoke-CapturedCommand -Action 'openclaw config validate' -Command 'openclaw' -Arguments @('config','validate'))
+
+    if ($parsed.NoRestart) {
+        Write-Host '  Skipping gateway restart (--no-restart).'
+        Write-Host '  Run `openclaw gateway restart` (or `openclaw gateway start`) to apply unwrap changes.'
+    } else {
+        Write-Host '  Applying unwrap changes to OpenClaw gateway...'
+        $gatewayResult = Restart-OrStartOpenClawGateway
+        Write-Host "  Gateway $($gatewayResult.Action)."
+        if ($parsed.Verbose -and $gatewayResult.Output) {
+            Write-Host $gatewayResult.Output
+        }
+    }
+
+    if ($parsed.Verbose) {
+        $inspectOutput = Invoke-CapturedCommand -Action 'openclaw plugins inspect headroom' -Command 'openclaw' -Arguments @('plugins','inspect','headroom')
+        if ($inspectOutput) {
+            Write-Host $inspectOutput
+        }
+    }
+
+    Write-Host ""
+    Write-Host "✓ OpenClaw Headroom wrap removed."
+    Write-Host "  Plugin: headroom (installed, disabled)"
+    Write-Host "  Slot:   plugins.slots.contextEngine = legacy"
+    Write-Host ""
+}
+
 function Parse-WrapArgs {
     param([string[]]$Arguments)
 
@@ -421,11 +911,23 @@ if ($args.Count -eq 0) {
 switch ($args[0]) {
     'wrap' {
         if ($args.Count -lt 2) {
-            Fail 'Usage: headroom wrap <claude|codex|aider|cursor> [...]'
+            Fail 'Usage: headroom wrap <claude|codex|aider|cursor|openclaw> [...]'
         }
 
         $tool = $args[1]
         $wrapArgs = if ($args.Count -gt 2) { $args[2..($args.Count - 1)] } else { @() }
+
+        if ($tool -eq 'openclaw') {
+            if (Test-HelpFlag -Arguments $wrapArgs) {
+                $helpArgs = @('wrap','openclaw') + $wrapArgs
+                Invoke-HeadroomDocker -Arguments $helpArgs
+                exit 0
+            }
+
+            Invoke-OpenClawWrap -Arguments $wrapArgs
+            exit 0
+        }
+
         $parsed = Parse-WrapArgs -Arguments $wrapArgs
         $proxyArgs = New-Object System.Collections.Generic.List[string]
         if ($parsed.Learn) { $proxyArgs.Add('--learn') }
@@ -438,7 +940,6 @@ switch ($args[0]) {
             'codex' { }
             'aider' { }
             'cursor' { }
-            'openclaw' { Fail "Docker-native install does not support 'headroom wrap openclaw' yet. Use a native Headroom install for OpenClaw plugin management." }
             default { Fail "Unsupported wrap target: $tool" }
         }
 
@@ -490,7 +991,15 @@ switch ($args[0]) {
     }
     'unwrap' {
         if ($args.Count -ge 2 -and $args[1] -eq 'openclaw') {
-            Fail "Docker-native install does not support 'headroom unwrap openclaw' yet. Use a native Headroom install for OpenClaw plugin management."
+            $unwrapArgs = if ($args.Count -gt 2) { $args[2..($args.Count - 1)] } else { @() }
+            if (Test-HelpFlag -Arguments $unwrapArgs) {
+                $helpArgs = @('unwrap','openclaw') + $unwrapArgs
+                Invoke-HeadroomDocker -Arguments $helpArgs
+                exit 0
+            }
+
+            Invoke-OpenClawUnwrap -Arguments $unwrapArgs
+            exit 0
         }
         Invoke-HeadroomDocker -Arguments $args
     }

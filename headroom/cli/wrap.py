@@ -549,6 +549,17 @@ def _read_openclaw_config_value(openclaw_bin: str, path: str) -> Any | None:
         return output
 
 
+def _decode_openclaw_entry_json(raw_value: str | None) -> Any | None:
+    """Decode a JSON payload captured from `openclaw config get` when available."""
+    if not raw_value:
+        return None
+
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError:
+        return raw_value
+
+
 def _build_openclaw_plugin_entry(
     *,
     existing_entry: Any,
@@ -581,6 +592,28 @@ def _build_openclaw_plugin_entry(
         "enabled": enabled,
         "config": next_config,
     }
+
+
+def _build_openclaw_unwrap_entry(existing_entry: Any) -> dict[str, object]:
+    """Disable the managed plugin while preserving unrelated user config."""
+    base_entry = existing_entry if isinstance(existing_entry, dict) else {}
+    existing_config = {}
+    if isinstance(existing_entry, dict) and isinstance(existing_entry.get("config"), dict):
+        existing_config = {
+            key: value
+            for key, value in existing_entry["config"].items()
+            if key
+            not in {
+                "gatewayProviderIds",
+                "proxyUrl",
+                "proxyPort",
+                "autoStart",
+                "startupTimeoutMs",
+                "pythonPath",
+            }
+        }
+
+    return {**base_entry, "enabled": False, "config": existing_config}
 
 
 def _write_openclaw_plugin_entry(openclaw_bin: str, entry: dict[str, object]) -> None:
@@ -1132,6 +1165,8 @@ def cursor(
     help="Do not restart OpenClaw gateway at the end",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option("--prepare-only", is_flag=True, hidden=True)
+@click.option("--existing-entry-json", default=None, hidden=True)
 def openclaw(
     plugin_path: Path | None,
     plugin_spec: str,
@@ -1144,6 +1179,8 @@ def openclaw(
     no_auto_start: bool,
     no_restart: bool,
     verbose: bool,
+    prepare_only: bool,
+    existing_entry_json: str | None,
 ) -> None:
     """Install and configure Headroom OpenClaw plugin in one command.
 
@@ -1160,6 +1197,19 @@ def openclaw(
       headroom wrap openclaw
       headroom wrap openclaw --plugin-path C:\\git\\headroom\\plugins\\openclaw
     """
+    if prepare_only:
+        entry = _build_openclaw_plugin_entry(
+            existing_entry=_decode_openclaw_entry_json(existing_entry_json),
+            proxy_port=proxy_port,
+            startup_timeout_ms=startup_timeout_ms,
+            python_path=python_path,
+            no_auto_start=no_auto_start,
+            gateway_provider_ids=gateway_provider_ids,
+            enabled=True,
+        )
+        click.echo(json.dumps(entry, separators=(",", ":")))
+        return
+
     openclaw_bin = shutil.which("openclaw")
     if not openclaw_bin:
         raise click.ClickException("'openclaw' not found in PATH. Install OpenClaw CLI first.")
@@ -1304,8 +1354,24 @@ def openclaw(
 @unwrap.command("openclaw")
 @click.option("--no-restart", is_flag=True, help="Do not restart OpenClaw gateway at the end")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
-def unwrap_openclaw(no_restart: bool, verbose: bool) -> None:
+@click.option("--prepare-only", is_flag=True, hidden=True)
+@click.option("--existing-entry-json", default=None, hidden=True)
+def unwrap_openclaw(
+    no_restart: bool,
+    verbose: bool,
+    prepare_only: bool,
+    existing_entry_json: str | None,
+) -> None:
     """Disable the Headroom OpenClaw plugin and restore the legacy engine slot."""
+    if prepare_only:
+        click.echo(
+            json.dumps(
+                _build_openclaw_unwrap_entry(_decode_openclaw_entry_json(existing_entry_json)),
+                separators=(",", ":"),
+            )
+        )
+        return
+
     openclaw_bin = shutil.which("openclaw")
     if not openclaw_bin:
         raise click.ClickException("'openclaw' not found in PATH. Install OpenClaw CLI first.")
@@ -1318,23 +1384,7 @@ def unwrap_openclaw(no_restart: bool, verbose: bool) -> None:
     click.echo("  Disabling Headroom plugin and removing engine mapping...")
 
     existing_entry = _read_openclaw_config_value(openclaw_bin, "plugins.entries.headroom")
-    existing_config = {}
-    if isinstance(existing_entry, dict) and isinstance(existing_entry.get("config"), dict):
-        existing_config = {
-            key: value
-            for key, value in existing_entry["config"].items()
-            if key
-            not in {
-                "gatewayProviderIds",
-                "proxyUrl",
-                "proxyPort",
-                "autoStart",
-                "startupTimeoutMs",
-                "pythonPath",
-            }
-        }
-
-    entry = {"enabled": False, "config": existing_config}
+    entry = _build_openclaw_unwrap_entry(existing_entry)
     _write_openclaw_plugin_entry(openclaw_bin, entry)
     _set_openclaw_context_engine_slot(openclaw_bin, "legacy")
     _run_checked(

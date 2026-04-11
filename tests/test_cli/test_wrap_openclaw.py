@@ -389,6 +389,24 @@ def test_build_openclaw_plugin_entry_sets_and_clears_python_path() -> None:
     assert without_python["config"]["customFlag"] is True
 
 
+def test_build_openclaw_unwrap_entry_preserves_top_level_metadata() -> None:
+    entry = wrap_cli._build_openclaw_unwrap_entry(
+        {
+            "source": "headroom-ai/openclaw",
+            "enabled": True,
+            "config": {
+                "pythonPath": "C:\\Python312\\python.exe",
+                "proxyPort": 8787,
+                "customFlag": True,
+            },
+        }
+    )
+
+    assert entry["source"] == "headroom-ai/openclaw"
+    assert entry["enabled"] is False
+    assert entry["config"] == {"customFlag": True}
+
+
 def test_wrap_openclaw_no_auto_start_does_not_default_python_path(
     runner: CliRunner, plugin_dir: Path
 ) -> None:

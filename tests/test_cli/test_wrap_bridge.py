@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,3 +69,56 @@ def test_wrap_cursor_prepare_only_injects_cursorrules(monkeypatch, tmp_path: Pat
         cursorrules = Path(".cursorrules")
         assert cursorrules.exists()
         assert "headroom:rtk-instructions" in cursorrules.read_text()
+
+
+def test_wrap_openclaw_prepare_only_emits_config_without_python_default() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        main,
+        [
+            "wrap",
+            "openclaw",
+            "--prepare-only",
+            "--gateway-provider-id",
+            "codex",
+            "--gateway-provider-id",
+            "anthropic",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["enabled"] is True
+    assert payload["config"]["proxyPort"] == 8787
+    assert payload["config"]["gatewayProviderIds"] == ["codex", "anthropic"]
+    assert "pythonPath" not in payload["config"]
+
+
+def test_unwrap_openclaw_prepare_only_preserves_unmanaged_config() -> None:
+    runner = CliRunner()
+    existing_entry = json.dumps(
+        {
+            "enabled": True,
+            "config": {
+                "pythonPath": "C:\\Python312\\python.exe",
+                "proxyPort": 8787,
+                "customFlag": True,
+            },
+        }
+    )
+
+    result = runner.invoke(
+        main,
+        [
+            "unwrap",
+            "openclaw",
+            "--prepare-only",
+            "--existing-entry-json",
+            existing_entry,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload == {"enabled": False, "config": {"customFlag": True}}

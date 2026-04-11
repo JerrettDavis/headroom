@@ -150,6 +150,8 @@ When `proxyUrl` points to localhost (or is omitted), the plugin will auto-start 
 
 If `pythonPath` is set, it is tried first in the Python fallback step.
 
+Docker-native Headroom installs intentionally leave `pythonPath` unset so this launcher order prefers the installed host `headroom` wrapper on `PATH`, which then runs Headroom in Docker.
+
 ### Remote proxy (connect-only)
 
 Point `proxyUrl` to any reachable Headroom instance:

@@ -153,7 +153,7 @@ headroom wrap codex --memory      # Shares the same memory store
 
 Headroom starts a proxy, points your tool at it, and compresses everything automatically. Add `--memory` for persistent memory that's shared across agents.
 
-In Docker-native mode, Headroom still runs in Docker while wrapped tools run on the host. `wrap claude`, `wrap codex`, `wrap aider`, and `wrap cursor` are supported; OpenClaw wrap/unwrap still require a native install.
+In Docker-native mode, Headroom still runs in Docker while wrapped tools run on the host. `wrap claude`, `wrap codex`, `wrap aider`, `wrap cursor`, and OpenClaw plugin setup (`wrap openclaw` / `unwrap openclaw`) are host-managed through the installed wrapper.
 
 ### Multi-agent — SharedContext
 
