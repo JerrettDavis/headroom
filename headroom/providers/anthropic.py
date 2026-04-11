@@ -15,8 +15,8 @@ Usage:
     provider = AnthropicProvider()  # Warning: approximate counting
 """
 
-import json
 import importlib.util
+import json
 import logging
 import os
 import warnings
@@ -40,6 +40,7 @@ def _get_litellm_clients() -> tuple[Any | None, Any | None]:
         return None, None
 
     return litellm, litellm_get_model_info
+
 
 logger = logging.getLogger(__name__)
 
