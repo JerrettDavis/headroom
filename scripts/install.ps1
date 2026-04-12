@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $ImageDefault = 'ghcr.io/chopratejas/headroom:latest'
+$InstallImage = if ($env:HEADROOM_DOCKER_IMAGE) { $env:HEADROOM_DOCKER_IMAGE } else { $ImageDefault }
 $InstallDir = Join-Path $HOME '.local\bin'
 if (-not (Test-Path (Join-Path $HOME '.local'))) {
     $InstallDir = Join-Path $HOME 'bin'
@@ -37,10 +38,11 @@ function Ensure-ProfileBlock {
 
     $markerStart = '# >>> headroom docker-native >>>'
     $markerEnd = '# <<< headroom docker-native <<<'
+    $escapedPathEntry = $PathEntry.Replace("'", "''")
     $block = @"
 $markerStart
-if (-not ((`$env:Path -split ';') -contains '$PathEntry')) {
-    `$env:Path = '$PathEntry;' + `$env:Path
+if (-not ((`$env:Path -split ';') -contains '$escapedPathEntry')) {
+    `$env:Path = '$escapedPathEntry;' + `$env:Path
 }
 $markerEnd
 "@
@@ -64,11 +66,12 @@ function Write-Wrapper {
 
     $wrapperPath = Join-Path $TargetDir 'headroom.ps1'
     $cmdPath = Join-Path $TargetDir 'headroom.cmd'
+    $resolvedInstallImage = $InstallImage.Replace("'", "''")
 
     $wrapper = @'
 $ErrorActionPreference = 'Stop'
 
-$HeadroomImage = if ($env:HEADROOM_DOCKER_IMAGE) { $env:HEADROOM_DOCKER_IMAGE } else { 'ghcr.io/chopratejas/headroom:latest' }
+$HeadroomImage = if ($env:HEADROOM_DOCKER_IMAGE) { $env:HEADROOM_DOCKER_IMAGE } else { '__HEADROOM_INSTALL_IMAGE__' }
 $ContainerHome = if ($env:HEADROOM_CONTAINER_HOME) { $env:HEADROOM_CONTAINER_HOME } else { '/tmp/headroom-home' }
 $HostHome = $HOME
 
@@ -151,11 +154,27 @@ function Get-SharedDockerArgs {
     return ,$args.ToArray()
 }
 
+function Add-TtyArgs {
+    param($ArgsList)
+
+    if (-not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
+        $ArgsList.Add('-it')
+        return
+    }
+    if (-not [Console]::IsInputRedirected) {
+        $ArgsList.Add('-i')
+    }
+    if (-not [Console]::IsOutputRedirected) {
+        $ArgsList.Add('-t')
+    }
+}
+
 function Invoke-HeadroomDocker {
     param([string[]]$Arguments)
 
     $dockerArgs = New-Object System.Collections.Generic.List[string]
-    $dockerArgs.AddRange([string[]]@('run','--rm','-it'))
+    $dockerArgs.AddRange([string[]]@('run','--rm'))
+    Add-TtyArgs -ArgsList $dockerArgs
     $dockerArgs.AddRange((Get-SharedDockerArgs))
     $dockerArgs.Add('--entrypoint')
     $dockerArgs.Add('headroom')
@@ -226,6 +245,574 @@ function Stop-ProxyContainer {
     if ($ContainerName) {
         docker stop $ContainerName | Out-Null
     }
+}
+
+function Get-PersistentProfileRoot {
+    param([string]$Profile)
+    Assert-ValidProfileName -Profile $Profile
+    return Join-Path (Join-Path $HostHome '.headroom\deploy') $Profile
+}
+
+function Get-PersistentStatePath {
+    param([string]$Profile)
+    return Join-Path (Get-PersistentProfileRoot -Profile $Profile) 'docker-native.json'
+}
+
+function Get-PersistentManifestPath {
+    param([string]$Profile)
+    return Join-Path (Get-PersistentProfileRoot -Profile $Profile) 'manifest.json'
+}
+
+function Get-PersistentContainerName {
+    param([string]$Profile)
+    return "headroom-$Profile"
+}
+
+function Assert-ValidProfileName {
+    param([string]$Profile)
+    if ($Profile -notmatch '^[A-Za-z0-9._-]+$' -or $Profile -in @('.', '..')) {
+        Fail "Invalid profile name '$Profile'"
+    }
+}
+
+function Parse-PortValue {
+    param([string]$Value)
+
+    $parsed = 0
+    if (-not [int]::TryParse($Value, [ref]$parsed) -or $parsed -lt 1 -or $parsed -gt 65535) {
+        Fail "Invalid port '$Value'"
+    }
+    return $parsed
+}
+
+function Parse-PositiveIntegerValue {
+    param([string]$Value)
+
+    $parsed = 0
+    if (-not [int]::TryParse($Value, [ref]$parsed) -or $parsed -lt 1) {
+        Fail "Invalid value '$Value'"
+    }
+    return $parsed
+}
+
+function Require-OptionValue {
+    param(
+        [string[]]$Arguments,
+        [int]$Index,
+        [string]$Option
+    )
+
+    if ($Index + 1 -ge $Arguments.Count) {
+        Fail "Option $Option requires a value"
+    }
+}
+
+function Write-Utf8NoBomFile {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+
+    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Get-PersistentDockerArgs {
+    Ensure-HostDirs
+    $args = New-Object System.Collections.Generic.List[string]
+    $args.Add('--workdir')
+    $args.Add($ContainerHome)
+    $args.Add('--env')
+    $args.Add("HOME=$ContainerHome")
+    $args.Add('--env')
+    $args.Add('PYTHONUNBUFFERED=1')
+    $args.Add('--volume')
+    $args.Add((Join-Path $HostHome '.headroom') + ":$ContainerHome/.headroom")
+    $args.Add('--volume')
+    $args.Add((Join-Path $HostHome '.claude') + ":$ContainerHome/.claude")
+    $args.Add('--volume')
+    $args.Add((Join-Path $HostHome '.codex') + ":$ContainerHome/.codex")
+    $args.Add('--volume')
+    $args.Add((Join-Path $HostHome '.gemini') + ":$ContainerHome/.gemini")
+
+    foreach ($entry in (Get-PassthroughEnvArgs)) {
+        $args.Add($entry)
+    }
+
+    return ,$args.ToArray()
+}
+
+function Get-ManifestProxyArgs {
+    param(
+        [int]$Port,
+        [string]$Backend,
+        [string]$AnyllmProvider,
+        [string]$Region,
+        [string]$Mode,
+        [bool]$Memory,
+        [bool]$TelemetryEnabled
+    )
+
+    $args = New-Object System.Collections.Generic.List[string]
+    $args.AddRange([string[]]@('--host','127.0.0.1','--port',"$Port",'--mode',$Mode,'--backend',$Backend))
+    if (-not $TelemetryEnabled) {
+        $args.Add('--no-telemetry')
+    }
+    if ($Memory) {
+        $args.AddRange([string[]]@('--memory','--memory-db-path',"$ContainerHome/.headroom/memory.db"))
+    }
+    if ($AnyllmProvider) {
+        $args.AddRange([string[]]@('--anyllm-provider', $AnyllmProvider))
+    }
+    if ($Region) {
+        $args.AddRange([string[]]@('--region', $Region))
+    }
+
+    return ,$args.ToArray()
+}
+
+function Write-PersistentState {
+    param(
+        [string]$Profile,
+        [string]$Image,
+        [int]$Port,
+        [string]$Backend,
+        [string]$AnyllmProvider,
+        [string]$Region,
+        [string]$Mode,
+        [bool]$Memory,
+        [bool]$TelemetryEnabled
+    )
+
+    $root = Get-PersistentProfileRoot -Profile $Profile
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $state = [ordered]@{
+        profile = $Profile
+        image = $Image
+        port = $Port
+        backend = $Backend
+        anyllm_provider = $AnyllmProvider
+        region = $Region
+        proxy_mode = $Mode
+        memory_enabled = $Memory
+        telemetry_enabled = $TelemetryEnabled
+        container_name = Get-PersistentContainerName -Profile $Profile
+        health_url = "http://127.0.0.1:$Port/readyz"
+    }
+    Write-Utf8NoBomFile -Path (Get-PersistentStatePath -Profile $Profile) -Content ($state | ConvertTo-Json -Depth 4)
+}
+
+function Write-PersistentManifest {
+    param(
+        [string]$Profile,
+        [string]$Image,
+        [int]$Port,
+        [string]$Backend,
+        [string]$AnyllmProvider,
+        [string]$Region,
+        [string]$Mode,
+        [bool]$Memory,
+        [bool]$TelemetryEnabled,
+        [string[]]$ProxyArgs
+    )
+
+    $root = Get-PersistentProfileRoot -Profile $Profile
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+    $baseEnv = [ordered]@{
+        HEADROOM_PORT = "$Port"
+        HEADROOM_HOST = '127.0.0.1'
+        HEADROOM_MODE = $Mode
+        HEADROOM_BACKEND = $Backend
+    }
+
+    $manifest = [ordered]@{
+        profile = $Profile
+        preset = 'persistent-docker'
+        runtime_kind = 'docker'
+        supervisor_kind = 'none'
+        scope = 'user'
+        provider_mode = 'manual'
+        targets = @()
+        port = $Port
+        host = '127.0.0.1'
+        backend = $Backend
+        anyllm_provider = if ($AnyllmProvider) { $AnyllmProvider } else { $null }
+        region = if ($Region) { $Region } else { $null }
+        proxy_mode = $Mode
+        memory_enabled = $Memory
+        memory_db_path = "$ContainerHome/.headroom/memory.db"
+        telemetry_enabled = $TelemetryEnabled
+        image = $Image
+        service_name = "headroom-$Profile"
+        container_name = Get-PersistentContainerName -Profile $Profile
+        health_url = "http://127.0.0.1:$Port/readyz"
+        base_env = $baseEnv
+        tool_envs = @{}
+        proxy_args = $ProxyArgs
+        mutations = @()
+        artifacts = @()
+    }
+
+    Write-Utf8NoBomFile -Path (Get-PersistentManifestPath -Profile $Profile) -Content ($manifest | ConvertTo-Json -Depth 8)
+}
+
+function Read-PersistentState {
+    param([string]$Profile)
+
+    Assert-ValidProfileName -Profile $Profile
+    $statePath = Get-PersistentStatePath -Profile $Profile
+    if (-not (Test-Path $statePath)) {
+        Fail "No docker-native persistent deployment profile named '$Profile'"
+    }
+    return Get-Content -Raw -Path $statePath | ConvertFrom-Json
+}
+
+function Start-PersistentDockerInstall {
+    param(
+        [string]$Profile,
+        [string]$Image,
+        [int]$Port,
+        [string]$Backend,
+        [string]$AnyllmProvider,
+        [string]$Region,
+        [string]$Mode,
+        [bool]$Memory,
+        [bool]$TelemetryEnabled
+    )
+
+    Assert-ValidProfileName -Profile $Profile
+    $containerName = Get-PersistentContainerName -Profile $Profile
+    $proxyArgs = Get-ManifestProxyArgs -Port $Port -Backend $Backend -AnyllmProvider $AnyllmProvider -Region $Region -Mode $Mode -Memory $Memory -TelemetryEnabled $TelemetryEnabled
+
+    docker rm -f $containerName | Out-Null 2>$null
+
+    $dockerArgs = New-Object System.Collections.Generic.List[string]
+    $dockerArgs.AddRange([string[]]@('run','-d','--restart','unless-stopped','--name',$containerName,'-p',"$Port`:$Port"))
+    $dockerArgs.AddRange((Get-PersistentDockerArgs))
+    $dockerArgs.AddRange([string[]]@(
+        '--env',"HEADROOM_DEPLOYMENT_PROFILE=$Profile",
+        '--env','HEADROOM_DEPLOYMENT_PRESET=persistent-docker',
+        '--env','HEADROOM_DEPLOYMENT_RUNTIME=docker',
+        '--env','HEADROOM_DEPLOYMENT_SUPERVISOR=none',
+        '--env','HEADROOM_DEPLOYMENT_SCOPE=user'
+    ))
+    $dockerArgs.Add($Image)
+    $dockerArgs.Add('--host')
+    $dockerArgs.Add('0.0.0.0')
+    for ($i = 2; $i -lt $proxyArgs.Count; $i++) {
+        $dockerArgs.Add($proxyArgs[$i])
+    }
+
+    & docker @dockerArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to start docker-native persistent deployment"
+    }
+
+    try {
+        Wait-Proxy -ContainerName $containerName -Port $Port
+    } catch {
+        docker rm -f $containerName | Out-Null 2>$null
+        throw
+    }
+    Write-PersistentState -Profile $Profile -Image $Image -Port $Port -Backend $Backend -AnyllmProvider $AnyllmProvider -Region $Region -Mode $Mode -Memory $Memory -TelemetryEnabled $TelemetryEnabled
+    Write-PersistentManifest -Profile $Profile -Image $Image -Port $Port -Backend $Backend -AnyllmProvider $AnyllmProvider -Region $Region -Mode $Mode -Memory $Memory -TelemetryEnabled $TelemetryEnabled -ProxyArgs $proxyArgs
+}
+
+function Stop-PersistentDockerInstall {
+    param([string]$Profile)
+
+    $state = Read-PersistentState -Profile $Profile
+    docker stop $state.container_name | Out-Null 2>$null
+    docker rm -f $state.container_name | Out-Null 2>$null
+}
+
+function Remove-PersistentDockerInstall {
+    param([string]$Profile)
+
+    $state = Read-PersistentState -Profile $Profile
+    docker stop $state.container_name | Out-Null 2>$null
+    docker rm -f $state.container_name | Out-Null 2>$null
+    $root = Get-PersistentProfileRoot -Profile $Profile
+    if (Test-Path $root) {
+        Remove-Item -Recurse -Force -Path $root
+    }
+}
+
+function Show-PersistentDockerInstallStatus {
+    param([string]$Profile)
+
+    $state = Read-PersistentState -Profile $Profile
+    $status = 'stopped'
+    $ready = 'no'
+    $running = docker ps --format '{{.Names}}'
+    if ($running -contains $state.container_name) {
+        $status = 'running'
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $state.health_url | Out-Null
+            $ready = 'yes'
+        } catch {
+            $ready = 'no'
+        }
+    }
+
+    Write-Host "Profile:    $($state.profile)"
+    Write-Host 'Preset:     persistent-docker'
+    Write-Host 'Runtime:    docker'
+    Write-Host 'Supervisor: none'
+    Write-Host "Port:       $($state.port)"
+    Write-Host "Status:     $status"
+    Write-Host "Ready:      $ready"
+    Write-Host "Health URL: $($state.health_url)"
+}
+
+function Show-InstallHelp {
+    $lines = @(
+        'Usage: headroom install [OPTIONS] COMMAND [ARGS]...',
+        '',
+        '  Manage persistent Docker-native Headroom deployments.',
+        '',
+        '  The Docker-native wrapper currently supports the persistent-docker preset only.',
+        '  Use the Python-native `headroom install` command for persistent-service and',
+        '  persistent-task installs, or when you need provider/user/system config mutation.',
+        '',
+        'Options:',
+        '  -?, --help  Show this message and exit.',
+        '',
+        'Commands:',
+        '  apply    Install a persistent Docker deployment.',
+        '  remove   Remove a persistent Docker deployment.',
+        '  restart  Restart a persistent Docker deployment.',
+        '  start    Start a persistent Docker deployment.',
+        '  status   Show persistent Docker deployment status.',
+        '  stop     Stop a persistent Docker deployment.'
+    )
+    Write-Host ($lines -join [Environment]::NewLine)
+}
+
+function Show-InstallApplyHelp {
+    $lines = @(
+        'Usage: headroom install apply [OPTIONS]',
+        '',
+        '  Install a persistent Docker deployment.',
+        '',
+        'Options:',
+        '  --preset [persistent-docker]  Docker-native wrapper supports persistent-docker only.',
+        '  --runtime [docker]            Docker-native wrapper supports runtime=docker only.',
+        '  --profile TEXT                Deployment profile name.  [default: default]',
+        '  -p, --port INTEGER            Persistent proxy port.  [default: 8787]',
+        '  --backend TEXT                Proxy backend.  [default: anthropic]',
+        '  --anyllm-provider TEXT        Provider for any-llm backends.',
+        '  --region TEXT                 Cloud region for Bedrock / Vertex style backends.',
+        '  --mode TEXT                   Proxy optimization mode.  [default: token]',
+        '  --memory                      Enable persistent memory in the runtime.',
+        '  --no-telemetry                Disable anonymous telemetry in the runtime.',
+        '  --image TEXT                  Docker image to use.  [default: HEADROOM_DOCKER_IMAGE or ghcr.io/chopratejas/headroom:latest]',
+        '  -?, --help                    Show this message and exit.'
+    )
+    Write-Host ($lines -join [Environment]::NewLine)
+}
+
+function Show-WrapHelp {
+    $lines = @(
+        'Usage: headroom wrap <COMMAND> [OPTIONS] [-- ARGS...]',
+        '',
+        '  Launch supported host tools through a Docker-native Headroom proxy.',
+        '',
+        'Supported commands:',
+        '  claude',
+        '  codex',
+        '  aider',
+        '  cursor',
+        '  openclaw',
+        '',
+        'Notes:',
+        '  - GitHub Copilot CLI wrapping is not supported by the Docker-native wrapper.',
+        '  - Use the Python-native CLI for unsupported wrap targets.'
+    )
+    Write-Host ($lines -join [Environment]::NewLine)
+}
+
+function Parse-InstallApplyArgs {
+    param([string[]]$Arguments)
+
+    $profile = 'default'
+    $port = 8787
+    $backend = 'anthropic'
+    $anyllmProvider = $null
+    $region = $null
+    $mode = 'token'
+    $memory = $false
+    $telemetryEnabled = $true
+    $image = $HeadroomImage
+
+    $i = 0
+    while ($i -lt $Arguments.Count) {
+        $arg = $Arguments[$i]
+        switch -Regex ($arg) {
+            '^--preset$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--preset'
+                if ($Arguments[$i + 1] -ne 'persistent-docker') { Fail 'Docker-native wrapper supports only --preset persistent-docker' }
+                $i += 2
+                continue
+            }
+            '^--preset=' {
+                if (($arg -replace '^--preset=', '') -ne 'persistent-docker') { Fail 'Docker-native wrapper supports only --preset persistent-docker' }
+                $i += 1
+                continue
+            }
+            '^--runtime$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--runtime'
+                if ($Arguments[$i + 1] -ne 'docker') { Fail 'Docker-native wrapper supports only --runtime docker' }
+                $i += 2
+                continue
+            }
+            '^--runtime=' {
+                if (($arg -replace '^--runtime=', '') -ne 'docker') { Fail 'Docker-native wrapper supports only --runtime docker' }
+                $i += 1
+                continue
+            }
+            '^(--scope|--providers|--target)$' { Fail 'Docker-native wrapper install does not support provider/user/system mutation flags; use the Python-native CLI for those flows' }
+            '^(--scope=|--providers=|--target=)' { Fail 'Docker-native wrapper install does not support provider/user/system mutation flags; use the Python-native CLI for those flows' }
+            '^--profile$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--profile'
+                $profile = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--profile=' {
+                $profile = $arg -replace '^--profile=', ''
+                $i += 1
+                continue
+            }
+            '^(--port|-p)$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
+                $port = Parse-PortValue -Value $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^(--port=|-p=)' {
+                $port = Parse-PortValue -Value ($arg -replace '^(--port=|-p=)', '')
+                $i += 1
+                continue
+            }
+            '^--backend$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--backend'
+                $backend = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--backend=' {
+                $backend = $arg -replace '^--backend=', ''
+                $i += 1
+                continue
+            }
+            '^--anyllm-provider$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--anyllm-provider'
+                $anyllmProvider = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--anyllm-provider=' {
+                $anyllmProvider = $arg -replace '^--anyllm-provider=', ''
+                $i += 1
+                continue
+            }
+            '^--region$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--region'
+                $region = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--region=' {
+                $region = $arg -replace '^--region=', ''
+                $i += 1
+                continue
+            }
+            '^--mode$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--mode'
+                $mode = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--mode=' {
+                $mode = $arg -replace '^--mode=', ''
+                $i += 1
+                continue
+            }
+            '^--memory$' {
+                $memory = $true
+                $i += 1
+                continue
+            }
+            '^--no-telemetry$' {
+                $telemetryEnabled = $false
+                $i += 1
+                continue
+            }
+            '^--image$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--image'
+                $image = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--image=' {
+                $image = $arg -replace '^--image=', ''
+                $i += 1
+                continue
+            }
+            '^(--help|-\?)$' {
+                Show-InstallApplyHelp
+                exit 0
+            }
+            default {
+                Fail "Unsupported option for 'headroom install apply': $arg"
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Profile = $profile
+        Port = $port
+        Backend = $backend
+        AnyllmProvider = $anyllmProvider
+        Region = $region
+        Mode = $mode
+        Memory = $memory
+        TelemetryEnabled = $telemetryEnabled
+        Image = $image
+    }
+}
+
+function Parse-InstallProfileArgs {
+    param([string[]]$Arguments)
+
+    $profile = 'default'
+    $i = 0
+    while ($i -lt $Arguments.Count) {
+        $arg = $Arguments[$i]
+        switch -Regex ($arg) {
+            '^--profile$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option '--profile'
+                $profile = $Arguments[$i + 1]
+                $i += 2
+                continue
+            }
+            '^--profile=' {
+                $profile = $arg -replace '^--profile=', ''
+                $i += 1
+                continue
+            }
+            '^(--help|-\?)$' {
+                Show-InstallHelp
+                exit 0
+            }
+            default {
+                Fail "Unsupported option for 'headroom install': $arg"
+            }
+        }
+    }
+
+    return $profile
 }
 
 function Invoke-ClaudeRtkInit {
@@ -300,6 +887,7 @@ function Parse-OpenClawWrapArgs {
         $arg = $Arguments[$i]
         switch -Regex ($arg) {
             '^--plugin-path$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $pluginPath = $Arguments[$i + 1]
                 $i += 2
                 continue
@@ -310,6 +898,7 @@ function Parse-OpenClawWrapArgs {
                 continue
             }
             '^--plugin-spec$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $pluginSpec = $Arguments[$i + 1]
                 $i += 2
                 continue
@@ -330,26 +919,29 @@ function Parse-OpenClawWrapArgs {
                 continue
             }
             '^--proxy-port$' {
-                $proxyPort = [int]$Arguments[$i + 1]
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
+                $proxyPort = Parse-PortValue -Value $Arguments[$i + 1]
                 $i += 2
                 continue
             }
             '^--proxy-port=' {
-                $proxyPort = [int]($arg -replace '^--proxy-port=', '')
+                $proxyPort = Parse-PortValue -Value ($arg -replace '^--proxy-port=', '')
                 $i += 1
                 continue
             }
             '^--startup-timeout-ms$' {
-                $startupTimeoutMs = [int]$Arguments[$i + 1]
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
+                $startupTimeoutMs = Parse-PositiveIntegerValue -Value $Arguments[$i + 1]
                 $i += 2
                 continue
             }
             '^--startup-timeout-ms=' {
-                $startupTimeoutMs = [int]($arg -replace '^--startup-timeout-ms=', '')
+                $startupTimeoutMs = Parse-PositiveIntegerValue -Value ($arg -replace '^--startup-timeout-ms=', '')
                 $i += 1
                 continue
             }
             '^--gateway-provider-id$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $gatewayProviderIds.Add($Arguments[$i + 1])
                 $i += 2
                 continue
@@ -360,6 +952,7 @@ function Parse-OpenClawWrapArgs {
                 continue
             }
             '^--python-path$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $pythonPath = $Arguments[$i + 1]
                 $i += 2
                 continue
@@ -762,7 +1355,7 @@ function Parse-WrapArgs {
     param([string[]]$Arguments)
 
     $known = New-Object System.Collections.Generic.List[string]
-    $host = New-Object System.Collections.Generic.List[string]
+    $hostArgs = New-Object System.Collections.Generic.List[string]
     $port = 8787
     $noRtk = $false
     $noProxy = $false
@@ -777,20 +1370,21 @@ function Parse-WrapArgs {
         switch -Regex ($arg) {
             '^--$' {
                 for ($j = $i + 1; $j -lt $Arguments.Count; $j++) {
-                    $host.Add($Arguments[$j])
+                    $hostArgs.Add($Arguments[$j])
                 }
                 $i = $Arguments.Count
                 continue
             }
             '^--port$|^-p$' {
-                $port = [int]$Arguments[$i + 1]
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
+                $port = Parse-PortValue -Value $Arguments[$i + 1]
                 $known.Add($arg)
                 $known.Add($Arguments[$i + 1])
                 $i += 2
                 continue
             }
             '^--port=' {
-                $port = [int]($arg -replace '^--port=', '')
+                $port = Parse-PortValue -Value ($arg -replace '^--port=', '')
                 $known.Add($arg)
                 $i += 1
                 continue
@@ -819,6 +1413,7 @@ function Parse-WrapArgs {
                 continue
             }
             '^--backend$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $backend = $Arguments[$i + 1]
                 $known.Add($arg)
                 $known.Add($Arguments[$i + 1])
@@ -832,6 +1427,7 @@ function Parse-WrapArgs {
                 continue
             }
             '^--anyllm-provider$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $anyllm = $Arguments[$i + 1]
                 $known.Add($arg)
                 $known.Add($Arguments[$i + 1])
@@ -845,6 +1441,7 @@ function Parse-WrapArgs {
                 continue
             }
             '^--region$' {
+                Require-OptionValue -Arguments $Arguments -Index $i -Option $arg
                 $region = $Arguments[$i + 1]
                 $known.Add($arg)
                 $known.Add($Arguments[$i + 1])
@@ -859,7 +1456,7 @@ function Parse-WrapArgs {
             }
             default {
                 for ($j = $i; $j -lt $Arguments.Count; $j++) {
-                    $host.Add($Arguments[$j])
+                    $hostArgs.Add($Arguments[$j])
                 }
                 $i = $Arguments.Count
             }
@@ -868,7 +1465,7 @@ function Parse-WrapArgs {
 
     [pscustomobject]@{
         KnownArgs = $known.ToArray()
-        HostArgs = $host.ToArray()
+        HostArgs = $hostArgs.ToArray()
         Port = $port
         NoRtk = $noRtk
         NoProxy = $noProxy
@@ -886,7 +1483,8 @@ function Invoke-PrepareOnly {
     )
 
     $dockerArgs = New-Object System.Collections.Generic.List[string]
-    $dockerArgs.AddRange([string[]]@('run','--rm','-it'))
+    $dockerArgs.AddRange([string[]]@('run','--rm'))
+    Add-TtyArgs -ArgsList $dockerArgs
     $dockerArgs.AddRange((Get-SharedDockerArgs))
     $dockerArgs.Add('--env')
     $dockerArgs.Add("HEADROOM_RTK_TARGET=$(Get-RtkTarget)")
@@ -912,9 +1510,61 @@ if ($args.Count -eq 0) {
 }
 
 switch ($args[0]) {
+    'install' {
+        if ($args.Count -eq 1 -or $args[1] -eq '--help' -or $args[1] -eq '-?') {
+            Show-InstallHelp
+            exit 0
+        }
+
+        $installCommand = $args[1]
+        $installArgs = if ($args.Count -gt 2) { $args[2..($args.Count - 1)] } else { @() }
+
+        switch ($installCommand) {
+            'apply' {
+                $parsed = Parse-InstallApplyArgs -Arguments $installArgs
+                Start-PersistentDockerInstall -Profile $parsed.Profile -Image $parsed.Image -Port $parsed.Port -Backend $parsed.Backend -AnyllmProvider $parsed.AnyllmProvider -Region $parsed.Region -Mode $parsed.Mode -Memory $parsed.Memory -TelemetryEnabled $parsed.TelemetryEnabled
+                Write-Host "Installed docker-native persistent deployment '$($parsed.Profile)' on port $($parsed.Port)."
+                exit 0
+            }
+            'status' {
+                $profile = Parse-InstallProfileArgs -Arguments $installArgs
+                Show-PersistentDockerInstallStatus -Profile $profile
+                exit 0
+            }
+            'start' {
+                $profile = Parse-InstallProfileArgs -Arguments $installArgs
+                $state = Read-PersistentState -Profile $profile
+                Start-PersistentDockerInstall -Profile $state.profile -Image $state.image -Port $state.port -Backend $state.backend -AnyllmProvider $state.anyllm_provider -Region $state.region -Mode $state.proxy_mode -Memory ([bool]$state.memory_enabled) -TelemetryEnabled ([bool]$state.telemetry_enabled)
+                Write-Host "Started docker-native persistent deployment '$profile'."
+                exit 0
+            }
+            'stop' {
+                $profile = Parse-InstallProfileArgs -Arguments $installArgs
+                Stop-PersistentDockerInstall -Profile $profile
+                Write-Host "Stopped docker-native persistent deployment '$profile'."
+                exit 0
+            }
+            'restart' {
+                $profile = Parse-InstallProfileArgs -Arguments $installArgs
+                $state = Read-PersistentState -Profile $profile
+                Start-PersistentDockerInstall -Profile $state.profile -Image $state.image -Port $state.port -Backend $state.backend -AnyllmProvider $state.anyllm_provider -Region $state.region -Mode $state.proxy_mode -Memory ([bool]$state.memory_enabled) -TelemetryEnabled ([bool]$state.telemetry_enabled)
+                Write-Host "Restarted docker-native persistent deployment '$profile'."
+                exit 0
+            }
+            'remove' {
+                $profile = Parse-InstallProfileArgs -Arguments $installArgs
+                Remove-PersistentDockerInstall -Profile $profile
+                Write-Host "Removed docker-native persistent deployment '$profile'."
+                exit 0
+            }
+            default {
+                Fail "Unsupported install target: $installCommand"
+            }
+        }
+    }
     'wrap' {
         if ($args.Count -eq 1 -or $args[1] -eq '--help' -or $args[1] -eq '-?') {
-            Invoke-HeadroomDocker -Arguments @('wrap','--help')
+            Show-WrapHelp
             exit 0
         }
 
@@ -924,6 +1574,17 @@ switch ($args[0]) {
 
         $tool = $args[1]
         $wrapArgs = if ($args.Count -gt 2) { $args[2..($args.Count - 1)] } else { @() }
+
+        switch ($tool) {
+            'claude' { }
+            'codex' { }
+            'aider' { }
+            'cursor' { }
+            'openclaw' { }
+            default {
+                Fail "Docker-native wrapper does not support 'wrap $tool'. Supported targets: claude, codex, aider, cursor, openclaw"
+            }
+        }
 
         if ($tool -eq 'openclaw') {
             if (Test-HelpFlag -Arguments $wrapArgs) {
@@ -948,14 +1609,6 @@ switch ($args[0]) {
         if ($parsed.Backend) { $proxyArgs.AddRange([string[]]@('--backend', $parsed.Backend)) }
         if ($parsed.Anyllm) { $proxyArgs.AddRange([string[]]@('--anyllm-provider', $parsed.Anyllm)) }
         if ($parsed.Region) { $proxyArgs.AddRange([string[]]@('--region', $parsed.Region)) }
-
-        switch ($tool) {
-            'claude' { }
-            'codex' { }
-            'aider' { }
-            'cursor' { }
-            default { Fail "Unsupported wrap target: $tool" }
-        }
 
         $containerName = $null
         try {
@@ -1028,17 +1681,20 @@ switch ($args[0]) {
         foreach ($arg in $args) { $forwardArgs.Add($arg) }
         for ($i = 1; $i -lt $args.Count; $i++) {
             if ($args[$i] -eq '--port' -or $args[$i] -eq '-p') {
-                $port = [int]$args[$i + 1]
+                Require-OptionValue -Arguments $args -Index $i -Option $args[$i]
+                $port = Parse-PortValue -Value $args[$i + 1]
                 break
             }
             if ($args[$i] -match '^--port=') {
-                $port = [int]($args[$i] -replace '^--port=', '')
+                $port = Parse-PortValue -Value ($args[$i] -replace '^--port=', '')
                 break
             }
         }
 
         $dockerArgs = New-Object System.Collections.Generic.List[string]
-        $dockerArgs.AddRange([string[]]@('run','--rm','-it','-p',"$port`:$port"))
+        $dockerArgs.AddRange([string[]]@('run','--rm'))
+        Add-TtyArgs -ArgsList $dockerArgs
+        $dockerArgs.AddRange([string[]]@('-p',"$port`:$port"))
         $dockerArgs.AddRange((Get-SharedDockerArgs))
         $dockerArgs.Add('--entrypoint')
         $dockerArgs.Add('headroom')
@@ -1056,34 +1712,46 @@ switch ($args[0]) {
 }
 '@
 
-    $cmdWrapper = @'
-@echo off
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0headroom.ps1" %*
-'@
+    $wrapper = $wrapper.Replace('__HEADROOM_INSTALL_IMAGE__', $resolvedInstallImage)
 
-    Set-Content -Path $wrapperPath -Value $wrapper
-    Set-Content -Path $cmdPath -Value $cmdWrapper
+    $cmdWrapper = ([string][char]64) + "echo off`r`npowershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ""%~dp0headroom.ps1"" %*`r`n"
+
+    Set-Content -Path $wrapperPath -Value $wrapper -Encoding utf8
+    Set-Content -Path $cmdPath -Value $cmdWrapper -Encoding ascii
 }
 
 Require-Command docker
 docker version | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Docker is installed but not available to the current user'
+}
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Write-Wrapper -TargetDir $InstallDir
 Ensure-PathEntry -PathEntry $InstallDir
 Ensure-ProfileBlock -PathEntry $InstallDir
 
-Write-Info "Pulling $ImageDefault"
-docker pull $ImageDefault | Out-Null
+if ($env:HEADROOM_DOCKER_IMAGE) {
+    $null = docker image inspect $InstallImage 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Info "Using existing HEADROOM_DOCKER_IMAGE=$InstallImage"
+    } else {
+        Write-Info "Pulling $InstallImage"
+        docker pull $InstallImage | Out-Null
+    }
+} else {
+    Write-Info "Pulling $ImageDefault"
+    docker pull $ImageDefault | Out-Null
+}
 
-Write-Host ''
-Write-Host 'Headroom Docker-native install complete.'
-Write-Host ''
+Write-Host ""
+Write-Host "Headroom Docker-native install complete."
+Write-Host ""
 Write-Host "Installed wrappers:"
 Write-Host "  $InstallDir\headroom.ps1"
 Write-Host "  $InstallDir\headroom.cmd"
-Write-Host ''
-Write-Host 'Next steps:'
+Write-Host ""
+Write-Host "Next steps:"
 Write-Host "  1. Restart PowerShell"
 Write-Host "  2. Try: headroom proxy"
 Write-Host "  3. Docs: https://github.com/chopratejas/headroom/blob/main/docs/docker-install.md"

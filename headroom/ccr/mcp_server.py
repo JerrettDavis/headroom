@@ -32,10 +32,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# fcntl is Unix-only; on Windows we skip file locking (stats are best-effort)
+# fcntl is Unix-only; on Windows we skip file locking (stats are best-effort).
+# Keep the module typed as Any so Windows mypy runs don't try to resolve Unix-only attrs.
+fcntl: Any = None
 try:
-    import fcntl
+    import fcntl as _fcntl
 
+    fcntl = _fcntl
     _HAS_FCNTL = True
 except ImportError:
     _HAS_FCNTL = False
@@ -329,10 +332,10 @@ class HeadroomMCPServer:
         # File read cache: path → (content_hash, ccr_hash, line_count, token_count)
         self._file_cache: dict[str, tuple[str, str, int, int]] = {}
 
-        if not MCP_AVAILABLE:
+        if not MCP_AVAILABLE or Server is None:
             raise ImportError("MCP SDK not installed. Install with: pip install mcp")
 
-        self.server = Server("headroom")
+        self.server: Server = Server("headroom")
         self._setup_handlers()
 
     def _get_local_store(self) -> Any:

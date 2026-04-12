@@ -3,9 +3,16 @@
 set -euo pipefail
 
 IMAGE_DEFAULT="ghcr.io/chopratejas/headroom:latest"
+INSTALL_IMAGE="${HEADROOM_DOCKER_IMAGE:-${IMAGE_DEFAULT}}"
 INSTALL_DIR="${HOME}/.local/bin"
 if [[ ! -d "${HOME}/.local" ]]; then
   INSTALL_DIR="${HOME}/bin"
+fi
+
+BASH_PATH="${BASH:-$(command -v bash)}"
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3))); then
+  printf 'ERROR: Headroom Docker-native install requires bash >= 4.3\n' >&2
+  exit 1
 fi
 
 info() {
@@ -46,14 +53,21 @@ ${marker_end}"
 write_wrapper() {
   local wrapper_path="${INSTALL_DIR}/headroom"
 
-  cat >"${wrapper_path}" <<'WRAPPER'
-#!/usr/bin/env bash
+  {
+    printf '#!%s\n\n' "${BASH_PATH}"
+    printf 'HEADROOM_IMAGE_DEFAULT=%q\n' "${INSTALL_IMAGE}"
+    cat <<'WRAPPER'
 
 set -euo pipefail
 
-HEADROOM_IMAGE="${HEADROOM_DOCKER_IMAGE:-ghcr.io/chopratejas/headroom:latest}"
+HEADROOM_IMAGE="${HEADROOM_DOCKER_IMAGE:-${HEADROOM_IMAGE_DEFAULT}}"
 HEADROOM_CONTAINER_HOME="${HEADROOM_CONTAINER_HOME:-/tmp/headroom-home}"
 HEADROOM_HOST_HOME="${HOME:?}"
+
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3))); then
+  printf 'ERROR: Headroom Docker-native wrapper requires bash >= 4.3\n' >&2
+  exit 1
+fi
 
 warn() {
   printf 'WARN: %s\n' "$*" >&2
@@ -168,7 +182,11 @@ wait_for_proxy() {
   local attempt
 
   for attempt in $(seq 1 45); do
-    if (echo >/dev/tcp/127.0.0.1/"${port}") >/dev/null 2>&1; then
+    if command -v curl >/dev/null 2>&1; then
+      if curl --fail --silent "http://127.0.0.1:${port}/readyz" >/dev/null; then
+        return 0
+      fi
+    elif (echo >/dev/tcp/127.0.0.1/"${port}") >/dev/null 2>&1; then
       return 0
     fi
 
@@ -207,6 +225,557 @@ stop_proxy_container() {
   if [[ -n "${container_name}" ]]; then
     docker stop "${container_name}" >/dev/null 2>&1 || true
   fi
+}
+
+persistent_profile_root() {
+  local profile="$1"
+  validate_profile_name "${profile}"
+  printf '%s/.headroom/deploy/%s\n' "${HEADROOM_HOST_HOME}" "${profile}"
+}
+
+persistent_state_path() {
+  local profile="$1"
+  printf '%s/docker-native.env\n' "$(persistent_profile_root "${profile}")"
+}
+
+persistent_manifest_path() {
+  local profile="$1"
+  printf '%s/manifest.json\n' "$(persistent_profile_root "${profile}")"
+}
+
+persistent_container_name() {
+  local profile="$1"
+  validate_profile_name "${profile}"
+  printf 'headroom-%s\n' "${profile}"
+}
+
+validate_profile_name() {
+  local profile="$1"
+  [[ "${profile}" =~ ^[A-Za-z0-9._-]+$ ]] || die "Invalid profile name '${profile}'"
+  [[ "${profile}" != "." && "${profile}" != ".." ]] || die "Invalid profile name '${profile}'"
+}
+
+validate_port() {
+  local port="$1"
+  [[ "${port}" =~ ^[0-9]+$ ]] || die "Invalid port '${port}'"
+  ((10#${port} >= 1 && 10#${port} <= 65535)) || die "Invalid port '${port}'"
+}
+
+validate_positive_integer() {
+  local value="$1"
+  [[ "${value}" =~ ^[0-9]+$ ]] || die "Invalid value '${value}'"
+  ((10#${value} >= 1)) || die "Invalid value '${value}'"
+}
+
+require_option_value() {
+  (($# >= 2)) || die "Option $1 requires a value"
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  printf '%s' "${value}"
+}
+
+json_array_from_args() {
+  local first=1
+  local arg
+  printf '['
+  for arg in "$@"; do
+    if [[ "${first}" -eq 0 ]]; then
+      printf ','
+    fi
+    first=0
+    printf '"%s"' "$(json_escape "${arg}")"
+  done
+  printf ']'
+}
+
+append_persistent_container_args() {
+  local -n ref=$1
+
+  ensure_host_dirs
+  ref+=(--workdir "${HEADROOM_CONTAINER_HOME}")
+  ref+=(--env "HOME=${HEADROOM_CONTAINER_HOME}")
+  ref+=(--env "PYTHONUNBUFFERED=1")
+  ref+=(-v "${HEADROOM_HOST_HOME}/.headroom:${HEADROOM_CONTAINER_HOME}/.headroom")
+  ref+=(-v "${HEADROOM_HOST_HOME}/.claude:${HEADROOM_CONTAINER_HOME}/.claude")
+  ref+=(-v "${HEADROOM_HOST_HOME}/.codex:${HEADROOM_CONTAINER_HOME}/.codex")
+  ref+=(-v "${HEADROOM_HOST_HOME}/.gemini:${HEADROOM_CONTAINER_HOME}/.gemini")
+
+  if command -v id >/dev/null 2>&1; then
+    ref+=(--user "$(id -u):$(id -g)")
+  fi
+
+  append_passthrough_envs "$1"
+}
+
+build_manifest_proxy_args() {
+  local -n out_args=$1
+  local port="$2"
+  local proxy_mode="$3"
+  local backend="$4"
+  local anyllm="$5"
+  local region="$6"
+  local memory_enabled="$7"
+  local telemetry_enabled="$8"
+
+  out_args=(--host 127.0.0.1 --port "${port}" --mode "${proxy_mode}" --backend "${backend}")
+  if [[ "${telemetry_enabled}" -eq 0 ]]; then
+    out_args+=(--no-telemetry)
+  fi
+  if [[ "${memory_enabled}" -eq 1 ]]; then
+    out_args+=(--memory --memory-db-path "${HEADROOM_CONTAINER_HOME}/.headroom/memory.db")
+  fi
+  if [[ -n "${anyllm}" ]]; then
+    out_args+=(--anyllm-provider "${anyllm}")
+  fi
+  if [[ -n "${region}" ]]; then
+    out_args+=(--region "${region}")
+  fi
+}
+
+write_persistent_state() {
+  local profile="$1"
+  local image="$2"
+  local port="$3"
+  local backend="$4"
+  local anyllm="$5"
+  local region="$6"
+  local proxy_mode="$7"
+  local memory_enabled="$8"
+  local telemetry_enabled="$9"
+
+  local root
+  root="$(persistent_profile_root "${profile}")"
+  mkdir -p "${root}"
+
+  {
+    printf 'PROFILE=%s\n' "${profile}"
+    printf 'IMAGE=%s\n' "${image}"
+    printf 'PORT=%s\n' "${port}"
+    printf 'BACKEND=%s\n' "${backend}"
+    printf 'ANYLLM_PROVIDER=%s\n' "${anyllm}"
+    printf 'REGION=%s\n' "${region}"
+    printf 'PROXY_MODE=%s\n' "${proxy_mode}"
+    printf 'MEMORY_ENABLED=%s\n' "${memory_enabled}"
+    printf 'TELEMETRY_ENABLED=%s\n' "${telemetry_enabled}"
+    printf 'CONTAINER_NAME=%s\n' "$(persistent_container_name "${profile}")"
+    printf 'HEALTH_URL=%s\n' "http://127.0.0.1:${port}/readyz"
+  } >"$(persistent_state_path "${profile}")"
+}
+
+write_persistent_manifest() {
+  local profile="$1"
+  local image="$2"
+  local port="$3"
+  local backend="$4"
+  local anyllm="$5"
+  local region="$6"
+  local proxy_mode="$7"
+  local memory_enabled="$8"
+  local telemetry_enabled="$9"
+  local -n proxy_args_ref=${10}
+
+  local root
+  local manifest_path
+  local anyllm_json="null"
+  local region_json="null"
+  local memory_json="false"
+  local telemetry_json="true"
+
+  root="$(persistent_profile_root "${profile}")"
+  manifest_path="$(persistent_manifest_path "${profile}")"
+  mkdir -p "${root}"
+
+  if [[ -n "${anyllm}" ]]; then
+    anyllm_json="\"$(json_escape "${anyllm}")\""
+  fi
+  if [[ -n "${region}" ]]; then
+    region_json="\"$(json_escape "${region}")\""
+  fi
+  if [[ "${memory_enabled}" -eq 1 ]]; then
+    memory_json="true"
+  fi
+  if [[ "${telemetry_enabled}" -eq 0 ]]; then
+    telemetry_json="false"
+  fi
+
+  cat >"${manifest_path}" <<EOF
+{
+  "profile": "$(json_escape "${profile}")",
+  "preset": "persistent-docker",
+  "runtime_kind": "docker",
+  "supervisor_kind": "none",
+  "scope": "user",
+  "provider_mode": "manual",
+  "targets": [],
+  "port": ${port},
+  "host": "127.0.0.1",
+  "backend": "$(json_escape "${backend}")",
+  "anyllm_provider": ${anyllm_json},
+  "region": ${region_json},
+  "proxy_mode": "$(json_escape "${proxy_mode}")",
+  "memory_enabled": ${memory_json},
+  "memory_db_path": "$(json_escape "${HEADROOM_CONTAINER_HOME}/.headroom/memory.db")",
+  "telemetry_enabled": ${telemetry_json},
+  "image": "$(json_escape "${image}")",
+  "service_name": "headroom-$(json_escape "${profile}")",
+  "container_name": "$(json_escape "$(persistent_container_name "${profile}")")",
+  "health_url": "http://127.0.0.1:${port}/readyz",
+  "base_env": {
+    "HEADROOM_PORT": "${port}",
+    "HEADROOM_HOST": "127.0.0.1",
+    "HEADROOM_MODE": "$(json_escape "${proxy_mode}")",
+    "HEADROOM_BACKEND": "$(json_escape "${backend}")"
+  },
+  "tool_envs": {},
+  "proxy_args": $(json_array_from_args "${proxy_args_ref[@]}"),
+  "mutations": [],
+  "artifacts": []
+}
+EOF
+}
+
+load_persistent_state() {
+  local profile="$1"
+  local state_path
+  validate_profile_name "${profile}"
+  state_path="$(persistent_state_path "${profile}")"
+  [[ -f "${state_path}" ]] || die "No docker-native persistent deployment profile named '${profile}'"
+  PROFILE=""
+  IMAGE=""
+  PORT=""
+  BACKEND=""
+  ANYLLM_PROVIDER=""
+  REGION=""
+  PROXY_MODE=""
+  MEMORY_ENABLED=""
+  TELEMETRY_ENABLED=""
+  CONTAINER_NAME=""
+  HEALTH_URL=""
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      PROFILE|IMAGE|PORT|BACKEND|ANYLLM_PROVIDER|REGION|PROXY_MODE|MEMORY_ENABLED|TELEMETRY_ENABLED|CONTAINER_NAME|HEALTH_URL)
+        printf -v "${key}" '%s' "${value}"
+        ;;
+    esac
+  done <"${state_path}"
+}
+
+start_persistent_docker_install() {
+  local profile="$1"
+  local image="$2"
+  local port="$3"
+  local backend="$4"
+  local anyllm="$5"
+  local region="$6"
+  local proxy_mode="$7"
+  local memory_enabled="$8"
+  local telemetry_enabled="$9"
+
+  local container_name
+  local proxy_args=()
+  local args=()
+
+  validate_profile_name "${profile}"
+  container_name="$(persistent_container_name "${profile}")"
+  build_manifest_proxy_args proxy_args "${port}" "${proxy_mode}" "${backend}" "${anyllm}" "${region}" "${memory_enabled}" "${telemetry_enabled}"
+
+  docker rm -f "${container_name}" >/dev/null 2>&1 || true
+
+  args=(docker run -d --restart unless-stopped --name "${container_name}" -p "${port}:${port}")
+  append_persistent_container_args args
+  args+=(
+    --env "HEADROOM_DEPLOYMENT_PROFILE=${profile}"
+    --env "HEADROOM_DEPLOYMENT_PRESET=persistent-docker"
+    --env "HEADROOM_DEPLOYMENT_RUNTIME=docker"
+    --env "HEADROOM_DEPLOYMENT_SUPERVISOR=none"
+    --env "HEADROOM_DEPLOYMENT_SCOPE=user"
+  )
+  args+=("${image}" --host 0.0.0.0 "${proxy_args[@]:2}")
+  "${args[@]}" >/dev/null
+
+  if ! wait_for_proxy "${container_name}" "${port}"; then
+    docker rm -f "${container_name}" >/dev/null 2>&1 || true
+    die "Headroom persistent Docker deployment failed to start on port ${port}"
+  fi
+
+  write_persistent_state "${profile}" "${image}" "${port}" "${backend}" "${anyllm}" "${region}" "${proxy_mode}" "${memory_enabled}" "${telemetry_enabled}"
+  write_persistent_manifest "${profile}" "${image}" "${port}" "${backend}" "${anyllm}" "${region}" "${proxy_mode}" "${memory_enabled}" "${telemetry_enabled}" proxy_args
+}
+
+stop_persistent_docker_install() {
+  local profile="$1"
+  local container_name
+
+  load_persistent_state "${profile}"
+  container_name="${CONTAINER_NAME}"
+  docker stop "${container_name}" >/dev/null 2>&1 || true
+  docker rm -f "${container_name}" >/dev/null 2>&1 || true
+}
+
+status_persistent_docker_install() {
+  local profile="$1"
+  local status="stopped"
+  local ready="no"
+
+  load_persistent_state "${profile}"
+  if docker_container_exists "${CONTAINER_NAME}"; then
+    status="running"
+    if command -v curl >/dev/null 2>&1; then
+      if curl --fail --silent "${HEALTH_URL}" >/dev/null; then
+        ready="yes"
+      fi
+    elif (echo >/dev/tcp/127.0.0.1/"${PORT}") >/dev/null 2>&1; then
+      ready="yes"
+    fi
+  fi
+
+  printf 'Profile:    %s\n' "${PROFILE}"
+  printf 'Preset:     persistent-docker\n'
+  printf 'Runtime:    docker\n'
+  printf 'Supervisor: none\n'
+  printf 'Port:       %s\n' "${PORT}"
+  printf 'Status:     %s\n' "${status}"
+  printf 'Ready:      %s\n' "${ready}"
+  printf 'Health URL: %s\n' "${HEALTH_URL}"
+}
+
+remove_persistent_docker_install() {
+  local profile="$1"
+  local root
+
+  load_persistent_state "${profile}"
+  docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  root="$(persistent_profile_root "${profile}")"
+  rm -rf "${root}"
+}
+
+print_install_help() {
+  cat <<'EOF'
+Usage: headroom install [OPTIONS] COMMAND [ARGS]...
+
+  Manage persistent Docker-native Headroom deployments.
+
+  The Docker-native wrapper currently supports the persistent-docker preset only.
+  Use the Python-native `headroom install` command for persistent-service and
+  persistent-task installs, or when you need provider/user/system config mutation.
+
+Options:
+  -?, --help  Show this message and exit.
+
+Commands:
+  apply    Install a persistent Docker deployment.
+  remove   Remove a persistent Docker deployment.
+  restart  Restart a persistent Docker deployment.
+  start    Start a persistent Docker deployment.
+  status   Show persistent Docker deployment status.
+  stop     Stop a persistent Docker deployment.
+EOF
+}
+
+print_install_apply_help() {
+  cat <<'EOF'
+Usage: headroom install apply [OPTIONS]
+
+  Install a persistent Docker deployment.
+
+Options:
+  --preset [persistent-docker]  Docker-native wrapper supports persistent-docker only.
+  --runtime [docker]            Docker-native wrapper supports runtime=docker only.
+  --profile TEXT                Deployment profile name.  [default: default]
+  -p, --port INTEGER            Persistent proxy port.  [default: 8787]
+  --backend TEXT                Proxy backend.  [default: anthropic]
+  --anyllm-provider TEXT        Provider for any-llm backends.
+  --region TEXT                 Cloud region for Bedrock / Vertex style backends.
+  --mode TEXT                   Proxy optimization mode.  [default: token]
+  --memory                      Enable persistent memory in the runtime.
+  --no-telemetry                Disable anonymous telemetry in the runtime.
+  --image TEXT                  Docker image to use.  [default: HEADROOM_DOCKER_IMAGE or ghcr.io/chopratejas/headroom:latest]
+  -?, --help                    Show this message and exit.
+EOF
+}
+
+print_wrap_help() {
+  cat <<'EOF'
+Usage: headroom wrap <COMMAND> [OPTIONS] [-- ARGS...]
+
+  Launch supported host tools through a Docker-native Headroom proxy.
+
+Supported commands:
+  claude
+  codex
+  aider
+  cursor
+  openclaw
+
+Notes:
+  - GitHub Copilot CLI wrapping is not supported by the Docker-native wrapper.
+  - Use the Python-native CLI for unsupported wrap targets.
+EOF
+}
+
+parse_install_apply_args() {
+  local -n out_profile=$1
+  local -n out_port=$2
+  local -n out_backend=$3
+  local -n out_anyllm=$4
+  local -n out_region=$5
+  local -n out_mode=$6
+  local -n out_memory=$7
+  local -n out_telemetry=$8
+  local -n out_image=$9
+  shift 9
+
+  out_profile="default"
+  out_port=8787
+  out_backend="anthropic"
+  out_anyllm=""
+  out_region=""
+  out_mode="token"
+  out_memory=0
+  out_telemetry=1
+  out_image="${HEADROOM_IMAGE}"
+
+  while (($#)); do
+    case "$1" in
+      --preset)
+        require_option_value "$@"
+        [[ "$2" == "persistent-docker" ]] || die "Docker-native wrapper supports only --preset persistent-docker"
+        shift 2
+        ;;
+      --preset=*)
+        [[ "${1#*=}" == "persistent-docker" ]] || die "Docker-native wrapper supports only --preset persistent-docker"
+        shift
+        ;;
+      --runtime)
+        require_option_value "$@"
+        [[ "$2" == "docker" ]] || die "Docker-native wrapper supports only --runtime docker"
+        shift 2
+        ;;
+      --runtime=*)
+        [[ "${1#*=}" == "docker" ]] || die "Docker-native wrapper supports only --runtime docker"
+        shift
+        ;;
+      --scope|--providers|--target)
+        die "Docker-native wrapper install does not support provider/user/system mutation flags; use the Python-native CLI for those flows"
+        ;;
+      --scope=*|--providers=*|--target=*)
+        die "Docker-native wrapper install does not support provider/user/system mutation flags; use the Python-native CLI for those flows"
+        ;;
+      --profile)
+        require_option_value "$@"
+        out_profile="$2"
+        shift 2
+        ;;
+      --profile=*)
+        out_profile="${1#*=}"
+        shift
+        ;;
+      --port|-p)
+        require_option_value "$@"
+        out_port="$2"
+        shift 2
+        ;;
+      --port=*|-p=*)
+        out_port="${1#*=}"
+        shift
+        ;;
+      --backend)
+        require_option_value "$@"
+        out_backend="$2"
+        shift 2
+        ;;
+      --backend=*)
+        out_backend="${1#*=}"
+        shift
+        ;;
+      --anyllm-provider)
+        require_option_value "$@"
+        out_anyllm="$2"
+        shift 2
+        ;;
+      --anyllm-provider=*)
+        out_anyllm="${1#*=}"
+        shift
+        ;;
+      --region)
+        require_option_value "$@"
+        out_region="$2"
+        shift 2
+        ;;
+      --region=*)
+        out_region="${1#*=}"
+        shift
+        ;;
+      --mode)
+        require_option_value "$@"
+        out_mode="$2"
+        shift 2
+        ;;
+      --mode=*)
+        out_mode="${1#*=}"
+        shift
+        ;;
+      --memory)
+        out_memory=1
+        shift
+        ;;
+      --no-telemetry)
+        out_telemetry=0
+        shift
+        ;;
+      --image)
+        require_option_value "$@"
+        out_image="$2"
+        shift 2
+        ;;
+      --image=*)
+        out_image="${1#*=}"
+        shift
+        ;;
+      --help|-?)
+        print_install_apply_help
+        exit 0
+        ;;
+      *)
+        die "Unsupported option for 'headroom install apply': $1"
+        ;;
+    esac
+  done
+
+  validate_port "${out_port}"
+}
+
+parse_install_profile_arg() {
+  local -n out_profile=$1
+  shift
+
+  out_profile="default"
+  while (($#)); do
+    case "$1" in
+      --profile)
+        require_option_value "$@"
+        out_profile="$2"
+        shift 2
+        ;;
+      --profile=*)
+        out_profile="${1#*=}"
+        shift
+        ;;
+      --help|-?)
+        print_install_help
+        exit 0
+        ;;
+      *)
+        die "Unsupported option for 'headroom install': $1"
+        ;;
+    esac
+  done
 }
 
 run_claude_rtk_init() {
@@ -251,12 +820,15 @@ parse_wrap_args() {
         break
         ;;
       --port|-p)
+        require_option_value "$@"
         out_port="$2"
+        validate_port "${out_port}"
         out_known+=("$1" "$2")
         shift 2
         ;;
       --port=*)
         out_port="${1#*=}"
+        validate_port "${out_port}"
         out_known+=("$1")
         shift
         ;;
@@ -280,6 +852,7 @@ parse_wrap_args() {
         shift
         ;;
       --backend)
+        require_option_value "$@"
         out_backend="$2"
         out_known+=("$1" "$2")
         shift 2
@@ -290,6 +863,7 @@ parse_wrap_args() {
         shift
         ;;
       --anyllm-provider)
+        require_option_value "$@"
         out_anyllm="$2"
         out_known+=("$1" "$2")
         shift 2
@@ -300,6 +874,7 @@ parse_wrap_args() {
         shift
         ;;
       --region)
+        require_option_value "$@"
         out_region="$2"
         out_known+=("$1" "$2")
         shift 2
@@ -381,6 +956,7 @@ parse_openclaw_wrap_args() {
   while (($#)); do
     case "$1" in
       --plugin-path)
+        require_option_value "$@"
         out_plugin_path="$2"
         shift 2
         ;;
@@ -389,6 +965,7 @@ parse_openclaw_wrap_args() {
         shift
         ;;
       --plugin-spec)
+        require_option_value "$@"
         out_plugin_spec="$2"
         shift 2
         ;;
@@ -405,22 +982,29 @@ parse_openclaw_wrap_args() {
         shift
         ;;
       --proxy-port)
+        require_option_value "$@"
         out_proxy_port="$2"
+        validate_port "${out_proxy_port}"
         shift 2
         ;;
       --proxy-port=*)
         out_proxy_port="${1#*=}"
+        validate_port "${out_proxy_port}"
         shift
         ;;
       --startup-timeout-ms)
+        require_option_value "$@"
         out_startup_timeout_ms="$2"
+        validate_positive_integer "${out_startup_timeout_ms}"
         shift 2
         ;;
       --startup-timeout-ms=*)
         out_startup_timeout_ms="${1#*=}"
+        validate_positive_integer "${out_startup_timeout_ms}"
         shift
         ;;
       --gateway-provider-id)
+        require_option_value "$@"
         out_gateway_provider_ids+=("$2")
         shift 2
         ;;
@@ -429,6 +1013,7 @@ parse_openclaw_wrap_args() {
         shift
         ;;
       --python-path)
+        require_option_value "$@"
         out_python_path="$2"
         shift 2
         ;;
@@ -795,15 +1380,74 @@ main() {
   fi
 
   case "$1" in
+    install)
+      if (($# == 1)) || [[ "$2" == "--help" || "$2" == "-?" ]]; then
+        print_install_help
+        return
+      fi
+
+      local install_command="$2"
+      shift 2
+      case "${install_command}" in
+        apply)
+          local profile port backend anyllm region proxy_mode memory_enabled telemetry_enabled image
+          parse_install_apply_args profile port backend anyllm region proxy_mode memory_enabled telemetry_enabled image "$@"
+          start_persistent_docker_install "${profile}" "${image}" "${port}" "${backend}" "${anyllm}" "${region}" "${proxy_mode}" "${memory_enabled}" "${telemetry_enabled}"
+          printf "Installed docker-native persistent deployment '%s' on port %s.\n" "${profile}" "${port}"
+          ;;
+        status)
+          local profile
+          parse_install_profile_arg profile "$@"
+          status_persistent_docker_install "${profile}"
+          ;;
+        start)
+          local profile
+          parse_install_profile_arg profile "$@"
+          load_persistent_state "${profile}"
+          start_persistent_docker_install "${PROFILE}" "${IMAGE}" "${PORT}" "${BACKEND}" "${ANYLLM_PROVIDER}" "${REGION}" "${PROXY_MODE}" "${MEMORY_ENABLED}" "${TELEMETRY_ENABLED}"
+          printf "Started docker-native persistent deployment '%s'.\n" "${profile}"
+          ;;
+        stop)
+          local profile
+          parse_install_profile_arg profile "$@"
+          stop_persistent_docker_install "${profile}"
+          printf "Stopped docker-native persistent deployment '%s'.\n" "${profile}"
+          ;;
+        restart)
+          local profile
+          parse_install_profile_arg profile "$@"
+          load_persistent_state "${profile}"
+          start_persistent_docker_install "${PROFILE}" "${IMAGE}" "${PORT}" "${BACKEND}" "${ANYLLM_PROVIDER}" "${REGION}" "${PROXY_MODE}" "${MEMORY_ENABLED}" "${TELEMETRY_ENABLED}"
+          printf "Restarted docker-native persistent deployment '%s'.\n" "${profile}"
+          ;;
+        remove)
+          local profile
+          parse_install_profile_arg profile "$@"
+          remove_persistent_docker_install "${profile}"
+          printf "Removed docker-native persistent deployment '%s'.\n" "${profile}"
+          ;;
+        *)
+          die "Unsupported install target: ${install_command}"
+          ;;
+      esac
+      ;;
     wrap)
       if (($# == 1)) || [[ "$2" == "--help" || "$2" == "-?" ]]; then
-        run_headroom wrap --help
+        print_wrap_help
         return
       fi
 
       (($# >= 2)) || die "Usage: headroom wrap <claude|codex|aider|cursor|openclaw> [...]"
       local tool="$2"
       shift 2
+
+      case "${tool}" in
+        claude|codex|aider|cursor|openclaw)
+          ;;
+        *)
+          die "Docker-native wrapper does not support 'wrap ${tool}'. Supported targets: claude, codex, aider, cursor, openclaw"
+          ;;
+      esac
 
       if [[ "${tool}" == "openclaw" ]]; then
         if contains_help_flag "$@"; then
@@ -835,14 +1479,6 @@ main() {
       if [[ -n "${region}" ]]; then
         proxy_args+=(--region "${region}")
       fi
-
-      case "${tool}" in
-        claude|codex|aider|cursor)
-          ;;
-        *)
-          die "Unsupported wrap target: ${tool}"
-          ;;
-      esac
 
       local container_name=""
       if [[ "${no_proxy}" -eq 0 ]]; then
@@ -911,12 +1547,15 @@ EOF
       while (($#)); do
         case "$1" in
           --port|-p)
+            require_option_value "$@"
             port="$2"
+            validate_port "${port}"
             args+=("$1" "$2")
             shift 2
             ;;
           --port=*)
             port="${1#*=}"
+            validate_port "${port}"
             args+=("$1")
             shift
             ;;
@@ -942,6 +1581,7 @@ EOF
 
 main "$@"
 WRAPPER
+  } >"${wrapper_path}"
 
   chmod +x "${wrapper_path}"
 }
@@ -957,8 +1597,17 @@ main() {
   append_path_block "${HOME}/.zshrc"
   append_path_block "${HOME}/.profile"
 
-  info "Pulling ${IMAGE_DEFAULT}"
-  docker pull "${IMAGE_DEFAULT}" >/dev/null
+  if [[ -n "${HEADROOM_DOCKER_IMAGE:-}" ]]; then
+    if docker image inspect "${INSTALL_IMAGE}" >/dev/null 2>&1; then
+      info "Using existing HEADROOM_DOCKER_IMAGE=${INSTALL_IMAGE}"
+    else
+      info "Pulling ${INSTALL_IMAGE}"
+      docker pull "${INSTALL_IMAGE}" >/dev/null
+    fi
+  else
+    info "Pulling ${IMAGE_DEFAULT}"
+    docker pull "${IMAGE_DEFAULT}" >/dev/null
+  fi
 
   cat <<EOF
 

@@ -144,6 +144,15 @@ from headroom.transforms import (
     is_tree_sitter_available,
 )
 
+fcntl: Any = None
+try:
+    import fcntl as _fcntl
+
+    fcntl = _fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+
 _build_prefix_cache_stats = build_prefix_cache_stats
 _build_session_summary = build_session_summary
 _merge_cost_stats = merge_cost_stats
@@ -921,34 +930,30 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
         Returns True if this process is the beacon owner.
         """
+        if not HAS_FCNTL:
+            return True
+
+        fd = None
         try:
             _beacon_lock_path.parent.mkdir(parents=True, exist_ok=True)
-            import fcntl
-
             fd = open(_beacon_lock_path, "w")  # noqa: SIM115
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fd.write(str(os.getpid()))
             fd.flush()
             _beacon_lock_fd[0] = fd
             return True
-        except (OSError, ImportError):
-            # Lock held by another worker, or fcntl not available (Windows)
-            # On Windows, skip locking — workers are rare on Windows anyway
-            try:
-                import fcntl  # noqa: F811
-
-                return False  # Lock held by another worker
-            except ImportError:
-                return True  # Windows: no fcntl, just allow it
+        except OSError:
+            if fd is not None:
+                fd.close()
+            return False
 
     def _release_beacon_lock() -> None:
         """Release the beacon file lock."""
         fd = _beacon_lock_fd[0]
         if fd:
             try:
-                import fcntl
-
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                if HAS_FCNTL:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
                 fd.close()
             except Exception:
                 pass
@@ -1093,6 +1098,15 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             "uptime_seconds": _uptime_seconds(),
             "checks": checks,
         }
+        deployment_profile = os.environ.get("HEADROOM_DEPLOYMENT_PROFILE")
+        if deployment_profile:
+            payload["deployment"] = {
+                "profile": deployment_profile,
+                "preset": os.environ.get("HEADROOM_DEPLOYMENT_PRESET"),
+                "runtime": os.environ.get("HEADROOM_DEPLOYMENT_RUNTIME"),
+                "supervisor": os.environ.get("HEADROOM_DEPLOYMENT_SUPERVISOR"),
+                "scope": os.environ.get("HEADROOM_DEPLOYMENT_SCOPE"),
+            }
         if include_config:
             payload["config"] = {
                 "backend": config.backend,

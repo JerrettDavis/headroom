@@ -55,7 +55,8 @@ def _normalize_embeddings_batch(embeddings: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     # Avoid division by zero
     norms = np.where(norms > 0, norms, 1.0)
-    return (embeddings / norms).astype(np.float32)
+    result: np.ndarray = (embeddings / norms).astype(np.float32)
+    return result
 
 
 # =============================================================================

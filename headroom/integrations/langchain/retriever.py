@@ -30,35 +30,50 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-# LangChain imports - these are optional dependencies
-try:
+if TYPE_CHECKING:
     from langchain_core.callbacks import Callbacks
     from langchain_core.documents import Document
 
-    # BaseDocumentCompressor location varies by langchain version
-    try:
-        from langchain.retrievers.document_compressors import BaseDocumentCompressor
-    except ImportError:
-        try:
-            from langchain_core.documents.compressors import BaseDocumentCompressor
-        except ImportError:
-            # Fallback: create a minimal base class
-            class BaseDocumentCompressor:  # type: ignore[no-redef]
-                """Minimal base class for document compression."""
-
-                def compress_documents(
-                    self, documents: Sequence[Any], query: str, callbacks: Any = None
-                ) -> Sequence[Any]:
-                    raise NotImplementedError
-
     LANGCHAIN_AVAILABLE = True
-except ImportError:
-    LANGCHAIN_AVAILABLE = False
-    BaseDocumentCompressor = object  # type: ignore[misc,assignment]
-    Document = object  # type: ignore[misc,assignment]
-    Callbacks = None  # type: ignore[misc,assignment]
+
+    class BaseDocumentCompressor:
+        """Type-checking stub for LangChain's document compressor base."""
+
+        def compress_documents(
+            self, documents: Sequence[Any], query: str, callbacks: Any = None
+        ) -> Sequence[Any]:
+            raise NotImplementedError
+
+# LangChain imports - these are optional dependencies
+else:
+    try:
+        from langchain_core.callbacks import Callbacks
+        from langchain_core.documents import Document
+
+        # BaseDocumentCompressor location varies by langchain version
+        try:
+            from langchain.retrievers.document_compressors import BaseDocumentCompressor
+        except ImportError:
+            try:
+                from langchain_core.documents.compressors import BaseDocumentCompressor
+            except ImportError:
+                # Fallback: create a minimal base class
+                class BaseDocumentCompressor:
+                    """Minimal base class for document compression."""
+
+                    def compress_documents(
+                        self, documents: Sequence[Any], query: str, callbacks: Any = None
+                    ) -> Sequence[Any]:
+                        raise NotImplementedError
+
+        LANGCHAIN_AVAILABLE = True
+    except ImportError:
+        LANGCHAIN_AVAILABLE = False
+        BaseDocumentCompressor = object  # type: ignore[misc,assignment]
+        Document = object  # type: ignore[misc,assignment]
+        Callbacks = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 

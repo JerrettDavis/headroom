@@ -87,9 +87,21 @@ npm install headroom-ai
 curl -fsSL https://raw.githubusercontent.com/chopratejas/headroom/main/scripts/install.sh | bash
 ```
 
+macOS uses Bash 4.3+, so run the installer with a newer Bash such as Homebrew's `bash`.
+
 PowerShell:
 ```powershell
 irm https://raw.githubusercontent.com/chopratejas/headroom/main/scripts/install.ps1 | iex
+```
+
+**Persistent local runtime (Python-native service/task flow):**
+```bash
+headroom install apply --preset persistent-service --providers auto
+```
+
+**Persistent local runtime (Docker-native wrapper / compose flow):**
+```bash
+headroom install apply --preset persistent-docker
 ```
 
 ### Any agent — one function
@@ -137,14 +149,14 @@ Use `cache` mode for long-running chats where preserving prior-turn bytes improv
 
 Works with any language, any tool, any framework. **[Proxy docs](docs/proxy.md)**
 
-Prefer Docker as the runtime provider? See **[Docker-native install](docs/docker-install.md)**.
+Prefer Docker as the runtime provider? See **[Docker-native install](docs/docker-install.md)**. Want Headroom to stay up in the background? See **[Persistent installs](docs/persistent-installs.md)**.
 
 ### Coding agents — one command
 
 ```bash
 headroom wrap claude              # Starts proxy + launches Claude Code
 headroom wrap copilot -- --model claude-sonnet-4-20250514
-                                  # Starts proxy + launches GitHub Copilot CLI
+                                   # Starts proxy + launches GitHub Copilot CLI
 headroom wrap codex               # Starts proxy + launches OpenAI Codex CLI
 headroom wrap aider               # Starts proxy + launches Aider
 headroom wrap cursor              # Starts proxy + prints Cursor config
@@ -154,7 +166,7 @@ headroom wrap codex --memory      # Shares the same memory store
 headroom wrap claude --code-graph # With code graph intelligence (codebase-memory-mcp)
 ```
 
-Headroom starts a proxy, points your tool at it, and compresses everything automatically. Add `--memory` for persistent memory that's shared across agents. Add `--code-graph` for code intelligence via [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — indexes your codebase into a knowledge graph for call-chain traversal, impact analysis, and architectural queries.
+Headroom starts a proxy, points your tool at it, and compresses everything automatically. Add `--memory` for persistent memory that's shared across agents. Add `--code-graph` for code intelligence via [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — indexes your codebase into a knowledge graph for call-chain traversal, impact analysis, and architectural queries. `wrap copilot` is part of the Python-native CLI; the Docker-native wrapper currently supports `claude`, `codex`, `aider`, `cursor`, and `openclaw`.
 
 In Docker-native mode, Headroom still runs in Docker while wrapped tools run on the host. `wrap claude`, `wrap codex`, `wrap aider`, `wrap cursor`, and OpenClaw plugin setup (`wrap openclaw` / `unwrap openclaw`) are host-managed through the installed wrapper.
 
@@ -197,6 +209,7 @@ Gives your AI tool three MCP tools: `headroom_compress`, `headroom_retrieve`, `h
 | **Claude Code** | Wrap | `headroom wrap claude` |
 | **GitHub Copilot CLI** | Wrap | `headroom wrap copilot -- --model claude-sonnet-4-20250514` |
 | **Codex / Aider** | Wrap | `headroom wrap codex` or `headroom wrap aider` |
+| **Always-on local proxy** | Persistent install | `headroom install apply --preset persistent-service --providers auto` |
 
 **[Full Integration Guide](docs/integration-guide.md)** | **[TypeScript SDK](docs/typescript-sdk.md)**
 
@@ -513,6 +526,9 @@ Python 3.10+
 | [MCP](docs/mcp.md) | Context engineering toolkit (compress, retrieve, stats) |
 | [SharedContext](docs/shared-context.md) | Compressed inter-agent context sharing |
 | [Learn](docs/learn.md) | Plugin-based failure learning (Claude, Codex, Gemini, extensible) |
+| [CLI Reference](docs/cli.md) | Complete command surface, help output, and Docker parity matrix |
+| [Docker-Native Install](docs/docker-install.md) | Host wrapper install, compose support, and Docker runtime behavior |
+| [Persistent Installs](docs/persistent-installs.md) | Service/task/docker deployment models and provider scopes |
 | [Configuration](docs/configuration.md) | All options |
 
 ---
