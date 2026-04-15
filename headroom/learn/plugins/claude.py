@@ -106,16 +106,24 @@ class ClaudeCodePlugin(LearnPlugin, ConversationScanner):
 
         return projects
 
-    def scan_project(self, project: ProjectInfo) -> list[SessionData]:
+    def scan_project(self, project: ProjectInfo, max_workers: int = 1) -> list[SessionData]:
         """Scan all conversation JSONL files for a project."""
-        sessions = []
         jsonl_files = sorted(project.data_path.glob("*.jsonl"))
+        if not jsonl_files:
+            return []
 
-        for jsonl_path in jsonl_files:
-            session = self._scan_session(jsonl_path)
-            if session and session.tool_calls:
-                sessions.append(session)
+        if max_workers <= 1 or len(jsonl_files) <= 1:
+            return [s for f in jsonl_files if (s := self._scan_session(f)) and s.tool_calls]
 
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        sessions: list[SessionData] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._scan_session, f): f for f in jsonl_files}
+            for future in as_completed(futures):
+                session = future.result()
+                if session and session.tool_calls:
+                    sessions.append(session)
         return sessions
 
     def _scan_session(self, jsonl_path: Path) -> SessionData | None:

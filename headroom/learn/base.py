@@ -25,7 +25,7 @@ class ConversationScanner(ABC):
         ...
 
     @abstractmethod
-    def scan_project(self, project: ProjectInfo) -> list[SessionData]:
+    def scan_project(self, project: ProjectInfo, max_workers: int = 1) -> list[SessionData]:
         """Scan all sessions for a project, returning normalized tool calls."""
         ...
 
@@ -99,8 +99,14 @@ class LearnPlugin(ABC):
         ...
 
     @abstractmethod
-    def scan_project(self, project: ProjectInfo) -> list[SessionData]:
-        """Scan all sessions for a project, returning normalized data."""
+    def scan_project(self, project: ProjectInfo, max_workers: int = 1) -> list[SessionData]:
+        """Scan all sessions for a project, returning normalized data.
+
+        Args:
+            project: The project to scan.
+            max_workers: Number of threads for parallel file scanning.
+                         1 (default) = serial.  >1 = concurrent.
+        """
         ...
 
     # --- Writing ---

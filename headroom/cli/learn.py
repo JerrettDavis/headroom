@@ -90,12 +90,21 @@ Use 'auto' (default) to scan all detected agents."""
     help="LLM model for analysis (e.g., claude-sonnet-4-6, gpt-4o, gemini/gemini-2.0-flash). "
     "Auto-detected from API keys if not specified.",
 )
+@click.option(
+    "--workers",
+    "-j",
+    type=int,
+    default=None,
+    help="Parallel workers for session scanning. "
+    "Default: auto (min of CPU count, 8). Use 1 for serial.",
+)
 def learn(
     project: Path | None,
     analyze_all: bool,
     apply: bool,
     agent: str,
     model: str | None,
+    workers: int | None,
 ) -> None:
     """Learn from past tool call failures to prevent future ones.
 
@@ -115,8 +124,12 @@ def learn(
         headroom learn --all                  # Analyze all projects
         headroom learn --agent codex --all    # Analyze all Codex sessions
     """
+    import os
+
     from ..learn.analyzer import SessionAnalyzer, _detect_default_model
     from ..learn.registry import auto_detect_plugins, get_plugin
+
+    max_workers = workers if workers is not None else min(os.cpu_count() or 4, 8)
 
     # Resolve model early to fail fast with a clear message
     try:
@@ -185,7 +198,7 @@ def learn(
             click.echo(f"Path: {proj.project_path}")
             click.echo(f"{'=' * 60}")
 
-            sessions = plugin.scan_project(proj)
+            sessions = plugin.scan_project(proj, max_workers=max_workers)
             if not sessions:
                 click.echo("  No conversation data found.")
                 continue
