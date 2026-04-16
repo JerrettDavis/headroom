@@ -193,10 +193,22 @@ jobs:
           cat .changelog.md
 
       - name: Upload changelog artifact
+        run: |
+          if [ -f .changelog.md ]; then
+            echo "File exists, uploading..."
+            ls -la .changelog.md
+            cp .changelog.md /tmp/changelog-backup.md
+          else
+            echo "ERROR: .changelog.md does not exist!"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Upload changelog via action
         uses: actions/upload-artifact@v4
         with:
           name: changelog
-          path: .changelog.md
+          path: /tmp/changelog-backup.md
           if-no-files-found: error
 
       - name: Build Python package
@@ -309,10 +321,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: changelog
-          path: .
+          path: /tmp
 
       - name: Show changelog
-        run: cat .changelog.md
+        run: |
+          ls -la /tmp/changelog-backup.md
+          cp /tmp/changelog-backup.md .changelog.md
+          cat .changelog.md
 
       - name: Create GitHub Release
         env:
