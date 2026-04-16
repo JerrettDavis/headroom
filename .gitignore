@@ -4,6 +4,10 @@ scripts/
 scripts/*
 !scripts/install.sh
 !scripts/install.ps1
+!scripts/version-sync.py
+!scripts/changelog-gen.py
+!scripts/verify-versions.py
+!scripts/tests/
 
 # Swift SDK (separate repo)
 swift/
