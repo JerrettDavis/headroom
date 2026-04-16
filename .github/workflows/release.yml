@@ -209,7 +209,8 @@ jobs:
     if: github.event.inputs.dry_run != 'true' && vars.PYPI_SKIP != 'true'
     environment: pypi  # NOTE: environment name must be a literal; update here if the GitHub environment name changes
     runs-on: ubuntu-latest
-    permissions: id-token: write  # Required for OIDC trusted publishing
+    permissions:
+      id-token: write  # Required for OIDC trusted publishing
     steps:
       - name: Download dist artifact
         uses: actions/download-artifact@v4
