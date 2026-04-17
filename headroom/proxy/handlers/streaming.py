@@ -462,7 +462,7 @@ class StreamingMixin:
         3. Makes continuation requests until no memory tools remain
         4. Streams the final response to the client
         """
-        from fastapi.responses import StreamingResponse
+        from fastapi.responses import Response, StreamingResponse
 
         from headroom.proxy.cost import _summarize_transforms
         from headroom.proxy.helpers import MAX_SSE_BUFFER_SIZE
@@ -510,6 +510,19 @@ class StreamingMixin:
                 yield f"event: error\ndata: {json.dumps(error_event)}\n\n".encode()
 
             return StreamingResponse(_error_gen(), media_type="text/event-stream")
+
+        if upstream_response.status_code >= 400:
+            response_headers = dict(upstream_response.headers)
+            response_headers.pop("content-length", None)
+            response_headers.pop("transfer-encoding", None)
+            response_headers.pop("connection", None)
+            error_content = await upstream_response.aread()
+            await upstream_response.aclose()
+            return Response(
+                content=error_content,
+                status_code=upstream_response.status_code,
+                headers=response_headers,
+            )
 
         # Forward upstream ratelimit headers to the client
         forwarded_headers = {

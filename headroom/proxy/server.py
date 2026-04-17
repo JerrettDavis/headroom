@@ -2033,6 +2033,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         """OpenAI Responses API (new API introduced March 2025)."""
         return await proxy.handle_openai_responses(request)
 
+    @app.post("/v1/codex/responses")
+    async def openai_v1_codex_responses(request: Request):
+        """Pi/OpenAI Codex compatibility path for OpenAI-style /v1 base URLs."""
+        return await proxy.handle_openai_responses(request)
+
     @app.post("/backend-api/responses")
     async def openai_codex_responses(request: Request):
         """OpenAI Codex Responses API path preserved from ChatGPT backend."""
@@ -2048,6 +2053,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         """OpenAI Responses API via WebSocket (Codex gpt-5.4+)."""
         await proxy.handle_openai_responses_ws(websocket)
 
+    @app.websocket("/v1/codex/responses")
+    async def openai_v1_codex_responses_ws(websocket: WebSocket):
+        """Pi/OpenAI Codex compatibility WebSocket path for /v1 base URLs."""
+        await proxy.handle_openai_responses_ws(websocket)
+
     # OpenAI Responses API sub-endpoints (passthrough).
     # Codex sub-agents use /v1/responses/compact and other sub-paths
     # that we don't need to compress — just forward with correct auth routing.
@@ -2056,13 +2066,16 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         """Passthrough for /v1/responses/* sub-endpoints (compact, cancel, etc.)."""
         from fastapi.responses import Response
 
+        from headroom.proxy.handlers.openai import _resolve_codex_routing_headers
+
         headers = dict(request.headers.items())
         headers.pop("host", None)
+        headers, is_chatgpt_auth = _resolve_codex_routing_headers(headers)
 
         # Route to correct endpoint based on auth mode.
         # ChatGPT session auth (codex login) uses chatgpt.com with /responses/...
         # path (no /v1/ prefix). API key auth uses api.openai.com/v1/responses/...
-        if headers.get("chatgpt-account-id"):
+        if is_chatgpt_auth:
             url = f"https://chatgpt.com/backend-api/codex/responses/{sub_path}"
         else:
             url = f"{proxy.OPENAI_API_URL}/v1/responses/{sub_path}"
@@ -2088,6 +2101,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         except Exception as e:
             logger.error(f"Passthrough /v1/responses/{sub_path} failed: {e}")
             return Response(content=str(e), status_code=502)
+
+    @app.api_route("/v1/codex/responses/{sub_path:path}", methods=["GET", "POST", "DELETE"])
+    async def openai_v1_codex_responses_sub(request: Request, sub_path: str):
+        """Passthrough for Pi/OpenAI Codex /v1/codex/responses/* sub-endpoints."""
+        return await openai_responses_sub(request, sub_path)
 
     @app.websocket("/backend-api/responses")
     async def openai_codex_responses_ws(websocket: WebSocket):
@@ -2147,6 +2165,16 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     async def gemini_count_tokens(request: Request, model: str):
         """Gemini countTokens API with compression applied."""
         return await proxy.handle_gemini_count_tokens(request, model)
+
+    @app.post("/v1internal:streamGenerateContent")
+    async def google_cloudcode_stream_generate_content(request: Request):
+        """Google Cloud Code Assist / Antigravity compatibility streaming endpoint."""
+        return await proxy.handle_google_cloudcode_stream(request)
+
+    @app.post("/v1/v1internal:streamGenerateContent")
+    async def google_cloudcode_stream_generate_content_v1(request: Request):
+        """Compatibility endpoint for clients configured with a /v1 proxy base URL."""
+        return await proxy.handle_google_cloudcode_stream(request)
 
     # =========================================================================
     # Databricks Native Endpoints

@@ -68,6 +68,7 @@ class TestStreamingRatelimitHeaderForwarding:
         if extra_headers:
             headers.update(extra_headers)
         mock_response.headers = httpx.Headers(headers)
+        mock_response.status_code = 200
 
         # Simulate a simple SSE stream
         sse_data = (
@@ -197,6 +198,44 @@ class TestStreamingRatelimitHeaderForwarding:
         assert result.media_type == "text/event-stream"
         # No ratelimit headers to forward
         assert result.headers.get("anthropic-ratelimit-tokens-limit") is None
+
+    @pytest.mark.asyncio
+    async def test_upstream_http_error_preserves_status_and_body(self):
+        """Upstream non-200 streaming responses should preserve HTTP status/body."""
+        proxy = self._create_mock_proxy()
+        mock_response = self._create_mock_upstream_response()
+        mock_response.status_code = 503
+        mock_response.aread = AsyncMock(
+            return_value=b'{"error":{"message":"capacity exhausted"}}'
+        )
+        mock_response.aclose = AsyncMock()
+
+        mock_request = MagicMock()
+        proxy.http_client.build_request = MagicMock(return_value=mock_request)
+        proxy.http_client.send = AsyncMock(return_value=mock_response)
+
+        result = await proxy._stream_response(
+            url="https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": "sk-test"},
+            body={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 100,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            request_id="test-http-error",
+            original_tokens=10,
+            optimized_tokens=10,
+            tokens_saved=0,
+            transforms_applied=[],
+            tags={},
+            optimization_latency=0.0,
+        )
+
+        assert result.status_code == 503
+        assert result.body == b'{"error":{"message":"capacity exhausted"}}'
 
     @pytest.mark.asyncio
     async def test_connect_error_returns_sse_error(self):
