@@ -381,6 +381,11 @@ class AnthropicHandlerMixin:
         headers = dict(request.headers.items())
         headers.pop("host", None)
         headers.pop("content-length", None)
+        # Strip accept-encoding so httpx negotiates its own encoding.
+        # Edge proxies (Cloudflare Workers, etc.) may forward "br, zstd" which
+        # the upstream can honor; if httpx lacks brotli support the response
+        # body is undecipherable → 502.
+        headers.pop("accept-encoding", None)
         tags = self._extract_tags(headers)
 
         # Subscription tracker: notify on OAuth requests (not API-key requests)

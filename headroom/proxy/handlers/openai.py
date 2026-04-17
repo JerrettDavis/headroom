@@ -206,6 +206,10 @@ class OpenAIHandlerMixin:
         headers = dict(request.headers.items())
         headers.pop("host", None)
         headers.pop("content-length", None)
+        # Strip accept-encoding so httpx negotiates its own encoding.
+        # Cloudflare Workers forward "br, zstd" which OpenAI may honor;
+        # if httpx lacks brotli support the response body is undecipherable → 502.
+        headers.pop("accept-encoding", None)
         tags = self._extract_tags(headers)
 
         # Memory: Get user ID when memory is enabled
@@ -876,6 +880,10 @@ class OpenAIHandlerMixin:
         headers = dict(request.headers.items())
         headers.pop("host", None)
         headers.pop("content-length", None)
+        # Strip accept-encoding so httpx negotiates its own encoding.
+        # Cloudflare Workers forward "br, zstd" which OpenAI may honor;
+        # if httpx lacks brotli support the response body is undecipherable → 502.
+        headers.pop("accept-encoding", None)
         tags = self._extract_tags(headers)
 
         # Memory: Get user ID when memory is enabled
@@ -2037,6 +2045,7 @@ class OpenAIHandlerMixin:
 
         headers = dict(request.headers.items())
         headers.pop("host", None)
+        headers.pop("accept-encoding", None)
 
         body = await request.body()
 
