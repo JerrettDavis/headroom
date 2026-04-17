@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -137,12 +138,21 @@ def test_determine_bump_level_prefers_major_over_minor_and_patch() -> None:
     assert determine_bump_level(commits) == "major"
 
 
-def test_list_release_commits_returns_first_parent_range() -> None:
+def test_list_release_commits_parses_empty_body_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = Mock()
+    run.return_value = Mock(
+        stdout="feat: add capability\x1f\x1efix: patch bug\x1fbody text\x1e",
+    )
+    monkeypatch.setattr("headroom.release_version.subprocess.run", run)
+
     commits = list_release_commits(ROOT, "")
 
-    assert commits
-    assert isinstance(commits[0], CommitInfo)
-    assert commits[0].subject
+    assert commits == [
+        CommitInfo(subject="feat: add capability", body=""),
+        CommitInfo(subject="fix: patch bug", body="body text"),
+    ]
 
 
 def test_release_version_script_runs_directly_without_importing_headroom_package(

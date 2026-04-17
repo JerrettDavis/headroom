@@ -249,10 +249,9 @@ def list_release_commits(root: Path, previous_tag: str) -> list[CommitInfo]:
 
     commits: list[CommitInfo] = []
     for raw_entry in result.stdout.split(RECORD_SEP):
-        entry = raw_entry.strip()
-        if not entry or FIELD_SEP not in entry:
+        if not raw_entry or FIELD_SEP not in raw_entry:
             continue
-        subject, body = entry.split(FIELD_SEP, 1)
+        subject, body = raw_entry.split(FIELD_SEP, 1)
         commits.append(CommitInfo(subject=subject.strip(), body=body.strip()))
     return commits
 
