@@ -7,6 +7,8 @@ description: Automated release pipeline with semantic versioning, multi-package 
 
 Headroom uses a unified GitHub Actions workflow (`.github/workflows/release.yml`) that automatically publishes all three packages, generates changelogs from conventional commits, and creates GitHub Releases.
 
+Publishing a GitHub Release also triggers `.github/workflows/docker.yml`, which builds GHCR images tagged with the same semantic version and syncs the image contents to that exact release version before build.
+
 ## Packages & Registries
 
 | Package | Type | Registry | Environment Variable |
@@ -15,6 +17,7 @@ Headroom uses a unified GitHub Actions workflow (`.github/workflows/release.yml`
 | `headroom-ai` | TypeScript SDK | npmjs.org | `NPM_SDK_PACKAGE` |
 | `headroom-openclaw` | TypeScript plugin | npmjs.org | `NPM_OPENCLAW_PACKAGE` |
 | `headroom-openclaw` | TypeScript plugin | GitHub Package Registry | — |
+| `ghcr.io/chopratejas/headroom` | Docker image | GitHub Container Registry | — |
 
 ## Version Strategy
 
@@ -36,13 +39,13 @@ The workflow uses a **canonical + commit-height** algorithm that eliminates infi
 
 ## Conventional Commits & Semantic Bumping
 
-The workflow analyzes the **latest commit** to determine the bump level:
+The workflow analyzes the **unreleased commits since the previous release tag** and applies the highest required bump level:
 
 | Commit | Bump | Git Tag Example | npm Version |
 |--------|------|-----------------|-------------|
 | `fix:`, `ci:`, `chore:`, `perf:`, `refactor:` | patch | `v0.5.25.3` | `0.5.26` |
 | `feat:` | minor | `v0.6.0.0` | `0.6.0` |
-| `feat!:` or `feat:` + `BREAKING CHANGE` in body | major | `v1.0.0.0` | `1.0.0` |
+| Any conventional commit with `!` or any commit with `BREAKING CHANGE` in the body | major | `v1.0.0.0` | `1.0.0` |
 
 Commits are linted in CI via `commitlint` using `@commitlint/config-conventional`.
 
@@ -74,7 +77,7 @@ detect-version → build → publish-pypi
 **Note:** The workflow never commits back to the repo. `pyproject.toml` is updated manually before merging.
 
 ### detect-version
-Reads canonical version from `pyproject.toml`, counts commits since last `v{canonical}.*` tag, determines bump level from the latest commit message, and computes both the git tag version (`v{canonical}.{height}`) and npm version (3-part semver).
+Reads canonical version from `pyproject.toml`, counts commits since the previous release tag, chooses the highest bump level across that unreleased commit range, and computes both the git tag version (`v{canonical}.{height}`) and npm version (3-part semver).
 
 ### build
 1. Syncs version across TypeScript package files via `scripts/version-sync.py --version {npm_version}`
