@@ -243,10 +243,19 @@ jobs:
     needs: [detect-version, build]
     if: github.event.inputs.dry_run != 'true' && vars.GH_PACKAGES_SKIP != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Compute GitHub Packages scope
+        id: gh-scope
+        run: |
+          scope="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          printf 'scope=%s\n' "$scope" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js for GitHub Package Registry
         uses: actions/setup-node@v4
@@ -260,22 +269,79 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish ${{ env.NPM_OPENCLAW_PACKAGE }} to GitHub Package Registry
-        id: gpr-publish
+      - name: Publish ${{ env.NPM_SDK_PACKAGE }} to GitHub Package Registry
+        id: gpr-sdk-publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_SCOPE: ${{ steps.gh-scope.outputs.scope }}
         run: |
-          cd plugins/openclaw
+          workdir="$(mktemp -d)"
+          assets_dir="$workdir/release-assets"
+          mkdir -p "$assets_dir"
+
+          cp -R sdk/typescript "$workdir/sdk"
+          cd "$workdir/sdk"
           npm install
           npm run build
           npm version ${{ needs.detect-version.outputs.npm_version }} --no-git-tag-version --allow-same-version
+          node <<'EOF'
+          const fs = require("fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          pkg.name = `@${process.env.GITHUB_PACKAGES_SCOPE}/${pkg.name}`;
+          pkg.publishConfig = {
+            ...(pkg.publishConfig || {}),
+            registry: process.env.GITHUB_PACKAGES_REGISTRY_URL,
+          };
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          EOF
+          sdk_tarball="$(npm pack --pack-destination "$assets_dir" | tail -n 1)"
+          npm publish --access public --registry ${{ env.GITHUB_PACKAGES_REGISTRY_URL }}
+
+          printf 'sdk_tarball=%s\n' "$assets_dir/$sdk_tarball" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Publish ${{ env.NPM_OPENCLAW_PACKAGE }} to GitHub Package Registry
+        id: gpr-openclaw-publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_SCOPE: ${{ steps.gh-scope.outputs.scope }}
+          SDK_TARBALL: ${{ steps.gpr-sdk-publish.outputs.sdk_tarball }}
+        run: |
+          workdir="$(mktemp -d)"
+          cp -R plugins/openclaw "$workdir/openclaw"
+          cd "$workdir/openclaw"
+          node <<'EOF'
+          const fs = require("fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          pkg.dependencies = pkg.dependencies || {};
+          delete pkg.dependencies["headroom-ai"];
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          EOF
+          npm install
+          npm install --no-save "$SDK_TARBALL"
+          npm run build
+          npm version ${{ needs.detect-version.outputs.npm_version }} --no-git-tag-version --allow-same-version
+          node <<'EOF'
+          const fs = require("fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const scopedSdk = `@${process.env.GITHUB_PACKAGES_SCOPE}/headroom-ai`;
+          pkg.name = `@${process.env.GITHUB_PACKAGES_SCOPE}/${pkg.name}`;
+          pkg.dependencies = pkg.dependencies || {};
+          delete pkg.dependencies["headroom-ai"];
+          pkg.dependencies[scopedSdk] = `^${pkg.version}`;
+          pkg.publishConfig = {
+            ...(pkg.publishConfig || {}),
+            registry: process.env.GITHUB_PACKAGES_REGISTRY_URL,
+          };
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          EOF
           npm publish --access public --registry ${{ env.GITHUB_PACKAGES_REGISTRY_URL }}
         continue-on-error: true
 
       - name: GPR publish notice
-        if: steps.gpr-publish.outcome == 'failure'
+        if: steps.gpr-sdk-publish.outcome == 'failure' || steps.gpr-openclaw-publish.outcome == 'failure'
         run: |
-          echo "::notice::GitHub Package Registry publish failed. Check GITHUB_TOKEN permissions and registry configuration. Set GH_PACKAGES_SKIP=true to skip."
+          echo "::notice::One or more GitHub Package Registry publishes failed. Check GITHUB_TOKEN permissions and package scope/repository settings. Set GH_PACKAGES_SKIP=true to skip."
 
   publish-docker:
     needs: [detect-version]
@@ -290,8 +356,14 @@ jobs:
       enable_ref_tags: false
 
   create-release:
-    needs: [detect-version, build, publish-docker]
-    if: github.event.inputs.dry_run != 'true'
+    needs: [detect-version, build, publish-pypi, publish-npm, publish-github-packages, publish-docker]
+    if: >-
+      ${{
+        always() &&
+        github.event.inputs.dry_run != 'true' &&
+        needs.detect-version.result == 'success' &&
+        needs.build.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
