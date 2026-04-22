@@ -33,6 +33,22 @@ class MutatingExtension:
         return event
 
 
+class ReplacingExtension:
+    def on_pipeline_event(self, event):
+        return type(event)(
+            stage=event.stage,
+            operation=event.operation,
+            model=event.model,
+            messages=[{"role": "user", "content": "replaced"}],
+            metadata={"replaced": True},
+        )
+
+
+class RaisingExtension:
+    def on_pipeline_event(self, event):
+        raise RuntimeError("boom")
+
+
 class RecordingHooks(CompressionHooks):
     def __init__(self) -> None:
         self.stages: list[PipelineStage] = []
@@ -128,6 +144,77 @@ def test_pipeline_extension_manager_uses_canonical_stage_contract():
     ]
     assert recorder.stages == [PipelineStage.INPUT_RECEIVED]
     assert event.messages == [{"role": "user", "content": "mutated"}]
+
+
+def test_pipeline_extension_manager_replaces_events_and_ignores_failures(caplog):
+    recorder = RecordingExtension()
+    manager = PipelineExtensionManager(
+        extensions=[recorder, RaisingExtension(), ReplacingExtension(), object()],
+        discover=False,
+    )
+
+    with caplog.at_level("WARNING", logger="headroom.pipeline"):
+        event = manager.emit(
+            PipelineStage.PRE_SEND,
+            operation="test",
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+    assert manager.enabled is True
+    assert recorder.stages == [PipelineStage.PRE_SEND]
+    assert event.messages == [{"role": "user", "content": "replaced"}]
+    assert event.metadata == {"replaced": True}
+
+
+def test_discover_pipeline_extensions_handles_load_and_init_failures(monkeypatch):
+    pipeline_module = importlib.import_module("headroom.pipeline")
+
+    class Entry:
+        def __init__(self, name, loader):
+            self.name = name
+            self._loader = loader
+
+        def load(self):
+            return self._loader()
+
+    class ExtensionClass:
+        def on_pipeline_event(self, event):
+            return event
+
+    class FailingInit:
+        def __init__(self):
+            raise RuntimeError("init failed")
+
+    entries = [
+        Entry("instance", lambda: RecordingExtension()),
+        Entry("class", lambda: ExtensionClass),
+        Entry("load-fail", lambda: (_ for _ in ()).throw(RuntimeError("load failed"))),
+        Entry("init-fail", lambda: FailingInit),
+    ]
+
+    monkeypatch.setattr(
+        pipeline_module.importlib.metadata,
+        "entry_points",
+        lambda group: entries if group == pipeline_module.ENTRY_POINT_GROUP else [],
+    )
+
+    discovered = pipeline_module.discover_pipeline_extensions()
+
+    assert len(discovered) == 2
+    assert hasattr(discovered[0], "on_pipeline_event")
+    assert hasattr(discovered[1], "on_pipeline_event")
+
+
+def test_discover_pipeline_extensions_returns_empty_when_entrypoint_lookup_fails(monkeypatch):
+    pipeline_module = importlib.import_module("headroom.pipeline")
+    monkeypatch.setattr(
+        pipeline_module.importlib.metadata,
+        "entry_points",
+        lambda group: (_ for _ in ()).throw(RuntimeError("lookup failed")),
+    )
+
+    assert pipeline_module.discover_pipeline_extensions() == []
 
 
 def test_compress_emits_canonical_pipeline_events(monkeypatch):
