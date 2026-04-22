@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`headroom learn` no longer clobbers prior recommendations on re-run** —
+  the marker block in `CLAUDE.md` / `MEMORY.md` is now merged with the
+  prior block instead of wholesale-replaced. Sections re-surfaced by the
+  new run win; sections not re-surfaced are carried forward so learnings
+  accumulate across runs instead of disappearing. To fully rebuild the
+  block, delete it manually and re-run. (#231)
+
 ### Added
 - **Telemetry stack & install-mode identity fields** — anonymous beacon now
   reports `headroom_stack` (how Headroom is invoked: `proxy`, `wrap_claude`,

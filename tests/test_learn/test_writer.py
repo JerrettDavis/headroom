@@ -154,7 +154,9 @@ class TestClaudeCodeWriter:
         )
 
         writer = ClaudeCodeWriter()
-        recs = [_rec(RecommendationTarget.MEMORY_FILE, "Related Codebases", "- web app at ~/Code/web")]
+        recs = [
+            _rec(RecommendationTarget.MEMORY_FILE, "Related Codebases", "- web app at ~/Code/web")
+        ]
         writer.write(recs, proj, dry_run=False)
 
         content = memory_md.read_text()
