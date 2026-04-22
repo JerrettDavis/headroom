@@ -14,29 +14,45 @@ from click.testing import CliRunner
 
 from headroom.copilot_auth import DEFAULT_API_URL
 
-fake_main_module = types.ModuleType("headroom.cli.main")
-fake_main_module.main = click.Group()
-sys.modules["headroom.cli.main"] = fake_main_module
-sys.modules.pop("headroom.cli", None)
-sys.modules.pop("headroom.cli.wrap", None)
-
-wrap_cli = importlib.import_module("headroom.cli.wrap")
-main = fake_main_module.main
-
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
 
 
+def _load_wrap_cli(monkeypatch: pytest.MonkeyPatch) -> tuple[types.ModuleType, click.Group]:
+    fake_main_module = types.ModuleType("headroom.cli.main")
+    fake_main_module.main = click.Group()
+
+    monkeypatch.setitem(sys.modules, "headroom.cli.main", fake_main_module)
+    monkeypatch.delitem(sys.modules, "headroom.cli", raising=False)
+    monkeypatch.delitem(sys.modules, "headroom.cli.wrap", raising=False)
+    importlib.invalidate_caches()
+
+    wrap_cli = importlib.import_module("headroom.cli.wrap")
+    return wrap_cli, fake_main_module.main
+
+
+@pytest.fixture
+def copilot_cli(monkeypatch: pytest.MonkeyPatch) -> tuple[types.ModuleType, click.Group]:
+    return _load_wrap_cli(monkeypatch)
+
+
 @pytest.fixture(autouse=True)
-def no_running_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_running_proxy(
+    monkeypatch: pytest.MonkeyPatch, copilot_cli: tuple[types.ModuleType, click.Group]
+) -> None:
+    wrap_cli, _ = copilot_cli
     monkeypatch.setattr(wrap_cli, "_check_proxy", lambda _port: False)
 
 
 def test_wrap_copilot_auto_anthropic_injects_instructions(
-    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    copilot_cli: tuple[types.ModuleType, click.Group],
 ) -> None:
+    wrap_cli, main = copilot_cli
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
     captured: dict[str, object] = {}
@@ -70,8 +86,11 @@ def test_wrap_copilot_auto_anthropic_injects_instructions(
 
 
 def test_wrap_copilot_openai_backend_sets_completions_env(
-    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    copilot_cli: tuple[types.ModuleType, click.Group],
 ) -> None:
+    _, main = copilot_cli
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy")
     captured: dict[str, object] = {}
 
@@ -112,8 +131,11 @@ def test_wrap_copilot_openai_backend_sets_completions_env(
 
 
 def test_wrap_copilot_auto_detects_running_proxy_backend(
-    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    copilot_cli: tuple[types.ModuleType, click.Group],
 ) -> None:
+    _, main = copilot_cli
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy")
     captured: dict[str, object] = {}
 
@@ -138,8 +160,11 @@ def test_wrap_copilot_auto_detects_running_proxy_backend(
 
 
 def test_wrap_copilot_prefers_existing_oauth_session(
-    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    copilot_cli: tuple[types.ModuleType, click.Group],
 ) -> None:
+    _, main = copilot_cli
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
     captured: dict[str, object] = {}
 
@@ -168,7 +193,9 @@ def test_wrap_copilot_prefers_existing_oauth_session(
 
 def test_wrap_copilot_translated_backend_still_requires_byok(
     runner: CliRunner,
+    copilot_cli: tuple[types.ModuleType, click.Group],
 ) -> None:
+    _, main = copilot_cli
     with patch("headroom.cli.wrap.shutil.which", return_value="copilot"):
         with patch("headroom.cli.wrap.has_oauth_auth", return_value=True):
             result = runner.invoke(
@@ -188,7 +215,11 @@ def test_wrap_copilot_translated_backend_still_requires_byok(
     assert "Copilot BYOK mode requires a provider API key" in result.output
 
 
-def test_wrap_copilot_rejects_wire_api_for_anthropic_provider(runner: CliRunner) -> None:
+def test_wrap_copilot_rejects_wire_api_for_anthropic_provider(
+    runner: CliRunner,
+    copilot_cli: tuple[types.ModuleType, click.Group],
+) -> None:
+    _, main = copilot_cli
     with patch("headroom.cli.wrap.shutil.which", return_value="copilot"):
         result = runner.invoke(
             main,
@@ -207,7 +238,11 @@ def test_wrap_copilot_rejects_wire_api_for_anthropic_provider(runner: CliRunner)
     assert "--wire-api is only valid" in result.output
 
 
-def test_wrap_copilot_rejects_responses_for_translated_backends(runner: CliRunner) -> None:
+def test_wrap_copilot_rejects_responses_for_translated_backends(
+    runner: CliRunner,
+    copilot_cli: tuple[types.ModuleType, click.Group],
+) -> None:
+    _, main = copilot_cli
     with patch("headroom.cli.wrap.shutil.which", return_value="copilot"):
         result = runner.invoke(
             main,
@@ -229,8 +264,11 @@ def test_wrap_copilot_rejects_responses_for_translated_backends(runner: CliRunne
 
 
 def test_wrap_copilot_clears_stale_wire_api_in_anthropic_mode(
-    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    copilot_cli: tuple[types.ModuleType, click.Group],
 ) -> None:
+    _, main = copilot_cli
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-dummy")
     captured: dict[str, object] = {}
 
@@ -255,7 +293,11 @@ def test_wrap_copilot_clears_stale_wire_api_in_anthropic_mode(
     assert "COPILOT_PROVIDER_WIRE_API" not in env
 
 
-def test_wrap_copilot_fails_when_binary_missing(runner: CliRunner) -> None:
+def test_wrap_copilot_fails_when_binary_missing(
+    runner: CliRunner,
+    copilot_cli: tuple[types.ModuleType, click.Group],
+) -> None:
+    _, main = copilot_cli
     with patch("headroom.cli.wrap.shutil.which", return_value=None):
         result = runner.invoke(main, ["wrap", "copilot", "--", "--model", "gpt-4o"])
 
