@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hourly/daily/weekly/monthly rollups. Responses now include a
   `history_summary` block describing stored versus returned points.
 
+### Fixed
+- **Streaming Anthropic requests are now visible to `/stats.recent_requests`
+  and `/transformations/feed`** — `_finalize_stream_response` did not call
+  `self.logger.log(...)`, so the entire streaming Anthropic code path (the
+  one Claude Code uses) silently bypassed the request logger. Only the
+  non-streaming Anthropic path and the Bedrock streaming path were logged.
+  As a consequence, `--log-messages` had no observable effect on the live
+  transformations feed for typical traffic. The streaming finalizer now
+  emits the same `RequestLog` shape the other paths do, including
+  `request_messages` when `log_full_messages` is enabled.
+
 ## [0.5.22] - 2026-04-11
 
 ### Added
