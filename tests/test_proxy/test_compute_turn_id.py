@@ -154,3 +154,66 @@ def test_none_system_hashes_without_system_segment():
     assert a == b
     # Different-system values must still produce a different id than None.
     assert a != compute_turn_id(MODEL, "some system", messages)
+
+
+def test_stable_when_cache_control_moves_between_calls():
+    # Clients like Claude Code move the cache_control breakpoint to the
+    # newest message on each call: the user-text message carries it on
+    # call 1 and not on call 2 (where a later tool_result carries it).
+    # The turn_id must be stable across those calls — otherwise the
+    # prompt-level aggregator in the desktop app never gets more than one
+    # call per "turn" and the prompt record degenerates to the biggest
+    # single call.
+    call_1_messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "fix the bug",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    ]
+    call_2_messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "fix the bug"}],
+        },
+        _assistant_tool_use("t1", "read"),
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": "file contents",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+    ]
+
+    id1 = compute_turn_id(MODEL, SYSTEM, call_1_messages)
+    id2 = compute_turn_id(MODEL, SYSTEM, call_2_messages)
+
+    assert id1 is not None
+    assert id1 == id2
+
+
+def test_stable_when_cache_control_moves_on_system_prompt():
+    # Same cache-breakpoint mechanic but applied to a list-shaped system
+    # prompt: the annotation moves between system text blocks across
+    # calls. The turn_id must ignore it.
+    system_call_1 = [
+        {"type": "text", "text": "You are helpful.", "cache_control": {"type": "ephemeral"}}
+    ]
+    system_call_2 = [{"type": "text", "text": "You are helpful."}]
+    messages = [_user("hi")]
+
+    id1 = compute_turn_id(MODEL, system_call_1, messages)
+    id2 = compute_turn_id(MODEL, system_call_2, messages)
+
+    assert id1 is not None
+    assert id1 == id2

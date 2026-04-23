@@ -281,6 +281,28 @@ async def _read_request_json(request: Request) -> dict[str, Any]:
     return result
 
 
+def _strip_per_call_annotations(obj: Any) -> Any:
+    """Remove annotations that clients mutate between calls in one agent loop.
+
+    ``cache_control`` is the main offender: clients (notably Claude Code)
+    move the cache breakpoint to the newest message on each call, which
+    means the exact same user-text message carries ``cache_control`` on
+    call 1 and not on call 2. Hashing the raw message dicts therefore
+    produces a different turn_id for every iteration of a single agent
+    loop, collapsing ``turn_id`` to effectively ``request_id`` and
+    breaking prompt-level aggregation downstream.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: _strip_per_call_annotations(v)
+            for k, v in obj.items()
+            if k != "cache_control"
+        }
+    if isinstance(obj, list):
+        return [_strip_per_call_annotations(item) for item in obj]
+    return obj
+
+
 def compute_turn_id(
     model: str,
     system: Any,
@@ -324,7 +346,7 @@ def compute_turn_id(
     if last_text_user_idx is None:
         return None
 
-    prefix = messages[: last_text_user_idx + 1]
+    prefix = _strip_per_call_annotations(messages[: last_text_user_idx + 1])
     try:
         prefix_json = json.dumps(prefix, sort_keys=True, default=str)
     except (TypeError, ValueError):
@@ -337,7 +359,10 @@ def compute_turn_id(
         h.update(system.encode("utf-8", errors="replace"))
     elif system is not None:
         try:
-            h.update(json.dumps(system, sort_keys=True, default=str).encode("utf-8"))
+            normalized_system = _strip_per_call_annotations(system)
+            h.update(
+                json.dumps(normalized_system, sort_keys=True, default=str).encode("utf-8")
+            )
         except (TypeError, ValueError):
             pass
     h.update(b"\0")
