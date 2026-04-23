@@ -423,9 +423,11 @@ class TestLiteLLMProvider:
                 (),
                 {
                     "completion_cost": staticmethod(
-                        lambda **kwargs: 1.23
-                        if kwargs["model"] == "priced-model"
-                        else (_ for _ in ()).throw(RuntimeError("missing price"))
+                        lambda **kwargs: (
+                            1.23
+                            if kwargs["model"] == "priced-model"
+                            else (_ for _ in ()).throw(RuntimeError("missing price"))
+                        )
                     )
                 },
             )(),
