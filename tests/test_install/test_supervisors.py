@@ -129,7 +129,7 @@ def test_render_windows_runner_writes_ps1_and_cmd_wrappers(tmp_path: Path) -> No
 
 
 def test_render_runner_scripts_writes_unix_scripts(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "linux")
     monkeypatch.setattr(
         "headroom.install.supervisors.resolve_headroom_command", lambda: ["headroom"]
     )
@@ -145,7 +145,7 @@ def test_render_runner_scripts_writes_unix_scripts(monkeypatch, tmp_path: Path) 
 
 
 def test_render_runner_scripts_writes_windows_scripts(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "nt")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "win32")
     monkeypatch.setattr(
         "headroom.install.supervisors.resolve_headroom_command", lambda: ["headroom.exe"]
     )
@@ -177,7 +177,7 @@ def test_render_runner_scripts_writes_windows_scripts(monkeypatch, tmp_path: Pat
 
 
 def test_install_supervisor_none_returns_runner_records(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "linux")
     monkeypatch.setattr(
         "headroom.install.supervisors.resolve_headroom_command", lambda: ["headroom"]
     )
@@ -210,7 +210,7 @@ def test_start_and_stop_supervisor_use_linux_systemctl(monkeypatch) -> None:
 
 def test_install_supervisor_linux_service_and_tasks(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "linux")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "linux")
     run_script = tmp_path / "run-headroom.sh"
     ensure_script = tmp_path / "ensure-headroom.sh"
     monkeypatch.setattr(
@@ -286,7 +286,7 @@ def test_install_supervisor_darwin_windows_and_unsupported(monkeypatch, tmp_path
         lambda manifest, script, interval=None: (plist_path, f"plist-{interval}"),
     )
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "darwin")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "darwin")
     service_records = install_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     task_records = install_supervisor(_manifest(supervisor=SupervisorKind.TASK.value))
     assert plist_path.read_text(encoding="utf-8") == "plist-300"
@@ -295,7 +295,7 @@ def test_install_supervisor_darwin_windows_and_unsupported(monkeypatch, tmp_path
     assert ["launchctl", "bootstrap", "gui/123", str(plist_path)] in calls
 
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "win32")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "nt")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "win32")
     monkeypatch.setattr(
         "headroom.install.supervisors.windows_run_cmd_path",
         lambda profile: Path(f"C:\\tmp\\{profile}\\run-headroom.cmd"),
@@ -330,7 +330,7 @@ def test_install_supervisor_darwin_windows_and_unsupported(monkeypatch, tmp_path
     ] in calls
 
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "plan9")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "plan9")
     with pytest.raises(click.ClickException, match="not supported"):
         install_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
 
@@ -348,7 +348,7 @@ def test_start_and_stop_supervisor_darwin_windows_and_none(monkeypatch) -> None:
     assert calls == []
 
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "darwin")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "darwin")
     start_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     stop_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     assert calls == [
@@ -358,7 +358,7 @@ def test_start_and_stop_supervisor_darwin_windows_and_none(monkeypatch) -> None:
 
     calls.clear()
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "win32")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "nt")
+    monkeypatch.setattr("headroom.install.supervisors.sys.platform", "win32")
     start_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     stop_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     assert calls == [
@@ -455,14 +455,12 @@ def test_remove_supervisor_darwin_and_windows(monkeypatch, tmp_path: Path) -> No
         lambda manifest, script, interval=None: (plist_path, "plist"),
     )
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "darwin")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "posix")
     remove_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     assert not plist_path.exists()
     assert calls[0] == ["launchctl", "bootout", "gui/55/com.headroom.default"]
 
     calls.clear()
     monkeypatch.setattr("headroom.install.supervisors.sys.platform", "win32")
-    monkeypatch.setattr("headroom.install.supervisors.os.name", "nt")
     remove_supervisor(_manifest(supervisor=SupervisorKind.SERVICE.value))
     remove_supervisor(_manifest(supervisor=SupervisorKind.TASK.value))
     assert calls == [

@@ -131,9 +131,9 @@ def test_runtime_env_and_mount_source(monkeypatch) -> None:
     assert _runtime_env(manifest)["EXTRA"] == "1"
     assert _runtime_env(manifest)["HEADROOM_DEPLOYMENT_PROFILE"] == "default"
 
-    monkeypatch.setattr("headroom.install.runtime.os.name", "nt")
+    monkeypatch.setattr("headroom.install.runtime.sys.platform", "win32")
     assert _mount_source("C:\\Users\\me", ".headroom") == "C:\\Users\\me\\.headroom"
-    monkeypatch.setattr("headroom.install.runtime.os.name", "posix")
+    monkeypatch.setattr("headroom.install.runtime.sys.platform", "linux")
     assert _mount_source("/home/me", ".headroom") == "/home/me/.headroom"
 
 
@@ -164,7 +164,7 @@ def test_build_runtime_command_python_and_docker_user(monkeypatch, tmp_path: Pat
     ]
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr("headroom.install.runtime.os.name", "posix")
+    monkeypatch.setattr("headroom.install.runtime.sys.platform", "linux")
     monkeypatch.setattr("headroom.install.runtime.os.getuid", lambda: 1000, raising=False)
     monkeypatch.setattr("headroom.install.runtime.os.getgid", lambda: 1001, raising=False)
     docker_manifest = DeploymentManifest(
@@ -263,7 +263,7 @@ def test_run_foreground_and_detached_helpers(monkeypatch, tmp_path: Path) -> Non
     assert _read_pid("default") is None
 
     monkeypatch.setattr("headroom.install.runtime.resolve_headroom_command", lambda: ["headroom"])
-    monkeypatch.setattr("headroom.install.runtime.os.name", "nt")
+    monkeypatch.setattr("headroom.install.runtime.sys.platform", "win32")
     monkeypatch.setattr("headroom.install.runtime.subprocess.DETACHED_PROCESS", 1, raising=False)
     monkeypatch.setattr(
         "headroom.install.runtime.subprocess.CREATE_NEW_PROCESS_GROUP", 2, raising=False
@@ -274,7 +274,7 @@ def test_run_foreground_and_detached_helpers(monkeypatch, tmp_path: Path) -> Non
     )
     assert start_detached_agent("demo") is fake_proc_nt
 
-    monkeypatch.setattr("headroom.install.runtime.os.name", "posix")
+    monkeypatch.setattr("headroom.install.runtime.sys.platform", "linux")
     fake_proc_posix = FakeProc()
     monkeypatch.setattr(
         "headroom.install.runtime.subprocess.Popen", lambda command, **kwargs: fake_proc_posix
