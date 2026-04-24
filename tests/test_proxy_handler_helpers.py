@@ -284,13 +284,10 @@ def test_anthropic_cache_delta_helpers_cover_string_list_and_role_mismatch() -> 
         )
         is None
     )
-    assert (
-        AnthropicHandlerMixin._merge_appended_message_delta(
-            {"role": "user", "content": "A"},
-            None,
-        )
-        == {"role": "user", "content": "A"}
-    )
+    assert AnthropicHandlerMixin._merge_appended_message_delta(
+        {"role": "user", "content": "A"},
+        None,
+    ) == {"role": "user", "content": "A"}
 
 
 def test_anthropic_tool_sort_key_and_cache_suffix_helpers_cover_fallbacks() -> None:

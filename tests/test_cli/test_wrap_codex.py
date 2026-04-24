@@ -368,7 +368,7 @@ def test_inject_memory_mcp_config_creates_and_replaces_section(
     config_file = tmp_path / ".codex" / "config.toml"
     config_file.parent.mkdir(parents=True)
     config_file.write_text(
-        "[profiles.default]\nmodel = \"gpt-5.4\"\n"
+        '[profiles.default]\nmodel = "gpt-5.4"\n'
         f"\n{wrap_mod._MEMORY_MCP_MARKER}\n"
         "[mcp_servers.headroom_memory]\n"
         'command = "python"\n'
@@ -410,7 +410,7 @@ def test_memory_and_rtk_injection_append_existing_content_and_create_missing_con
 
     existing_config = tmp_path / ".codex" / "config.toml"
     existing_config.parent.mkdir(parents=True)
-    existing_config.write_text("[profiles.default]\nmodel = \"gpt-5.4\"\n")
+    existing_config.write_text('[profiles.default]\nmodel = "gpt-5.4"\n')
     wrap_mod._inject_memory_mcp_config(r"C:\db.sqlite", "user-1")
     appended = existing_config.read_text()
     assert "[profiles.default]" in appended
@@ -503,7 +503,9 @@ def test_wrap_codex_prepare_only_with_memory_imports_claude_memories(
     assert result.exit_code == 0, result.output
     inject_rtk.assert_any_call(tmp_path / "AGENTS.md", verbose=False)
     inject_rtk.assert_any_call(tmp_path / ".codex" / "AGENTS.md", verbose=False)
-    inject_memory_mcp.assert_called_once_with(str(tmp_path / ".headroom" / "memory.db"), "codex-user")
+    inject_memory_mcp.assert_called_once_with(
+        str(tmp_path / ".headroom" / "memory.db"), "codex-user"
+    )
     inject_memory_agents.assert_called_once_with(tmp_path / "AGENTS.md")
     inject_provider.assert_called_once_with(8787)
     assert ("backend", str(tmp_path / ".headroom" / "memory.db")) in events
@@ -587,7 +589,9 @@ def test_wrap_codex_launches_with_memory_reinjection(
         patch("headroom.cli.wrap._inject_memory_mcp_config") as inject_memory_mcp,
         patch("headroom.cli.wrap._launch_tool", side_effect=fake_launch_tool),
     ):
-        result = runner.invoke(main, ["wrap", "codex", "--memory", "--no-rtk", "--", "--model", "gpt-5.4"])
+        result = runner.invoke(
+            main, ["wrap", "codex", "--memory", "--no-rtk", "--", "--model", "gpt-5.4"]
+        )
 
     assert result.exit_code == 0, result.output
     inject_provider.assert_called_once_with(8787)

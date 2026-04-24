@@ -64,7 +64,9 @@ def test_litellm_helpers_and_kv_parsing(monkeypatch) -> None:
     }
 
 
-def test_parse_log_files_collects_perf_router_transform_and_toin_records(tmp_path, monkeypatch) -> None:
+def test_parse_log_files_collects_perf_router_transform_and_toin_records(
+    tmp_path, monkeypatch
+) -> None:
     log_one = tmp_path / "proxy.log"
     log_one.write_text(
         "\n".join(
@@ -117,7 +119,9 @@ def test_format_report_handles_empty_report() -> None:
 
 
 def test_format_report_and_recommendations_cover_major_sections(monkeypatch) -> None:
-    monkeypatch.setattr(analyzer, "_get_list_price", lambda model: 2.5 if model == "claude" else None)
+    monkeypatch.setattr(
+        analyzer, "_get_list_price", lambda model: 2.5 if model == "claude" else None
+    )
 
     perf_records = [
         PerfRecord(
@@ -138,14 +142,38 @@ def test_format_report_and_recommendations_cover_major_sections(monkeypatch) -> 
     report = PerfReport(
         perf_records=perf_records,
         router_records=[
-            RouterRecord(timestamp="2026-03-07 13:40:00,000", compressed=2, excluded=10, skipped=1, unchanged=1)
+            RouterRecord(
+                timestamp="2026-03-07 13:40:00,000",
+                compressed=2,
+                excluded=10,
+                skipped=1,
+                unchanged=1,
+            )
         ],
         transform_records=[
-            TransformRecord(timestamp="2026-03-07 13:40:00,000", name="content_router", tokens_before=1000, tokens_after=400, tokens_saved=600),
-            TransformRecord(timestamp="2026-03-07 13:41:00,000", name="cache_aligner", tokens_before=100, tokens_after=95, tokens_saved=5),
+            TransformRecord(
+                timestamp="2026-03-07 13:40:00,000",
+                name="content_router",
+                tokens_before=1000,
+                tokens_after=400,
+                tokens_saved=600,
+            ),
+            TransformRecord(
+                timestamp="2026-03-07 13:41:00,000",
+                name="cache_aligner",
+                tokens_before=100,
+                tokens_after=95,
+                tokens_saved=5,
+            ),
         ],
         toin_records=[
-            ToinRecord(timestamp="2026-03-07 13:42:00,000", patterns=120, compressions=500, retrievals=0, retrieval_rate=0.0)
+            ToinRecord(
+                timestamp="2026-03-07 13:42:00,000",
+                patterns=120,
+                compressions=500,
+                retrievals=0,
+                retrieval_rate=0.0,
+            )
         ],
         log_files_read=2,
         total_lines_parsed=100,

@@ -55,7 +55,9 @@ def test_html_eval_results_and_suite_summary() -> None:
 def test_html_extraction_evaluator_lazy_loading_and_provider_paths(monkeypatch) -> None:
     evaluator = html_eval.HTMLExtractionEvaluator(compare_baseline=True, provider="openai")
 
-    fake_extractor_cls = lambda: SimpleNamespace(extract=lambda html, url=None: None)
+    def fake_extractor_cls():
+        return SimpleNamespace(extract=lambda html, url=None: None)
+
     monkeypatch.setitem(
         sys.modules,
         "headroom.transforms.html_extractor",
@@ -63,7 +65,9 @@ def test_html_extraction_evaluator_lazy_loading_and_provider_paths(monkeypatch) 
     )
     assert evaluator.extractor.extract("x") is None
 
-    fake_kompress_cls = lambda: SimpleNamespace(compress=lambda html: None)
+    def fake_kompress_cls():
+        return SimpleNamespace(compress=lambda html: None)
+
     monkeypatch.setitem(
         sys.modules,
         "headroom.transforms.kompress_compressor",
@@ -82,7 +86,11 @@ def test_html_extraction_evaluator_lazy_loading_and_provider_paths(monkeypatch) 
                 chat=SimpleNamespace(
                     completions=SimpleNamespace(
                         create=lambda **kwargs: SimpleNamespace(
-                            choices=[SimpleNamespace(message=SimpleNamespace(content="Reasoning: ok\nScore: 4"))]
+                            choices=[
+                                SimpleNamespace(
+                                    message=SimpleNamespace(content="Reasoning: ok\nScore: 4")
+                                )
+                            ]
                         )
                     )
                 )
@@ -99,7 +107,9 @@ def test_html_extraction_evaluator_lazy_loading_and_provider_paths(monkeypatch) 
         types.SimpleNamespace(
             Anthropic=lambda: SimpleNamespace(
                 messages=SimpleNamespace(
-                    create=lambda **kwargs: SimpleNamespace(content=[SimpleNamespace(text="Reasoning: yes\nScore: 5")])
+                    create=lambda **kwargs: SimpleNamespace(
+                        content=[SimpleNamespace(text="Reasoning: yes\nScore: 5")]
+                    )
                 )
             )
         ),
@@ -112,7 +122,9 @@ def test_html_extraction_evaluator_lazy_loading_and_provider_paths(monkeypatch) 
         "litellm",
         types.SimpleNamespace(
             completion=lambda **kwargs: SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="Reasoning: maybe\nScore: 2"))]
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content="Reasoning: maybe\nScore: 2"))
+                ]
             )
         ),
     )
@@ -134,7 +146,9 @@ def test_html_extraction_evaluator_lazy_loading_and_provider_paths(monkeypatch) 
 def test_html_extraction_evaluator_case_and_suite_execution(monkeypatch) -> None:
     evaluator = html_eval.HTMLExtractionEvaluator(compare_baseline=True)
     evaluator._extractor = SimpleNamespace(
-        extract=lambda html, url=None: SimpleNamespace(extracted="extracted text", compression_ratio=0.3)
+        extract=lambda html, url=None: SimpleNamespace(
+            extracted="extracted text", compression_ratio=0.3
+        )
     )
     evaluator._kompress = SimpleNamespace(
         compress=lambda html: SimpleNamespace(compressed="baseline text")

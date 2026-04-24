@@ -6,6 +6,7 @@ import types
 from types import SimpleNamespace
 
 import httpx
+
 import headroom.proxy.server as server_module
 from headroom.proxy.server import HeadroomProxy, ProxyConfig, _get_code_aware_banner_status
 from headroom.transforms import ContentRouter
@@ -129,7 +130,11 @@ def test_code_aware_banner_status_and_summary_logging(monkeypatch) -> None:
         latency_sum_ms=40.0,
     )
     logged: list[str] = []
-    monkeypatch.setattr(server_module.logger, "info", lambda message, *args: logged.append(message % args if args else message))
+    monkeypatch.setattr(
+        server_module.logger,
+        "info",
+        lambda message, *args: logged.append(message % args if args else message),
+    )
     proxy._print_summary()
     assert any("HEADROOM PROXY SESSION SUMMARY" in line for line in logged)
     assert any("Total requests:" in line for line in logged)
@@ -256,7 +261,9 @@ def test_log_toin_stats_periodically_logs_stats_and_failures(monkeypatch) -> Non
     except asyncio.CancelledError:
         pass
 
-    assert info_logs == [("TOIN: %d patterns, %d compressions, %d retrievals, %.1f%% retrieval rate", 4, 3, 5, 50.0)]
+    assert info_logs == [
+        ("TOIN: %d patterns, %d compressions, %d retrievals, %.1f%% retrieval rate", 4, 3, 5, 50.0)
+    ]
 
     state["sleeps"] = 0
 
@@ -275,7 +282,9 @@ def test_log_toin_stats_periodically_logs_stats_and_failures(monkeypatch) -> Non
     assert str(debug_logs[0][1]) == "boom"
 
 
-def test_register_memory_components_is_idempotent_and_skips_batch_store_without_stats(monkeypatch) -> None:
+def test_register_memory_components_is_idempotent_and_skips_batch_store_without_stats(
+    monkeypatch,
+) -> None:
     proxy = _make_proxy()
     proxy.cache = SimpleNamespace(get_memory_stats=lambda: {"kind": "cache"})
     proxy.logger = SimpleNamespace(get_memory_stats=lambda: {"kind": "logger"})

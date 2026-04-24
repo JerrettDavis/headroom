@@ -160,7 +160,9 @@ async def test_memory_system_dispatch_and_handlers(monkeypatch) -> None:
     backend.search_results = [
         MemorySearchResult(memory=Memory(id="m3", content="python", user_id="u1"), score=0.9)
     ]
-    found = await system.handle_memory_search("python", entities=["Python"], include_related=True, top_k=99)
+    found = await system.handle_memory_search(
+        "python", entities=["Python"], include_related=True, top_k=99
+    )
     assert found["count"] == 1
     assert backend.search_kwargs["top_k"] == 50
 

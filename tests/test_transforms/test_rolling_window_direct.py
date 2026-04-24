@@ -157,7 +157,9 @@ def test_apply_respects_frozen_message_count() -> None:
     ]
     window = RollingWindow(RollingWindowConfig(enabled=True, keep_system=False, keep_last_turns=1))
 
-    result = window.apply(messages, _Tokenizer(), model_limit=10, output_buffer=0, frozen_message_count=3)
+    result = window.apply(
+        messages, _Tokenizer(), model_limit=10, output_buffer=0, frozen_message_count=3
+    )
 
     remaining_contents = {message.get("content") for message in result.messages}
     assert "Frozen question with extra words" in remaining_contents

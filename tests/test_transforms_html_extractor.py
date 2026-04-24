@@ -3,9 +3,8 @@ from __future__ import annotations
 import importlib
 import importlib.machinery
 import sys
-from types import SimpleNamespace
 import types
-
+from types import SimpleNamespace
 
 _trafilatura_module = types.ModuleType("trafilatura")
 _trafilatura_module.__spec__ = importlib.machinery.ModuleSpec("trafilatura", loader=None)
@@ -61,17 +60,19 @@ def test_html_extractor_extract_and_batch(monkeypatch) -> None:
     monkeypatch.setattr(
         html_extractor.trafilatura,
         "extract_metadata",
-        lambda html, default_url=None: SimpleNamespace(
-            title="Doc",
-            author="Ada",
-            date="2024-01-01",
-            sitename="Headroom",
-            description="desc",
-            categories=["docs"],
-            tags=["tag"],
-        )
-        if "good" in html
-        else None,
+        lambda html, default_url=None: (
+            SimpleNamespace(
+                title="Doc",
+                author="Ada",
+                date="2024-01-01",
+                sitename="Headroom",
+                description="desc",
+                categories=["docs"],
+                tags=["tag"],
+            )
+            if "good" in html
+            else None
+        ),
     )
 
     extractor = html_extractor.HTMLExtractor(

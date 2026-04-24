@@ -14,7 +14,9 @@ import headroom.evals.suite_runner as suite_runner
 def test_suite_runner_env_and_proxy_helpers(monkeypatch, tmp_path: Path) -> None:
     env_calls: list[str] = []
     monkeypatch.setitem(
-        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=lambda path: env_calls.append(path))
+        sys.modules,
+        "dotenv",
+        types.SimpleNamespace(load_dotenv=lambda path: env_calls.append(path)),
     )
     env_path = tmp_path / ".env"
     env_path.write_text("X=1")
@@ -83,13 +85,19 @@ def test_suite_runner_benchmark_helpers(monkeypatch) -> None:
     runner = suite_runner.SuiteRunner(model="gpt-4o-mini", tiers=[1], auto_start_proxy=False)
 
     comparisons = [
-        SimpleNamespace(baseline_score=0.9, headroom_score=0.89, delta=-0.01, accuracy_preserved=True)
+        SimpleNamespace(
+            baseline_score=0.9, headroom_score=0.89, delta=-0.01, accuracy_preserved=True
+        )
     ]
-    monkeypatch.setitem(sys.modules, "headroom.evals.comprehensive_benchmark", types.SimpleNamespace(
-        run_baseline_benchmark=lambda **kwargs: {"baseline": True},
-        run_headroom_benchmark=lambda **kwargs: {"headroom": True},
-        compare_results=lambda baseline, headroom: comparisons,
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "headroom.evals.comprehensive_benchmark",
+        types.SimpleNamespace(
+            run_baseline_benchmark=lambda **kwargs: {"baseline": True},
+            run_headroom_benchmark=lambda **kwargs: {"headroom": True},
+            compare_results=lambda baseline, headroom: comparisons,
+        ),
+    )
     lm_spec = suite_runner.BenchmarkSpec(
         name="Task",
         category="reasoning",
@@ -102,13 +110,21 @@ def test_suite_runner_benchmark_helpers(monkeypatch) -> None:
     assert lm_result["baseline_score"] == 0.9
     assert lm_result["passed"] is True
 
-    monkeypatch.setitem(sys.modules, "headroom.evals.core", types.SimpleNamespace(
-        EvalMode=SimpleNamespace(GROUND_TRUTH="GROUND_TRUTH", BEFORE_AFTER="BEFORE_AFTER")
-    ))
-    monkeypatch.setitem(sys.modules, "headroom.evals.datasets", types.SimpleNamespace(
-        load_dataset_by_name=lambda name, n: [f"{name}-{n}"],
-        load_tool_output_samples=lambda: ["tool"],
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "headroom.evals.core",
+        types.SimpleNamespace(
+            EvalMode=SimpleNamespace(GROUND_TRUTH="GROUND_TRUTH", BEFORE_AFTER="BEFORE_AFTER")
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "headroom.evals.datasets",
+        types.SimpleNamespace(
+            load_dataset_by_name=lambda name, n: [f"{name}-{n}"],
+            load_tool_output_samples=lambda: ["tool"],
+        ),
+    )
 
     class _BeforeAfterRunner:
         def __init__(self, llm_config, use_semantic_similarity):
@@ -128,10 +144,14 @@ def test_suite_runner_benchmark_helpers(monkeypatch) -> None:
                 duration_seconds=2.5,
             )
 
-    monkeypatch.setitem(sys.modules, "headroom.evals.runners.before_after", types.SimpleNamespace(
-        BeforeAfterRunner=_BeforeAfterRunner,
-        LLMConfig=lambda **kwargs: SimpleNamespace(**kwargs),
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "headroom.evals.runners.before_after",
+        types.SimpleNamespace(
+            BeforeAfterRunner=_BeforeAfterRunner,
+            LLMConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        ),
+    )
     monkeypatch.setattr(suite_runner, "_check_proxy", lambda port: True)
     before_after_spec = suite_runner.BenchmarkSpec(
         name="Tool Outputs",
@@ -174,9 +194,11 @@ def test_suite_runner_benchmark_helpers(monkeypatch) -> None:
                 duration_seconds=1.5,
             )
 
-    monkeypatch.setitem(sys.modules, "headroom.evals.runners.compression_only", types.SimpleNamespace(
-        CompressionOnlyRunner=_CompressionOnlyRunner
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "headroom.evals.runners.compression_only",
+        types.SimpleNamespace(CompressionOnlyRunner=_CompressionOnlyRunner),
+    )
     ccr_spec = suite_runner.BenchmarkSpec(
         name="CCR Round-trip",
         category="lossless",
@@ -264,7 +286,9 @@ def test_suite_runner_run_and_cleanup(monkeypatch, capsys) -> None:
     runner = suite_runner.SuiteRunner(model="gpt-4o-mini", tiers=[1], auto_start_proxy=False)
     cleaned = {"called": False}
     monkeypatch.setattr(runner, "_ensure_proxy", lambda: False)
-    monkeypatch.setattr(runner, "_run_lm_eval_benchmark", lambda spec, tracker: {"passed": True, "n_samples": 2})
+    monkeypatch.setattr(
+        runner, "_run_lm_eval_benchmark", lambda spec, tracker: {"passed": True, "n_samples": 2}
+    )
     monkeypatch.setattr(
         runner,
         "_run_before_after_benchmark",

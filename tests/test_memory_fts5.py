@@ -80,16 +80,21 @@ async def test_fts5_index_search_update_and_async_helpers(monkeypatch, tmp_path:
     assert all(result.score >= 0.0 for result in results)
     assert results[0].metadata["category"] == ""
 
-    filtered = index.search("Python", filter=TextFilter(query="Python", user_id="u1", session_id="s1"))
+    filtered = index.search(
+        "Python", filter=TextFilter(query="Python", user_id="u1", session_id="s1")
+    )
     assert [result.memory_id for result in filtered] == ["m1"]
 
     assert await index.index_batch_memories([]) == 0
-    assert await index.index_batch_memories(
-        [
-            Memory(id="m4", content="Dave uses Go", user_id="u1", session_id="s4"),
-            Memory(id="m5", content="Erin tests SQLite", user_id="u3"),
-        ]
-    ) == 2
+    assert (
+        await index.index_batch_memories(
+            [
+                Memory(id="m4", content="Dave uses Go", user_id="u1", session_id="s4"),
+                Memory(id="m5", content="Erin tests SQLite", user_id="u3"),
+            ]
+        )
+        == 2
+    )
     await index.index_memory(Memory(id="m6", content="Frank uses Python", user_id="u4"))
 
     search_results = await index.search_memories(TextFilter(query="Python", limit=3))

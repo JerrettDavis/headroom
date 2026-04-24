@@ -71,17 +71,27 @@ def test_get_headroom_provider_and_model_name(monkeypatch) -> None:
         )
         == "via-get-config"
     )
-    assert providers._extract_model_id(
-        type("M", (), {"get_config": lambda self: (_ for _ in ()).throw(RuntimeError("boom"))})()
-    ) == ""
+    assert (
+        providers._extract_model_id(
+            type(
+                "M", (), {"get_config": lambda self: (_ for _ in ()).throw(RuntimeError("boom"))}
+            )()
+        )
+        == ""
+    )
 
-    assert providers.get_model_name_from_strands(type("M", (), {"model_id": "named-model"})()) == "named-model"
+    assert (
+        providers.get_model_name_from_strands(type("M", (), {"model_id": "named-model"})())
+        == "named-model"
+    )
     assert providers.get_model_name_from_strands(type("M", (), {})()) == "gpt-4o"
 
 
 def test_strands_package_lazy_exports(monkeypatch) -> None:
     module = importlib.import_module("headroom.integrations.strands")
-    monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: object() if name == "strands" else None)
+    monkeypatch.setattr(
+        module.importlib.util, "find_spec", lambda name: object() if name == "strands" else None
+    )
     assert module.strands_available() is True
     monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: None)
     assert module.strands_available() is False

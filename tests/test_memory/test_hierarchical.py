@@ -359,9 +359,13 @@ class TestSQLiteMemoryStore:
             "Turn memory"
         ]
 
-        agent_scope = await store.query(MemoryFilter(user_id="alice", scope_levels=[ScopeLevel.AGENT]))
+        agent_scope = await store.query(
+            MemoryFilter(user_id="alice", scope_levels=[ScopeLevel.AGENT])
+        )
         assert [m.content for m in agent_scope] == ["Agent memory"]
-        turn_scope = await store.query(MemoryFilter(user_id="alice", scope_levels=[ScopeLevel.TURN]))
+        turn_scope = await store.query(
+            MemoryFilter(user_id="alice", scope_levels=[ScopeLevel.TURN])
+        )
         assert [m.content for m in turn_scope] == ["Turn memory"]
 
         created_window = await store.query(
@@ -379,7 +383,9 @@ class TestSQLiteMemoryStore:
         )
         assert [m.content for m in medium_importance] == ["Agent memory", "Session memory"]
 
-        entity_filtered = await store.query(MemoryFilter(user_id="alice", entity_refs=["session-only"]))
+        entity_filtered = await store.query(
+            MemoryFilter(user_id="alice", entity_refs=["session-only"])
+        )
         assert [m.content for m in entity_filtered] == ["Session memory"]
 
         metadata_filtered = await store.query(
@@ -494,11 +500,13 @@ class TestSQLiteMemoryStore:
         await store.save(orphan_back)
         assert [m.content for m in await store.get_history(orphan_back.id)] == ["Orphan back"]
 
-        orphan_forward = Memory(content="Orphan forward", user_id="alice", superseded_by="missing-next")
+        orphan_forward = Memory(
+            content="Orphan forward", user_id="alice", superseded_by="missing-next"
+        )
         await store.save(orphan_forward)
-        assert [m.content for m in await store.get_history(orphan_forward.id, include_future=True)] == [
-            "Orphan forward"
-        ]
+        assert [
+            m.content for m in await store.get_history(orphan_forward.id, include_future=True)
+        ] == ["Orphan forward"]
 
     @pytest.mark.asyncio
     async def test_clear_scope(self, store):

@@ -167,7 +167,9 @@ async def test_start_stop_and_license_state_properties(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_report_usage_and_snapshot_paths(tmp_path: Path) -> None:
-    reporter = UsageReporter("hlk_test", cloud_url="https://cloud.test", cache_path=tmp_path / "license.json")
+    reporter = UsageReporter(
+        "hlk_test", cloud_url="https://cloud.test", cache_path=tmp_path / "license.json"
+    )
     reporter._license_info = LicenseInfo(status="active")
     reporter._proxy = type(
         "Proxy",

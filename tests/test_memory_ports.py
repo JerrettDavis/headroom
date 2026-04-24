@@ -122,78 +122,148 @@ async def test_runtime_checkable_memory_protocols(monkeypatch) -> None:
     class FakeMemoryStore:
         async def save(self, memory): ...
         async def save_batch(self, memories): ...
-        async def get(self, memory_id): return memory
-        async def get_batch(self, memory_ids): return [memory]
-        async def delete(self, memory_id): return True
-        async def delete_batch(self, memory_ids): return len(memory_ids)
-        async def query(self, filter): return [memory]
-        async def count(self, filter): return 1
-        async def supersede(self, old_memory_id, new_memory, supersede_time=None): return new_memory
-        async def get_history(self, memory_id, include_future=False): return [memory]
-        async def clear_scope(self, user_id, session_id=None, agent_id=None, turn_id=None): return 0
+        async def get(self, memory_id):
+            return memory
+
+        async def get_batch(self, memory_ids):
+            return [memory]
+
+        async def delete(self, memory_id):
+            return True
+
+        async def delete_batch(self, memory_ids):
+            return len(memory_ids)
+
+        async def query(self, filter):
+            return [memory]
+
+        async def count(self, filter):
+            return 1
+
+        async def supersede(self, old_memory_id, new_memory, supersede_time=None):
+            return new_memory
+
+        async def get_history(self, memory_id, include_future=False):
+            return [memory]
+
+        async def clear_scope(self, user_id, session_id=None, agent_id=None, turn_id=None):
+            return 0
 
     class FakeVectorIndex:
         async def index(self, memory): ...
-        async def index_batch(self, memories): return len(memories)
-        async def remove(self, memory_id): return True
-        async def remove_batch(self, memory_ids): return len(memory_ids)
-        async def search(self, filter): return []
-        async def update_embedding(self, memory_id, embedding): return True
+        async def index_batch(self, memories):
+            return len(memories)
+
+        async def remove(self, memory_id):
+            return True
+
+        async def remove_batch(self, memory_ids):
+            return len(memory_ids)
+
+        async def search(self, filter):
+            return []
+
+        async def update_embedding(self, memory_id, embedding):
+            return True
 
         @property
-        def dimension(self): return 3
+        def dimension(self):
+            return 3
 
         @property
-        def size(self): return 1
+        def size(self):
+            return 1
 
     class FakeTextIndex:
         async def index(self, memory): ...
-        async def index_batch(self, memories): return len(memories)
-        async def remove(self, memory_id): return True
-        async def remove_batch(self, memory_ids): return len(memory_ids)
-        async def search(self, filter): return []
-        async def update_content(self, memory_id, content): return True
+        async def index_batch(self, memories):
+            return len(memories)
+
+        async def remove(self, memory_id):
+            return True
+
+        async def remove_batch(self, memory_ids):
+            return len(memory_ids)
+
+        async def search(self, filter):
+            return []
+
+        async def update_content(self, memory_id, content):
+            return True
 
     class FakeEmbedder:
-        async def embed(self, text): return [1.0, 2.0]
-        async def embed_batch(self, texts): return [[1.0, 2.0] for _ in texts]
+        async def embed(self, text):
+            return [1.0, 2.0]
+
+        async def embed_batch(self, texts):
+            return [[1.0, 2.0] for _ in texts]
 
         @property
-        def dimension(self): return 2
+        def dimension(self):
+            return 2
 
         @property
-        def model_name(self): return "fake"
+        def model_name(self):
+            return "fake"
 
         @property
-        def max_tokens(self): return 1000
+        def max_tokens(self):
+            return 1000
 
     class FakeMemoryCache:
-        async def get(self, memory_id): return memory
-        async def get_batch(self, memory_ids): return {memory.id: memory}
+        async def get(self, memory_id):
+            return memory
+
+        async def get_batch(self, memory_ids):
+            return {memory.id: memory}
+
         async def put(self, memory, ttl_seconds=None): ...
         async def put_batch(self, memories, ttl_seconds=None): ...
-        async def invalidate(self, memory_id): return True
-        async def invalidate_batch(self, memory_ids): return len(memory_ids)
-        async def invalidate_scope(self, user_id, session_id=None, agent_id=None): return 0
+        async def invalidate(self, memory_id):
+            return True
+
+        async def invalidate_batch(self, memory_ids):
+            return len(memory_ids)
+
+        async def invalidate_scope(self, user_id, session_id=None, agent_id=None):
+            return 0
+
         async def clear(self): ...
 
         @property
-        def size(self): return 1
+        def size(self):
+            return 1
 
         @property
-        def max_size(self): return 10
+        def max_size(self):
+            return 10
 
     class FakeGraphStore:
         async def add_entity(self, entity): ...
         async def add_relationship(self, relationship): ...
-        async def get_entity(self, entity_id): return None
-        async def get_entity_by_name(self, name, user_id, entity_type=None): return None
-        async def get_relationships(self, entity_id, relation_types=None, direction="both"): return []
-        async def query_subgraph(self, entity_ids, hops=1, relation_types=None): return ports.Subgraph()
-        async def find_path(self, source_entity_id, target_entity_id, max_hops=3): return None
-        async def delete_entity(self, entity_id): return True
-        async def delete_relationship(self, relationship_id): return True
-        async def clear_user(self, user_id): return 0
+        async def get_entity(self, entity_id):
+            return None
+
+        async def get_entity_by_name(self, name, user_id, entity_type=None):
+            return None
+
+        async def get_relationships(self, entity_id, relation_types=None, direction="both"):
+            return []
+
+        async def query_subgraph(self, entity_ids, hops=1, relation_types=None):
+            return ports.Subgraph()
+
+        async def find_path(self, source_entity_id, target_entity_id, max_hops=3):
+            return None
+
+        async def delete_entity(self, entity_id):
+            return True
+
+        async def delete_relationship(self, relationship_id):
+            return True
+
+        async def clear_user(self, user_id):
+            return 0
 
     assert isinstance(FakeMemoryStore(), ports.MemoryStore)
     assert isinstance(FakeVectorIndex(), ports.VectorIndex)

@@ -63,20 +63,22 @@ def test_inline_memory_wrapper_chat_and_chat_with_response() -> None:
     client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
     wrapper = inline.InlineMemoryWrapper(client)
 
-    content, memories = wrapper.chat([{"role": "user", "content": "I prefer Python"}], temperature=0)
+    content, memories = wrapper.chat(
+        [{"role": "user", "content": "I prefer Python"}], temperature=0
+    )
     assert content == "Sure!"
     assert memories == [{"content": "Prefers Python"}]
 
     response2 = SimpleNamespace(
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(
-                    content='Answer<memory>{"memories":[]}</memory>'
-                )
+                message=SimpleNamespace(content='Answer<memory>{"memories":[]}</memory>')
             )
         ]
     )
-    client2 = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response2)))
+    client2 = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response2))
+    )
     wrapper2 = inline.InlineMemoryWrapper(client2)
     full_response, clean_content, clean_memories = wrapper2.chat_with_response(
         [{"role": "user", "content": "Hello"}],

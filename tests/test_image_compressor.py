@@ -44,7 +44,13 @@ def test_image_detection_query_extraction_and_singleton_helpers(monkeypatch) -> 
     assert compressor._extract_image_data(messages) == b"img"
     assert (
         compressor._extract_image_data(
-            [{"content": [{"type": "image", "source": {"type": "base64", "data": _b64(b"anthropic")}}]}]
+            [
+                {
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "data": _b64(b"anthropic")}}
+                    ]
+                }
+            ]
         )
         == b"anthropic"
     )
@@ -74,7 +80,11 @@ def test_image_detection_query_extraction_and_singleton_helpers(monkeypatch) -> 
     monkeypatch.setattr(image_compressor, "_default_compressor", None)
     singleton = get_compressor()
     assert singleton is get_compressor()
-    monkeypatch.setattr(image_compressor, "_default_compressor", types.SimpleNamespace(compress=lambda messages, provider: [provider]))
+    monkeypatch.setattr(
+        image_compressor,
+        "_default_compressor",
+        types.SimpleNamespace(compress=lambda messages, provider: [provider]),
+    )
     assert compress_images(messages, "google") == ["google"]
 
 
@@ -103,7 +113,10 @@ def test_count_result_tokens_covers_ocr_and_provider_specific_paths(monkeypatch)
     total = compressor._count_result_tokens(messages, b"original", "openai")
     assert total == max(1, len("[OCR from image]\nhello world") // 4) + 12 + 85 + 15 + 18
 
-    assert compressor._count_result_tokens([{"content": ["no dict blocks"]}], b"original", "openai") == 21
+    assert (
+        compressor._count_result_tokens([{"content": ["no dict blocks"]}], b"original", "openai")
+        == 21
+    )
 
 
 def test_apply_compression_handles_preserve_transcode_and_resize_paths(monkeypatch) -> None:
@@ -119,19 +132,29 @@ def test_apply_compression_handles_preserve_transcode_and_resize_paths(monkeypat
     assert compressor._apply_compression(messages, Technique.PRESERVE, "openai") == messages
 
     monkeypatch.setattr(compressor, "_ocr_extract", lambda image_data: "decoded text")
-    transcoded = compressor._apply_compression([{"content": [openai_item]}], Technique.TRANSCODE, "openai")
+    transcoded = compressor._apply_compression(
+        [{"content": [openai_item]}], Technique.TRANSCODE, "openai"
+    )
     assert transcoded[0]["content"] == [{"type": "text", "text": "[OCR from image]\ndecoded text"}]
 
     monkeypatch.setattr(compressor, "_ocr_extract", lambda image_data: None)
-    openai_low = compressor._apply_compression([{"content": [openai_item]}], Technique.TRANSCODE, "openai")
+    openai_low = compressor._apply_compression(
+        [{"content": [openai_item]}], Technique.TRANSCODE, "openai"
+    )
     assert openai_low[0]["content"][0]["image_url"]["detail"] == "low"
 
-    monkeypatch.setattr(compressor, "_resize_image", lambda image_data, max_dimension=512: (b"small", "image/jpeg"))
-    anthropic_low = compressor._apply_compression([{"content": [anthropic_item]}], Technique.FULL_LOW, "anthropic")
+    monkeypatch.setattr(
+        compressor, "_resize_image", lambda image_data, max_dimension=512: (b"small", "image/jpeg")
+    )
+    anthropic_low = compressor._apply_compression(
+        [{"content": [anthropic_item]}], Technique.FULL_LOW, "anthropic"
+    )
     assert anthropic_low[0]["content"][0]["source"]["media_type"] == "image/jpeg"
     assert base64.b64decode(anthropic_low[0]["content"][0]["source"]["data"]) == b"small"
 
-    google_low = compressor._apply_compression([{"content": [google_item]}], Technique.CROP, "google")
+    google_low = compressor._apply_compression(
+        [{"content": [google_item]}], Technique.CROP, "google"
+    )
     assert google_low[0]["content"][0]["inlineData"]["mimeType"] == "image/jpeg"
     assert base64.b64decode(google_low[0]["content"][0]["inlineData"]["data"]) == b"small"
 
@@ -192,9 +215,16 @@ def test_ocr_extract_handles_success_low_confidence_and_errors(monkeypatch) -> N
 
 def test_compress_orchestrates_tile_savings_router_paths_and_fallbacks(monkeypatch) -> None:
     compressor = ImageCompressor()
-    image_messages = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _data_url(b"img")}}]}]
+    image_messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image_url", "image_url": {"url": _data_url(b"img")}}],
+        }
+    ]
 
-    assert compressor.compress([{"role": "user", "content": "plain"}], "openai") == [{"role": "user", "content": "plain"}]
+    assert compressor.compress([{"role": "user", "content": "plain"}], "openai") == [
+        {"role": "user", "content": "plain"}
+    ]
 
     monkeypatch.setitem(
         sys.modules,
@@ -227,8 +257,14 @@ def test_compress_orchestrates_tile_savings_router_paths_and_fallbacks(monkeypat
     monkeypatch.setattr(compressor, "_extract_query", lambda messages: "what is shown?")
     monkeypatch.setattr(compressor, "_extract_image_data", lambda messages: b"img")
     monkeypatch.setattr(compressor, "_estimate_tokens", lambda image_data, detail="high": 200)
-    monkeypatch.setattr(compressor, "_apply_compression", lambda messages, technique, provider: [{"role": "assistant", "content": technique.value}])
-    monkeypatch.setattr(compressor, "_count_result_tokens", lambda messages, original_image_data, provider: 50)
+    monkeypatch.setattr(
+        compressor,
+        "_apply_compression",
+        lambda messages, technique, provider: [{"role": "assistant", "content": technique.value}],
+    )
+    monkeypatch.setattr(
+        compressor, "_count_result_tokens", lambda messages, original_image_data, provider: 50
+    )
 
     class _OnnxRouter:
         def __init__(self, use_siglip: bool = True) -> None:
@@ -253,7 +289,9 @@ def test_compress_orchestrates_tile_savings_router_paths_and_fallbacks(monkeypat
     monkeypatch.setitem(
         sys.modules,
         "headroom.image.tile_optimizer",
-        types.SimpleNamespace(optimize_images_in_messages=lambda messages, provider: (messages, [])),
+        types.SimpleNamespace(
+            optimize_images_in_messages=lambda messages, provider: (messages, [])
+        ),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -264,16 +302,22 @@ def test_compress_orchestrates_tile_savings_router_paths_and_fallbacks(monkeypat
                 (),
                 {
                     "__init__": lambda self, use_siglip=True: None,
-                    "classify": lambda self, image_data, query: (_ for _ in ()).throw(RuntimeError("onnx fail")),
+                    "classify": lambda self, image_data, query: (_ for _ in ()).throw(
+                        RuntimeError("onnx fail")
+                    ),
                 },
             )
         ),
     )
     monkeypatch.setattr(compressor, "_extract_query", lambda messages: "fallback")
     monkeypatch.setattr(compressor, "_extract_image_data", lambda messages: b"img")
-    monkeypatch.setattr(compressor, "_get_router", lambda: (_ for _ in ()).throw(RuntimeError("pt fail")))
+    monkeypatch.setattr(
+        compressor, "_get_router", lambda: (_ for _ in ()).throw(RuntimeError("pt fail"))
+    )
     monkeypatch.setattr(compressor, "_estimate_tokens", lambda image_data, detail="high": 30)
-    monkeypatch.setattr(compressor, "_count_result_tokens", lambda messages, original_image_data, provider: 30)
+    monkeypatch.setattr(
+        compressor, "_count_result_tokens", lambda messages, original_image_data, provider: 30
+    )
 
     preserved = compressor.compress(image_messages, "openai")
     assert preserved == image_messages
@@ -305,10 +349,10 @@ def test_router_resize_and_token_estimation_paths(monkeypatch) -> None:
             self.mode = mode
             self.saved = False
 
-        def resize(self, size: tuple[int, int], resample) -> "_FakeImage":
+        def resize(self, size: tuple[int, int], resample) -> _FakeImage:
             return _FakeImage(size, fmt=self.format, mode=self.mode)
 
-        def convert(self, mode: str) -> "_FakeImage":
+        def convert(self, mode: str) -> _FakeImage:
             return _FakeImage(self.size, fmt=self.format, mode=mode)
 
         def save(self, buf, format: str, quality: int, optimize: bool) -> None:
@@ -352,7 +396,15 @@ def test_apply_compression_and_compress_cover_remaining_fallback_paths(monkeypat
     result = compressor._apply_compression(
         [
             {"content": "plain"},
-            {"content": ["keep", {"type": "text", "text": "no image"}, openai_remote, anthropic_bad, google_item]},
+            {
+                "content": [
+                    "keep",
+                    {"type": "text", "text": "no image"},
+                    openai_remote,
+                    anthropic_bad,
+                    google_item,
+                ]
+            },
         ],
         weird_technique,
         "openai",
@@ -364,20 +416,43 @@ def test_apply_compression_and_compress_cover_remaining_fallback_paths(monkeypat
     assert result[1]["content"][3] == anthropic_bad
     assert result[1]["content"][4] == google_item
 
-    monkeypatch.setattr(compressor, "_resize_image", lambda image_data, max_dimension=512: (_ for _ in ()).throw(RuntimeError("resize failed")))
-    failed_google = compressor._apply_compression([{"content": [google_item]}], Technique.CROP, "google")
+    monkeypatch.setattr(
+        compressor,
+        "_resize_image",
+        lambda image_data, max_dimension=512: (_ for _ in ()).throw(RuntimeError("resize failed")),
+    )
+    failed_google = compressor._apply_compression(
+        [{"content": [google_item]}], Technique.CROP, "google"
+    )
     assert failed_google[0]["content"][0] == google_item
 
-    failed_anthropic = compressor._apply_compression([{"content": [{"type": "image", "source": {"type": "base64", "data": _b64(b"anthropic")}}]}], Technique.FULL_LOW, "anthropic")
+    failed_anthropic = compressor._apply_compression(
+        [
+            {
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "data": _b64(b"anthropic")}}
+                ]
+            }
+        ],
+        Technique.FULL_LOW,
+        "anthropic",
+    )
     assert failed_anthropic[0]["content"][0]["type"] == "image"
 
     compressor = ImageCompressor()
-    image_messages = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": _data_url(b"img")}}]}]
+    image_messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image_url", "image_url": {"url": _data_url(b"img")}}],
+        }
+    ]
     monkeypatch.setitem(
         sys.modules,
         "headroom.image.tile_optimizer",
         types.SimpleNamespace(
-            optimize_images_in_messages=lambda messages, provider: (_ for _ in ()).throw(RuntimeError("tile fail"))
+            optimize_images_in_messages=lambda messages, provider: (_ for _ in ()).throw(
+                RuntimeError("tile fail")
+            )
         ),
     )
     monkeypatch.setitem(
@@ -389,7 +464,9 @@ def test_apply_compression_and_compress_cover_remaining_fallback_paths(monkeypat
                 (),
                 {
                     "__init__": lambda self, use_siglip=True: None,
-                    "classify": lambda self, image_data, query: (_ for _ in ()).throw(RuntimeError("onnx fail")),
+                    "classify": lambda self, image_data, query: (_ for _ in ()).throw(
+                        RuntimeError("onnx fail")
+                    ),
                 },
             )
         ),
@@ -407,8 +484,14 @@ def test_apply_compression_and_compress_cover_remaining_fallback_paths(monkeypat
         ),
     )
     monkeypatch.setattr(compressor, "_estimate_tokens", lambda image_data, detail="high": 50)
-    monkeypatch.setattr(compressor, "_apply_compression", lambda messages, technique, provider: [{"role": "assistant", "content": technique.value}])
-    monkeypatch.setattr(compressor, "_count_result_tokens", lambda messages, original_image_data, provider: 15)
+    monkeypatch.setattr(
+        compressor,
+        "_apply_compression",
+        lambda messages, technique, provider: [{"role": "assistant", "content": technique.value}],
+    )
+    monkeypatch.setattr(
+        compressor, "_count_result_tokens", lambda messages, original_image_data, provider: 15
+    )
     routed = compressor.compress(image_messages, "google")
     assert routed == [{"role": "assistant", "content": "crop"}]
     assert compressor.last_result.technique == Technique.CROP

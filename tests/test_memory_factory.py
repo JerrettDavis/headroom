@@ -73,13 +73,24 @@ def _load_factory_module(monkeypatch):
     embedders_module = types.ModuleType("headroom.memory.adapters.embedders")
     embedders_module.LocalEmbedder = lambda model_name: ("local-embedder", model_name)
     embedders_module.OnnxLocalEmbedder = lambda: ("onnx-embedder",)
-    embedders_module.OpenAIEmbedder = lambda api_key, model_name: ("openai-embedder", api_key, model_name)
-    embedders_module.OllamaEmbedder = lambda base_url, model_name: ("ollama-embedder", base_url, model_name)
+    embedders_module.OpenAIEmbedder = lambda api_key, model_name: (
+        "openai-embedder",
+        api_key,
+        model_name,
+    )
+    embedders_module.OllamaEmbedder = lambda base_url, model_name: (
+        "ollama-embedder",
+        base_url,
+        model_name,
+    )
     monkeypatch.setitem(sys.modules, "headroom.memory.adapters.embedders", embedders_module)
 
     sqlite_vector_module = types.ModuleType("headroom.memory.adapters.sqlite_vector")
-    sqlite_vector_module.SQLiteVectorIndex = (
-        lambda dimension, db_path, page_cache_size_kb: ("sqlite-vec", dimension, db_path, page_cache_size_kb)
+    sqlite_vector_module.SQLiteVectorIndex = lambda dimension, db_path, page_cache_size_kb: (
+        "sqlite-vec",
+        dimension,
+        db_path,
+        page_cache_size_kb,
     )
     monkeypatch.setitem(sys.modules, "headroom.memory.adapters.sqlite_vector", sqlite_vector_module)
 
@@ -103,12 +114,20 @@ def _load_factory_module(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     sys.modules["headroom.memory.factory"] = module
     spec.loader.exec_module(module)
-    return module, MemoryConfig, EmbedderBackend, StoreBackend, VectorBackend, TextBackend, adapters_module
+    return (
+        module,
+        MemoryConfig,
+        EmbedderBackend,
+        StoreBackend,
+        VectorBackend,
+        TextBackend,
+        adapters_module,
+    )
 
 
 def test_memory_factory_branching(monkeypatch) -> None:
-    factory, MemoryConfig, EmbedderBackend, StoreBackend, VectorBackend, TextBackend, adapters = _load_factory_module(
-        monkeypatch
+    factory, MemoryConfig, EmbedderBackend, StoreBackend, VectorBackend, TextBackend, adapters = (
+        _load_factory_module(monkeypatch)
     )
 
     class FakeEntryPoint:
@@ -136,10 +155,16 @@ def test_memory_factory_branching(monkeypatch) -> None:
         else:
             raise AssertionError("expected ValueError")
 
-    assert factory._create_store(MemoryConfig(store_backend=StoreBackend.SQLITE)) == ("sqlite-store", Path("memory.db"))
-    assert factory._create_store(
-        MemoryConfig(store_backend=StoreBackend.EXTERNAL, store_backend_name="custom")
-    )[0] == "external"
+    assert factory._create_store(MemoryConfig(store_backend=StoreBackend.SQLITE)) == (
+        "sqlite-store",
+        Path("memory.db"),
+    )
+    assert (
+        factory._create_store(
+            MemoryConfig(store_backend=StoreBackend.EXTERNAL, store_backend_name="custom")
+        )[0]
+        == "external"
+    )
     try:
         factory._create_store(MemoryConfig(store_backend="bad"))
     except ValueError:
@@ -147,8 +172,13 @@ def test_memory_factory_branching(monkeypatch) -> None:
     else:
         raise AssertionError("expected store error")
 
-    assert factory._create_embedder(MemoryConfig(embedder_backend=EmbedderBackend.LOCAL)) == ("local-embedder", "mini")
-    assert factory._create_embedder(MemoryConfig(embedder_backend=EmbedderBackend.ONNX)) == ("onnx-embedder",)
+    assert factory._create_embedder(MemoryConfig(embedder_backend=EmbedderBackend.LOCAL)) == (
+        "local-embedder",
+        "mini",
+    )
+    assert factory._create_embedder(MemoryConfig(embedder_backend=EmbedderBackend.ONNX)) == (
+        "onnx-embedder",
+    )
     try:
         factory._create_embedder(MemoryConfig(embedder_backend=EmbedderBackend.OPENAI))
     except ValueError:
@@ -170,9 +200,12 @@ def test_memory_factory_branching(monkeypatch) -> None:
     else:
         raise AssertionError("expected embedder error")
 
-    assert factory._create_vector_index(
-        MemoryConfig(vector_backend=VectorBackend.EXTERNAL, vector_backend_name="custom")
-    )[0] == "external"
+    assert (
+        factory._create_vector_index(
+            MemoryConfig(vector_backend=VectorBackend.EXTERNAL, vector_backend_name="custom")
+        )[0]
+        == "external"
+    )
     try:
         factory._create_vector_index(MemoryConfig(vector_backend=VectorBackend.AUTO))
     except ValueError:
@@ -218,10 +251,16 @@ def test_memory_factory_branching(monkeypatch) -> None:
     else:
         raise AssertionError("expected vector error")
 
-    assert factory._create_text_index(MemoryConfig(text_backend=TextBackend.FTS5)) == ("fts5", Path("memory.db"))
-    assert factory._create_text_index(
-        MemoryConfig(text_backend=TextBackend.EXTERNAL, text_backend_name="custom")
-    )[0] == "external"
+    assert factory._create_text_index(MemoryConfig(text_backend=TextBackend.FTS5)) == (
+        "fts5",
+        Path("memory.db"),
+    )
+    assert (
+        factory._create_text_index(
+            MemoryConfig(text_backend=TextBackend.EXTERNAL, text_backend_name="custom")
+        )[0]
+        == "external"
+    )
     try:
         factory._create_text_index(MemoryConfig(text_backend="bad"))
     except ValueError:
@@ -234,8 +273,8 @@ def test_memory_factory_branching(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_create_memory_system_wires_components(monkeypatch) -> None:
-    factory, MemoryConfig, EmbedderBackend, StoreBackend, VectorBackend, TextBackend, adapters = _load_factory_module(
-        monkeypatch
+    factory, MemoryConfig, EmbedderBackend, StoreBackend, VectorBackend, TextBackend, adapters = (
+        _load_factory_module(monkeypatch)
     )
     adapters.SQLITE_VEC_AVAILABLE = True
     config = MemoryConfig(
@@ -252,5 +291,7 @@ async def test_create_memory_system_wires_components(monkeypatch) -> None:
     assert embedder[0] == "local-embedder"
     assert cache[0] == "cache"
 
-    _, _, _, _, no_cache = await factory.create_memory_system(MemoryConfig(cache_enabled=False, vector_backend=VectorBackend.AUTO))
+    _, _, _, _, no_cache = await factory.create_memory_system(
+        MemoryConfig(cache_enabled=False, vector_backend=VectorBackend.AUTO)
+    )
     assert no_cache is None

@@ -191,8 +191,12 @@ def test_copilot_proxy_helper_wrappers_delegate(
 
     with (
         patch.object(wrap_cli, "_copilot_resolve_provider_type", return_value="openai") as resolve,
-        patch.object(wrap_cli, "_copilot_query_proxy_config", return_value={"memory": True}) as query,
-        patch.object(wrap_cli, "_copilot_detect_running_proxy_backend", return_value="anyllm") as detect,
+        patch.object(
+            wrap_cli, "_copilot_query_proxy_config", return_value={"memory": True}
+        ) as query,
+        patch.object(
+            wrap_cli, "_copilot_detect_running_proxy_backend", return_value="anyllm"
+        ) as detect,
     ):
         assert wrap_cli._resolve_copilot_provider_type("anyllm", "auto") == "openai"
         assert wrap_cli._query_proxy_config(8787) == {"memory": True}

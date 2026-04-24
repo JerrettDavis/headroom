@@ -21,6 +21,7 @@ from headroom.transforms.smart_crusher import (
     FieldStats,
     SmartAnalyzer,
     SmartCrusher,
+    _calculate_string_entropy,
     _compress_text_within_items,
     _detect_error_items_for_preservation,
     _detect_id_field_statistically,
@@ -31,9 +32,8 @@ from headroom.transforms.smart_crusher import (
     _detect_structural_outliers,
     _get_preserve_field_values,
     _get_within_compressor,
-    _is_uuid_format,
-    _calculate_string_entropy,
     _hash_field_name,
+    _is_uuid_format,
     _item_has_preserve_field_match,
 )
 
@@ -280,7 +280,9 @@ class TestHelperCoverage:
                     return SimpleNamespace(compressed="shortened")
                 return SimpleNamespace(compressed=value)
 
-        monkeypatch.setattr(smart_crusher_module, "_get_within_compressor", lambda: _FakeCompressor())
+        monkeypatch.setattr(
+            smart_crusher_module, "_get_within_compressor", lambda: _FakeCompressor()
+        )
         long_text = "compress me " + ("x" * 220)
         error_text = "raise " + ("y" * 220)
         items = [
@@ -403,10 +405,7 @@ class TestStatisticalHelperCoverage:
         )
 
     def test_outlier_error_and_learned_semantics_helpers_preserve_important_items(self) -> None:
-        items = [
-            {"status": "ok", "kind": "task", "payload": {"n": i}}
-            for i in range(8)
-        ] + [
+        items = [{"status": "ok", "kind": "task", "payload": {"n": i}} for i in range(8)] + [
             {"status": "ok", "kind": "task", "extra_debug": True},
             {"status": "failed", "kind": "task", "message": "critical timeout"},
         ]
@@ -419,7 +418,7 @@ class TestStatisticalHelperCoverage:
         item_strings = [json.dumps(item) for item in items]
         assert _detect_error_items_for_preservation(items, item_strings=item_strings) == [9]
 
-        important_status_hash = smart_crusher_module.hashlib.sha256("failed".encode()).hexdigest()[:8]
+        important_status_hash = smart_crusher_module.hashlib.sha256(b"failed").hexdigest()[:8]
         important_payload_hash = smart_crusher_module.hashlib.sha256(
             json.dumps({"n": 3}, sort_keys=True).encode()
         ).hexdigest()[:8]
@@ -554,10 +553,13 @@ class TestAnalyzerHelperCoverage:
                 avg_length=20.0,
             )
         }
-        assert analyzer._detect_temporal_field(
-            temporal_string_stats,
-            [{"ts": "2025-01-01T12:00:00Z"}, {"ts": "2025-01-02T12:00:00Z"}],
-        ) is True
+        assert (
+            analyzer._detect_temporal_field(
+                temporal_string_stats,
+                [{"ts": "2025-01-01T12:00:00Z"}, {"ts": "2025-01-02T12:00:00Z"}],
+            )
+            is True
+        )
 
         temporal_numeric_stats = {
             "epoch": FieldStats(
@@ -571,7 +573,10 @@ class TestAnalyzerHelperCoverage:
                 max_val=1_700_000_100,
             )
         }
-        assert analyzer._detect_temporal_field(temporal_numeric_stats, [{"epoch": 1_700_000_000}]) is True
+        assert (
+            analyzer._detect_temporal_field(temporal_numeric_stats, [{"epoch": 1_700_000_000}])
+            is True
+        )
         assert (
             analyzer._estimate_reduction(
                 log_strategy_field_stats, CompressionStrategy.CLUSTER_SAMPLE, 10
@@ -595,8 +600,7 @@ class TestAnalyzerHelperCoverage:
         assert unique_analysis.recommended_strategy == CompressionStrategy.SKIP
 
         signaled_items = [
-            {"id": 3000 + i, "name": f"user-{i}", "score": 1.0 - (i * 0.02)}
-            for i in range(10)
+            {"id": 3000 + i, "name": f"user-{i}", "score": 1.0 - (i * 0.02)} for i in range(10)
         ]
         signaled_analysis = analyzer.analyze_array(signaled_items)
         assert signaled_analysis.crushability is not None

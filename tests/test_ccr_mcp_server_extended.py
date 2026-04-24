@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from types import SimpleNamespace
 
 import pytest
 
@@ -49,7 +48,9 @@ class _FakeServer:
         return None
 
 
-def _make_server(monkeypatch: pytest.MonkeyPatch, *, read_enabled: bool = False) -> mcp_server.HeadroomMCPServer:
+def _make_server(
+    monkeypatch: pytest.MonkeyPatch, *, read_enabled: bool = False
+) -> mcp_server.HeadroomMCPServer:
     monkeypatch.setattr(mcp_server, "MCP_AVAILABLE", True)
     monkeypatch.setattr(mcp_server, "Server", _FakeServer)
     monkeypatch.setattr(mcp_server, "TextContent", _FakeTextContent, raising=False)
@@ -83,7 +84,9 @@ def test_format_summary_shared_events_and_session_stats(tmp_path, monkeypatch) -
     assert '"timestamp": 100.0' not in pruned
 
     appended: list[dict] = []
-    monkeypatch.setattr(mcp_server, "_append_shared_event", lambda event: appended.append(dict(event)))
+    monkeypatch.setattr(
+        mcp_server, "_append_shared_event", lambda event: appended.append(dict(event))
+    )
     stats = mcp_server.SessionStats(started_at=900.0)
     for idx in range(55):
         stats.record_compression(100 + idx, 40 + idx, "route")
@@ -172,7 +175,9 @@ async def test_headroom_mcp_server_retrieve_stats_and_cleanup(monkeypatch) -> No
 
     store.mode = "none"
     monkeypatch.setattr(mcp_server, "HTTPX_AVAILABLE", True)
-    server._retrieve_via_proxy = lambda hash_key, query: _return_async({"hash": hash_key, "value": "proxy"})  # type: ignore[method-assign]
+    server._retrieve_via_proxy = lambda hash_key, query: _return_async(
+        {"hash": hash_key, "value": "proxy"}
+    )  # type: ignore[method-assign]
     result = await server._retrieve_content("abc123", None)
     assert result["source"] == "proxy"
 
@@ -247,7 +252,11 @@ async def test_headroom_mcp_server_handles_stats_and_cached_reads(monkeypatch, t
                 "mode": "token",
                 "api_requests": 5,
                 "primary_model": "claude",
-                "compression": {"requests_compressed": 1, "avg_compression_pct": 20, "total_tokens_removed": 50},
+                "compression": {
+                    "requests_compressed": 1,
+                    "avg_compression_pct": 20,
+                    "total_tokens_removed": 50,
+                },
             }
         }
     )

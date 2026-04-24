@@ -459,9 +459,13 @@ async def test_sync_runs_when_state_mismatch_without_force(tmp_path):
     backend.add_memory("From codex", metadata={"source_agent": "codex"})
     claude_dir = tmp_path / "memory"
     claude_dir.mkdir()
-    (claude_dir / "fact.md").write_text("---\nname: Fact\ndescription: Fact\ntype: project\n---\n\nImported fact\n")
+    (claude_dir / "fact.md").write_text(
+        "---\nname: Fact\ndescription: Fact\ntype: project\n---\n\nImported fact\n"
+    )
     state_path = tmp_path / "state.json"
-    state_path.write_text(json.dumps({"claude:tcms": {"agent_fingerprint": "old", "db_fingerprint": "old"}}))
+    state_path.write_text(
+        json.dumps({"claude:tcms": {"agent_fingerprint": "old", "db_fingerprint": "old"}})
+    )
 
     result = await sync(backend, ClaudeCodeAdapter(claude_dir), "tcms", state_path=state_path)
     assert result.imported == 1
@@ -510,7 +514,9 @@ def test_sync_main_runs_for_supported_agents(monkeypatch, capsys, tmp_path, agen
     codex_module.CodexAdapter = FakeCodexAdapter
     monkeypatch.setitem(sys.modules, "headroom.memory.sync_adapters.codex_agent", codex_module)
 
-    async def fake_sync(backend, adapter, user_id, state_path=sync_module._DEFAULT_STATE_PATH, force=False):
+    async def fake_sync(
+        backend, adapter, user_id, state_path=sync_module._DEFAULT_STATE_PATH, force=False
+    ):
         calls["sync"] = {"user_id": user_id, "force": force, "adapter_type": type(adapter).__name__}
         return sync_module.SyncResult(imported=1, exported=2, duration_ms=12.4)
 
@@ -591,7 +597,9 @@ class TestClaudeCodeAdapter:
         assert mems[0].source_file == "fact.md"
 
     @pytest.mark.asyncio
-    async def test_read_memories_handles_missing_dir_oserror_and_blank_body(self, memory_dir, monkeypatch):
+    async def test_read_memories_handles_missing_dir_oserror_and_blank_body(
+        self, memory_dir, monkeypatch
+    ):
         missing_adapter = ClaudeCodeAdapter(memory_dir / "missing")
         assert await missing_adapter.read_memories() == []
 
@@ -646,7 +654,9 @@ class TestClaudeCodeAdapter:
         assert await adapter.write_memories([]) == 0
 
         target = memory_dir / "headroom_project_uses_fastapi.md"
-        target.write_text("---\nname: Project uses FastAPI\n---\n\nProject uses FastAPI\n", encoding="utf-8")
+        target.write_text(
+            "---\nname: Project uses FastAPI\n---\n\nProject uses FastAPI\n", encoding="utf-8"
+        )
         written = await adapter.write_memories(
             [
                 {
@@ -674,7 +684,9 @@ class TestClaudeCodeAdapter:
         assert "- added" in content
         assert "## Other Section" in content
 
-        memory_md.write_text("# Memory\n\n## Headroom Shared Memory\n- existing\n", encoding="utf-8")
+        memory_md.write_text(
+            "# Memory\n\n## Headroom Shared Memory\n- existing\n", encoding="utf-8"
+        )
         adapter._update_memory_md_index(["- appended"])
         assert "- appended" in memory_md.read_text(encoding="utf-8")
 
@@ -739,8 +751,14 @@ class TestClaudeCodeAdapter:
     def test_get_claude_memory_dir(self, monkeypatch):
         monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: Path("C:\\repo\\project")))
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("C:\\Users\\me")))
-        assert get_claude_memory_dir() == Path("C:\\Users\\me") / ".claude" / "projects" / "C:-repo-project" / "memory"
-        assert get_claude_memory_dir(Path("/tmp/demo")) == Path("C:\\Users\\me") / ".claude" / "projects" / "-tmp-demo" / "memory"
+        assert (
+            get_claude_memory_dir()
+            == Path("C:\\Users\\me") / ".claude" / "projects" / "C:-repo-project" / "memory"
+        )
+        assert (
+            get_claude_memory_dir(Path("/tmp/demo"))
+            == Path("C:\\Users\\me") / ".claude" / "projects" / "-tmp-demo" / "memory"
+        )
 
 
 # ---------------------------------------------------------------------------

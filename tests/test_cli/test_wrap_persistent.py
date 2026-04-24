@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import click
-import headroom
 
+import headroom
 import headroom.cli.wrap as wrap_cli
 
 
@@ -143,7 +142,10 @@ def test_kill_proxy_by_pid_handles_permission_errors_and_escalation(monkeypatch)
     monkeypatch.setattr(wrap_cli.os, "kill", fake_kill)
 
     assert wrap_cli._kill_proxy_by_pid(1234, 8787) is True
-    assert signals == [wrap_cli.signal.SIGTERM, getattr(wrap_cli.signal, "SIGKILL", wrap_cli.signal.SIGTERM)]
+    assert signals == [
+        wrap_cli.signal.SIGTERM,
+        getattr(wrap_cli.signal, "SIGKILL", wrap_cli.signal.SIGTERM),
+    ]
 
     def raise_permission(pid: int, sig: int) -> None:
         raise PermissionError
@@ -164,7 +166,9 @@ def test_recover_persistent_proxy_handles_docker_success_and_start_failures(monk
         "headroom.install.runtime.start_persistent_docker",
         lambda manifest: starts.append(manifest.profile),
     )
-    monkeypatch.setattr("headroom.install.runtime.wait_ready", lambda manifest, timeout_seconds=45: True)
+    monkeypatch.setattr(
+        "headroom.install.runtime.wait_ready", lambda manifest, timeout_seconds=45: True
+    )
 
     assert wrap_cli._recover_persistent_proxy(8787) is True
     assert starts == ["default"]
@@ -288,9 +292,7 @@ def test_launch_tool_converts_runtime_errors_into_exit_code_one(monkeypatch) -> 
         raise AssertionError("expected launch failure to exit with code 1")
 
 
-def test_misc_wrap_helpers_cover_telemetry_health_check_and_log_path(
-    monkeypatch, tmp_path
-) -> None:
+def test_misc_wrap_helpers_cover_telemetry_health_check_and_log_path(monkeypatch, tmp_path) -> None:
     telemetry_module = ModuleType("headroom.telemetry.beacon")
     telemetry_module.format_telemetry_notice = lambda prefix="": f"{prefix}notice"  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "headroom.telemetry.beacon", telemetry_module)
@@ -488,7 +490,9 @@ def test_setup_rtk_and_code_graph_paths(monkeypatch, tmp_path) -> None:
     monkeypatch.setitem(sys.modules, "headroom.graph.installer", graph_module)
 
     registered: list[str] = []
-    monkeypatch.setattr(wrap_cli, "_register_cbm_mcp_server", lambda cbm_bin: registered.append(cbm_bin))
+    monkeypatch.setattr(
+        wrap_cli, "_register_cbm_mcp_server", lambda cbm_bin: registered.append(cbm_bin)
+    )
     monkeypatch.setattr(wrap_cli.Path, "cwd", staticmethod(lambda: tmp_path))
     monkeypatch.setattr(
         wrap_cli.subprocess,
@@ -505,7 +509,9 @@ def test_setup_rtk_and_code_graph_paths(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         wrap_cli.subprocess,
         "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="cbm", timeout=30)),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd="cbm", timeout=30)
+        ),
     )
     assert wrap_cli._setup_code_graph(verbose=False) is False
 
@@ -521,7 +527,9 @@ def test_register_cbm_mcp_server_skips_existing_and_registers_new(monkeypatch) -
     calls: list[list[str]] = []
     echoed: list[str] = []
 
-    monkeypatch.setattr(wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None
+    )
     monkeypatch.setattr(wrap_cli.click, "echo", lambda message="": echoed.append(message))
 
     def fake_run(cmd, capture_output=True, text=True):  # noqa: ANN001, ANN201
@@ -540,7 +548,9 @@ def test_register_cbm_mcp_server_skips_existing_and_registers_new(monkeypatch) -
     monkeypatch.setattr(
         wrap_cli.subprocess,
         "run",
-        lambda cmd, capture_output=True, text=True: calls.append(cmd) or SimpleNamespace(returncode=0),
+        lambda cmd, capture_output=True, text=True: (
+            calls.append(cmd) or SimpleNamespace(returncode=0)
+        ),
     )
     wrap_cli._register_cbm_mcp_server("cbm-bin")
     assert len(calls) == 1

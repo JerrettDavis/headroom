@@ -21,8 +21,12 @@ def _load_mem0_modules(monkeypatch):
         session_id: str | None = None
         agent_id: str | None = None
         turn_id: str | None = None
-        created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-        valid_from: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+        created_at: datetime = field(
+            default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+        valid_from: datetime = field(
+            default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        )
         valid_until: datetime | None = None
         importance: float = 0.5
         supersedes: str | None = None
@@ -105,7 +109,15 @@ def _load_mem0_modules(monkeypatch):
     sys.modules["headroom.memory.backends.mem0_system_adapter"] = adapter_module
     adapter_spec.loader.exec_module(adapter_module)
 
-    return mem0_module, adapter_module, Memory, MemoryFilter, VectorFilter, VectorSearchResult, MemorySearchResult
+    return (
+        mem0_module,
+        adapter_module,
+        Memory,
+        MemoryFilter,
+        VectorFilter,
+        VectorSearchResult,
+        MemorySearchResult,
+    )
 
 
 @pytest.mark.asyncio
@@ -175,7 +187,10 @@ async def test_mem0_backend_core_paths(monkeypatch) -> None:
             Memory=type(
                 "Mem0Factory",
                 (),
-                {"from_config": classmethod(lambda cls, config: local_client), "__call__": lambda self, **kwargs: None},
+                {
+                    "from_config": classmethod(lambda cls, config: local_client),
+                    "__call__": lambda self, **kwargs: None,
+                },
             )
         ),
     )
@@ -221,7 +236,9 @@ async def test_mem0_backend_core_paths(monkeypatch) -> None:
     )
     assert restored.id == "m1"
     assert restored.metadata == {"x": 1}
-    assert local_backend._build_mem0_filters(VectorFilter(user_id="u", session_id="s", agent_id="a")) == {
+    assert local_backend._build_mem0_filters(
+        VectorFilter(user_id="u", session_id="s", agent_id="a")
+    ) == {
         "user_id": "u",
         "session_id": "s",
         "agent_id": "a",
@@ -239,7 +256,9 @@ async def test_mem0_backend_core_paths(monkeypatch) -> None:
         {"id": "a", "memory": "foo", "metadata": {"user_id": "user"}, "score": 0.9},
         {"id": "b", "memory": "bar", "metadata": {"user_id": "user"}, "similarity": 0.5},
     ]
-    search = await local_backend.search_memories("q", user_id="user", filter=VectorFilter(agent_id="agent"), limit=2)
+    search = await local_backend.search_memories(
+        "q", user_id="user", filter=VectorFilter(agent_id="agent"), limit=2
+    )
     assert len(search) == 2
     assert search[0].rank == 1
 
@@ -312,12 +331,18 @@ async def test_mem0_backend_core_paths(monkeypatch) -> None:
     assert query_backend.supports_vector_search() is True
 
     related_backend = mem0.Mem0Backend()
-    related_backend.get_memory = lambda memory_id: asyncio.sleep(0, result=Memory(id="1", content="query", user_id="u"))
+    related_backend.get_memory = lambda memory_id: asyncio.sleep(
+        0, result=Memory(id="1", content="query", user_id="u")
+    )
     related_backend.search_memories = lambda **kwargs: asyncio.sleep(
         0,
         result=[
-            SimpleNamespace(memory=Memory(id="1", content="query", user_id="u"), similarity=1.0, rank=1),
-            SimpleNamespace(memory=Memory(id="2", content="related", user_id="u"), similarity=0.9, rank=2),
+            SimpleNamespace(
+                memory=Memory(id="1", content="query", user_id="u"), similarity=1.0, rank=1
+            ),
+            SimpleNamespace(
+                memory=Memory(id="2", content="related", user_id="u"), similarity=0.9, rank=2
+            ),
         ],
     )
     assert [m.id for m in await related_backend.get_related_memories("1")] == ["2"]
@@ -329,7 +354,9 @@ async def test_mem0_backend_core_paths(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_mem0_system_adapter_paths(monkeypatch) -> None:
-    mem0, adapter, Memory, _MemoryFilter, _VectorFilter, _VSR, MemorySearchResult = _load_mem0_modules(monkeypatch)
+    mem0, adapter, Memory, _MemoryFilter, _VectorFilter, _VSR, MemorySearchResult = (
+        _load_mem0_modules(monkeypatch)
+    )
 
     class FakeBackend:
         def __init__(self, config=None):
@@ -364,34 +391,67 @@ async def test_mem0_system_adapter_paths(monkeypatch) -> None:
     assert fallback.metadata["_mem0_status"] == "not_extracted"
 
     system._backend.vector_results = [
-        SimpleNamespace(memory=Memory(id="1", content="python fact", user_id="user", entity_refs=["python"], session_id="s1"), similarity=0.9, rank=1),
-        SimpleNamespace(memory=Memory(id="2", content="java fact", user_id="user", entity_refs=["java"], session_id="s2"), similarity=0.5, rank=2),
+        SimpleNamespace(
+            memory=Memory(
+                id="1",
+                content="python fact",
+                user_id="user",
+                entity_refs=["python"],
+                session_id="s1",
+            ),
+            similarity=0.9,
+            rank=1,
+        ),
+        SimpleNamespace(
+            memory=Memory(
+                id="2", content="java fact", user_id="user", entity_refs=["java"], session_id="s2"
+            ),
+            similarity=0.5,
+            rank=2,
+        ),
     ]
-    results = await system.search_memories("python", "user", entities=["python"], include_related=True, session_id="s1")
+    results = await system.search_memories(
+        "python", "user", entities=["python"], include_related=True, session_id="s1"
+    )
     assert len(results) == 1
     assert isinstance(results[0], MemorySearchResult)
 
     updated = await system.update_memory("id", "new", reason="fix", user_id="user")
     assert updated.content == "existing"
-    system._backend.client.get = lambda memory_id: {"id": memory_id, "user_id": "other", "memory": "existing"}
+    system._backend.client.get = lambda memory_id: {
+        "id": memory_id,
+        "user_id": "other",
+        "memory": "existing",
+    }
     with pytest.raises(ValueError):
         await system.update_memory("id", "new", user_id="user")
     system._backend.client.get = lambda memory_id: None
     with pytest.raises(ValueError):
         await system.update_memory("id", "new")
-    system._backend.client.get = lambda memory_id: {"id": memory_id, "user_id": "user", "memory": "existing"}
+    system._backend.client.get = lambda memory_id: {
+        "id": memory_id,
+        "user_id": "user",
+        "memory": "existing",
+    }
     system._backend.client.update = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad"))
     with pytest.raises(ValueError):
         await system.update_memory("id", "new")
 
-    system._backend.client.get = lambda memory_id: {"id": memory_id, "user_id": "other"} if memory_id == "id" else None
+    system._backend.client.get = lambda memory_id: (
+        {"id": memory_id, "user_id": "other"} if memory_id == "id" else None
+    )
     assert await system.delete_memory("id", user_id="user") is False
     system._backend.client.get = lambda memory_id: {"id": memory_id, "user_id": "user"}
     assert await system.delete_memory("id", user_id="user") is True
     system._backend.client.delete = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad"))
     assert await system.delete_memory("id") is False
 
-    system._backend.client.get = lambda memory_id: {"id": memory_id, "memory": "stored", "user_id": "user", "metadata": {"a": 1}}
+    system._backend.client.get = lambda memory_id: {
+        "id": memory_id,
+        "memory": "stored",
+        "user_id": "user",
+        "metadata": {"a": 1},
+    }
     got = await system.get_memory("id")
     assert got.metadata == {"a": 1}
     system._backend.client.get = lambda memory_id: None

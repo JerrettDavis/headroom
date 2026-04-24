@@ -229,7 +229,11 @@ class TestToolCrusher:
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": {"structured": True}}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": {"structured": True},
+                    }
                 ],
             },
         ]
@@ -270,15 +274,15 @@ class TestToolCrusher:
     def test_crush_value_handles_depth_exceeded_for_dict_list_and_string(self):
         crusher = ToolCrusher()
 
-        assert crusher._crush_value({"a": 1, "b": 2}, depth=5, max_depth=5, max_array_items=2, max_string_length=4) == {
-            "__headroom_depth_exceeded": 2
-        }
-        assert crusher._crush_value([1, 2, 3], depth=5, max_depth=5, max_array_items=2, max_string_length=4) == {
-            "__headroom_depth_exceeded": 3
-        }
-        assert crusher._crush_value("abcdef", depth=5, max_depth=5, max_array_items=2, max_string_length=4) == (
-            "abcd...[truncated 2 chars]"
-        )
+        assert crusher._crush_value(
+            {"a": 1, "b": 2}, depth=5, max_depth=5, max_array_items=2, max_string_length=4
+        ) == {"__headroom_depth_exceeded": 2}
+        assert crusher._crush_value(
+            [1, 2, 3], depth=5, max_depth=5, max_array_items=2, max_string_length=4
+        ) == {"__headroom_depth_exceeded": 3}
+        assert crusher._crush_value(
+            "abcdef", depth=5, max_depth=5, max_array_items=2, max_string_length=4
+        ) == ("abcd...[truncated 2 chars]")
 
     def test_crush_value_passes_through_small_structures_and_scalars(self):
         crusher = ToolCrusher()
@@ -290,8 +294,18 @@ class TestToolCrusher:
             max_array_items=5,
             max_string_length=10,
         ) == {"items": [1, 2], "name": "ok"}
-        assert crusher._crush_value(True, depth=0, max_depth=5, max_array_items=5, max_string_length=10) is True
-        assert crusher._crush_value(None, depth=0, max_depth=5, max_array_items=5, max_string_length=10) is None
+        assert (
+            crusher._crush_value(
+                True, depth=0, max_depth=5, max_array_items=5, max_string_length=10
+            )
+            is True
+        )
+        assert (
+            crusher._crush_value(
+                None, depth=0, max_depth=5, max_array_items=5, max_string_length=10
+            )
+            is None
+        )
 
     def test_crush_tool_output_convenience_uses_config(self):
         content = json.dumps({"items": list(range(20))})

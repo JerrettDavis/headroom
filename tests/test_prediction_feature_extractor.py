@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from types import SimpleNamespace
-
 import numpy as np
 
 from headroom.prediction.feature_extractor import (
@@ -100,7 +97,10 @@ def test_text_statistics_extractor_computes_metrics_and_fails_open(monkeypatch) 
     fail_open = TextStatisticsExtractor(tokenizer=_Tokenizer(0, raises=True))
     assert fail_open.extract("short text").token_count_exact is None
 
-    monkeypatch.setattr("headroom.prediction.feature_extractor.gzip.compress", lambda data: (_ for _ in ()).throw(OSError("gzip failed")))
+    monkeypatch.setattr(
+        "headroom.prediction.feature_extractor.gzip.compress",
+        lambda data: (_ for _ in ()).throw(OSError("gzip failed")),
+    )
     assert extractor._calculate_compression_ratio("abc") == 1.0
     assert extractor._calculate_entropy("") == 0.0
     assert extractor._calculate_repetition_score("tiny") == 0.0
@@ -203,7 +203,10 @@ def test_semantic_extractor_detects_intent_and_format_variants(monkeypatch) -> N
     assert extractor._detect_format("What is this?") == PromptFormat.QUESTION
     assert extractor._detect_format("User: hi\nAssistant: hello") == PromptFormat.MULTI_TURN
     assert extractor._detect_format("Name: {name}\nRole: <role>") == PromptFormat.TEMPLATE
-    assert extractor._detect_format("value = 1;\nvalue += 2;\ncall();\nother();") == PromptFormat.RAW_DATA
+    assert (
+        extractor._detect_format("value = 1;\nvalue += 2;\ncall();\nother();")
+        == PromptFormat.RAW_DATA
+    )
     assert extractor._detect_format("Explain the system behavior.") == PromptFormat.INSTRUCTION
 
     failure_extractor = SemanticExtractor(use_ner=True)

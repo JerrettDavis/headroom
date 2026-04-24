@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import importlib
 import importlib.machinery
 import sys
@@ -18,7 +17,9 @@ def _load_model_module(monkeypatch):
     content_module = types.ModuleType("strands.types.content")
     content_module.__spec__ = importlib.machinery.ModuleSpec("strands.types.content", loader=None)
     streaming_module = types.ModuleType("strands.types.streaming")
-    streaming_module.__spec__ = importlib.machinery.ModuleSpec("strands.types.streaming", loader=None)
+    streaming_module.__spec__ = importlib.machinery.ModuleSpec(
+        "strands.types.streaming", loader=None
+    )
     tools_module = types.ModuleType("strands.types.tools")
     tools_module.__spec__ = importlib.machinery.ModuleSpec("strands.types.tools", loader=None)
 
@@ -82,7 +83,12 @@ class _WrappedModel:
         yield {"kind": "stream", "messages": messages, "kwargs": kwargs}
 
     async def structured_output(self, output_model, prompt, **kwargs):
-        yield {"kind": "structured", "output_model": output_model, "prompt": prompt, "kwargs": kwargs}
+        yield {
+            "kind": "structured",
+            "output_model": output_model,
+            "prompt": prompt,
+            "kwargs": kwargs,
+        }
 
     def get_config(self):
         return {"wrapped": True}
@@ -99,7 +105,9 @@ def test_strands_model_conversion_and_optimization(monkeypatch) -> None:
     monkeypatch.setattr(model_module, "HeadroomConfig", lambda: SimpleNamespace(source="default"))
     monkeypatch.setattr(model_module, "OpenAIProvider", lambda: _FakeProvider(limit=64000))
     monkeypatch.setattr(model_module, "get_headroom_provider", lambda wrapped: fake_provider)
-    monkeypatch.setattr(model_module, "get_model_name_from_strands", lambda wrapped: "detected-model")
+    monkeypatch.setattr(
+        model_module, "get_model_name_from_strands", lambda wrapped: "detected-model"
+    )
     monkeypatch.setattr(
         model_module,
         "TransformPipeline",
@@ -128,7 +136,13 @@ def test_strands_model_conversion_and_optimization(monkeypatch) -> None:
 
     converted = optimized_model._convert_messages_to_openai(
         [
-            {"role": "user", "content": None, "tool_calls": [{"id": 1}], "tool_call_id": "x", "name": "nm"},
+            {
+                "role": "user",
+                "content": None,
+                "tool_calls": [{"id": 1}],
+                "tool_call_id": "x",
+                "name": "nm",
+            },
             _MessageObj(),
             42,
         ]
@@ -138,11 +152,25 @@ def test_strands_model_conversion_and_optimization(monkeypatch) -> None:
     assert converted[2] == {"role": "user", "content": "42"}
 
     back = optimized_model._convert_messages_from_openai(
-        [{"role": "assistant", "content": "ok", "tool_calls": [1], "tool_call_id": "id", "name": "name"}],
+        [
+            {
+                "role": "assistant",
+                "content": "ok",
+                "tool_calls": [1],
+                "tool_call_id": "id",
+                "name": "name",
+            }
+        ],
         [],
     )
     assert back == [
-        {"role": "assistant", "content": "ok", "tool_calls": [1], "tool_call_id": "id", "name": "name"}
+        {
+            "role": "assistant",
+            "content": "ok",
+            "tool_calls": [1],
+            "tool_call_id": "id",
+            "name": "name",
+        }
     ]
 
     empty_messages, empty_metrics = optimized_model._optimize_messages([])
@@ -218,7 +246,9 @@ async def test_strands_model_stream_and_structured_output(monkeypatch) -> None:
     monkeypatch.setattr(model_module, "HeadroomConfig", lambda: SimpleNamespace(source="default"))
     monkeypatch.setattr(model_module, "OpenAIProvider", lambda: _FakeProvider(limit=64000))
     monkeypatch.setattr(model_module, "get_headroom_provider", lambda wrapped: fake_provider)
-    monkeypatch.setattr(model_module, "get_model_name_from_strands", lambda wrapped: "detected-model")
+    monkeypatch.setattr(
+        model_module, "get_model_name_from_strands", lambda wrapped: "detected-model"
+    )
     monkeypatch.setattr(
         model_module,
         "TransformPipeline",

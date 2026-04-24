@@ -93,7 +93,7 @@ def test_report_card_models_and_renderers(tmp_path) -> None:
     assert "<h1>Headroom Accuracy Report Card</h1>" in html
     assert "mmlu" in html
     assert "tool_outputs" in html
-    assert "class=\"badge fail\"" in html
+    assert 'class="badge fail"' in html
 
     empty_html = generate_html(empty)
     assert "0/0 PASS" in empty_html

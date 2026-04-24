@@ -11,11 +11,10 @@ from headroom.transforms.code_compressor import (
     CodeAwareCompressor,
     CodeCompressionResult,
     CodeCompressorConfig,
-    CodeStructure,
     CodeLanguage,
+    CodeStructure,
     DocstringMode,
     LangConfig,
-    _SymbolAnalysis,
     _count_error_nodes,
     _detect_indent,
     _get_body_limit,
@@ -25,6 +24,7 @@ from headroom.transforms.code_compressor import (
     _has_syntax_issues,
     _is_public_symbol,
     _make_omitted_comment,
+    _SymbolAnalysis,
     compress_code,
     detect_language,
 )
@@ -34,7 +34,7 @@ class _Node:
     def __init__(
         self,
         node_type: str,
-        children: list["_Node"] | None = None,
+        children: list[_Node] | None = None,
         *,
         is_missing: bool = False,
         text: bytes | str | None = None,
@@ -70,9 +70,11 @@ def test_get_parser_caches_results_and_wraps_errors(monkeypatch) -> None:
     monkeypatch.setattr(
         builtins,
         "__import__",
-        lambda name, *args, **kwargs: types.SimpleNamespace(get_parser=fake_get_parser)
-        if name == "tree_sitter_language_pack"
-        else original_import(name, *args, **kwargs),
+        lambda name, *args, **kwargs: (
+            types.SimpleNamespace(get_parser=fake_get_parser)
+            if name == "tree_sitter_language_pack"
+            else original_import(name, *args, **kwargs)
+        ),
     )
     try:
         first = _get_parser("python")
@@ -92,7 +94,9 @@ def test_get_parser_caches_results_and_wraps_errors(monkeypatch) -> None:
 
     def failing_import(name, *args, **kwargs):
         if name == "tree_sitter_language_pack":
-            return types.SimpleNamespace(get_parser=lambda language: (_ for _ in ()).throw(RuntimeError("bad parser")))
+            return types.SimpleNamespace(
+                get_parser=lambda language: (_ for _ in ()).throw(RuntimeError("bad parser"))
+            )
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(code_compressor, "_check_tree_sitter_available", lambda: True)
@@ -122,7 +126,9 @@ def test_detect_language_covers_empty_prefilter_fallback_and_tree_sitter_paths(m
     assert detect_language("") == (CodeLanguage.UNKNOWN, 0.0)
     assert detect_language("plain prose without code markers") == (CodeLanguage.UNKNOWN, 0.0)
 
-    ts_code = "interface User {}\nconst value: string = 'x';\nexport function use(): void { return; }\n"
+    ts_code = (
+        "interface User {}\nconst value: string = 'x';\nexport function use(): void { return; }\n"
+    )
     lang, confidence = detect_language(ts_code)
     assert lang == CodeLanguage.TYPESCRIPT
     assert confidence >= 0.3
@@ -178,7 +184,9 @@ def test_code_compression_result_summary_includes_semantic_counts() -> None:
 def test_private_helper_functions_cover_symbol_and_syntax_paths() -> None:
     assert _get_node_text(_Node("slice", start_byte=2, end_byte=5), "0123456789") == "234"
 
-    definition = _Node("function_definition", [_Node("keyword"), _Node("identifier", text=b"runner")])
+    definition = _Node(
+        "function_definition", [_Node("keyword"), _Node("identifier", text=b"runner")]
+    )
     assert _get_definition_name(definition) == "runner"
     assert _get_definition_name(_Node("function_definition", [_Node("keyword")])) is None
 
@@ -306,7 +314,10 @@ def test_fallback_compress_and_convenience_wrapper(monkeypatch) -> None:
             return types.SimpleNamespace(compressed="delegated")
 
     monkeypatch.setattr(code_compressor, "CodeAwareCompressor", _FakeCompressor)
-    assert compress_code("print('x')", language="python", target_rate=0.4, context="ctx") == "delegated"
+    assert (
+        compress_code("print('x')", language="python", target_rate=0.4, context="ctx")
+        == "delegated"
+    )
     assert captured["call"] == ("print('x')", "python", "ctx")
     assert captured["config"].target_compression_rate == 0.4
     assert captured["config"].language_hint == "python"
@@ -347,9 +358,17 @@ def test_apply_try_compress_text_and_should_apply(monkeypatch) -> None:
 
     transforms_applied: list[str] = []
     assert compressor._try_compress_text("", "ctx", tokenizer, transforms_applied) == ""
-    assert compressor._try_compress_text("def run():\n    return 1", "ctx", tokenizer, transforms_applied) == "COMPRESSED"
+    assert (
+        compressor._try_compress_text(
+            "def run():\n    return 1", "ctx", tokenizer, transforms_applied
+        )
+        == "COMPRESSED"
+    )
     assert transforms_applied == ["code_aware:python:0.50"]
-    assert compressor._try_compress_text("plain text", "ctx", tokenizer, transforms_applied) == "plain text"
+    assert (
+        compressor._try_compress_text("plain text", "ctx", tokenizer, transforms_applied)
+        == "plain text"
+    )
 
     def fake_try(text: str, context: str, tokenizer, applied: list[str]) -> str:
         if "code" in text:
@@ -363,7 +382,10 @@ def test_apply_try_compress_text_and_should_apply(monkeypatch) -> None:
     result = compressor.apply(
         [
             {"role": "user", "content": "code sample"},
-            {"role": "assistant", "content": [{"type": "text", "text": "nested code"}, {"type": "tool_use"}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "nested code"}, {"type": "tool_use"}],
+            },
             {"role": "system", "content": 123},
         ],
         tokenizer,
@@ -374,7 +396,9 @@ def test_apply_try_compress_text_and_should_apply(monkeypatch) -> None:
     assert result.messages[1]["content"][1] == {"type": "tool_use"}
     assert result.messages[2]["content"] == 123
     assert result.transforms_applied == ["code_aware:python:0.50", "code_aware:python:0.50"]
-    assert result.warnings == ["tree-sitter not installed. Install with: pip install headroom-ai[code]"]
+    assert result.warnings == [
+        "tree-sitter not installed. Install with: pip install headroom-ai[code]"
+    ]
 
     monkeypatch.setattr(code_compressor, "_check_tree_sitter_available", lambda: True)
     assert compressor.should_apply([{"content": "plain text"}], tokenizer) is False
@@ -452,12 +476,17 @@ def test_symbol_analysis_and_budget_allocation_cover_semantic_paths() -> None:
 
     disabled = CodeAwareCompressor(CodeCompressorConfig(enable_ccr=False, semantic_analysis=False))
     assert disabled._analyze_symbol_importance(root, code, CodeLanguage.PYTHON) == _SymbolAnalysis()
-    assert compressor._analyze_symbol_importance(root, code, CodeLanguage.UNKNOWN) == _SymbolAnalysis()
+    assert (
+        compressor._analyze_symbol_importance(root, code, CodeLanguage.UNKNOWN) == _SymbolAnalysis()
+    )
     assert compressor._allocate_body_budget(_SymbolAnalysis(), code) == {}
-    assert compressor._allocate_body_budget(
-        _SymbolAnalysis(scores={"helper": 0.9}, body_line_counts={"helper": 0}),
-        code,
-    ) == {}
+    assert (
+        compressor._allocate_body_budget(
+            _SymbolAnalysis(scores={"helper": 0.9}, body_line_counts={"helper": 0}),
+            code,
+        )
+        == {}
+    )
 
 
 def test_compress_covers_ccr_unknown_and_failure_guards(monkeypatch) -> None:
@@ -476,12 +505,18 @@ def test_compress_covers_ccr_unknown_and_failure_guards(monkeypatch) -> None:
         "_compress_with_ast",
         lambda code, language, context, tokenizer=None: (
             "compressed body",
-            CodeStructure(imports=["import os"], function_signatures=["def keep(): ..."], function_bodies=[("keep", "body", 1)]),
+            CodeStructure(
+                imports=["import os"],
+                function_signatures=["def keep(): ..."],
+                function_bodies=[("keep", "body", 1)],
+            ),
             {"helper": 0.7},
         ),
     )
     monkeypatch.setattr(compressor, "_verify_syntax", lambda code, language: True)
-    monkeypatch.setattr(compressor, "_store_in_ccr", lambda original, compressed, original_tokens: "cache-123")
+    monkeypatch.setattr(
+        compressor, "_store_in_ccr", lambda original, compressed, original_tokens: "cache-123"
+    )
     monkeypatch.setattr(
         compressor,
         "_estimate_tokens",
@@ -490,7 +525,9 @@ def test_compress_covers_ccr_unknown_and_failure_guards(monkeypatch) -> None:
     monkeypatch.setitem(
         sys.modules,
         "headroom.transforms.compression_summary",
-        types.SimpleNamespace(summarize_compressed_code=lambda bodies, count: f"{count} bodies summarized"),
+        types.SimpleNamespace(
+            summarize_compressed_code=lambda bodies, count: f"{count} bodies summarized"
+        ),
     )
     result = compressor.compress("original code", language="python", context="ctx")
     assert result.language == CodeLanguage.PYTHON
@@ -505,7 +542,9 @@ def test_compress_covers_ccr_unknown_and_failure_guards(monkeypatch) -> None:
     compressor = CodeAwareCompressor(
         CodeCompressorConfig(min_tokens_for_compression=1, fallback_to_kompress=False)
     )
-    monkeypatch.setattr(code_compressor, "detect_language", lambda code: (CodeLanguage.UNKNOWN, 0.0))
+    monkeypatch.setattr(
+        code_compressor, "detect_language", lambda code: (CodeLanguage.UNKNOWN, 0.0)
+    )
     unknown = compressor.compress("unknown language")
     assert unknown.language == CodeLanguage.UNKNOWN
     assert unknown.compression_ratio == 1.0
@@ -513,7 +552,9 @@ def test_compress_covers_ccr_unknown_and_failure_guards(monkeypatch) -> None:
     compressor = CodeAwareCompressor(
         CodeCompressorConfig(min_tokens_for_compression=1, fallback_to_kompress=True)
     )
-    monkeypatch.setattr(code_compressor, "detect_language", lambda code: (CodeLanguage.UNKNOWN, 0.0))
+    monkeypatch.setattr(
+        code_compressor, "detect_language", lambda code: (CodeLanguage.UNKNOWN, 0.0)
+    )
     monkeypatch.setattr(
         compressor,
         "_fallback_compress",
@@ -620,13 +661,15 @@ def test_compress_with_ast_extract_structure_and_assembly_paths(monkeypatch) -> 
         "_extract_generic_structure",
         lambda root, code: CodeStructure(other=["misc", ""]),
     )
-    compressed, _, symbol_scores = compressor._compress_with_ast("misc", CodeLanguage.UNKNOWN, "ctx")
+    compressed, _, symbol_scores = compressor._compress_with_ast(
+        "misc", CodeLanguage.UNKNOWN, "ctx"
+    )
     assert compressed == "misc"
     assert symbol_scores == {"keep": 0.8}
 
-    generic = CodeAwareCompressor(CodeCompressorConfig(enable_ccr=False))._extract_generic_structure(
-        _Node("module"), "a\nb"
-    )
+    generic = CodeAwareCompressor(
+        CodeCompressorConfig(enable_ccr=False)
+    )._extract_generic_structure(_Node("module"), "a\nb")
     assert generic.other == ["a", "b"]
     assembled = compressor._assemble_compressed(
         CodeStructure(
@@ -681,7 +724,11 @@ def test_extract_structure_function_and_class_compression_paths(monkeypatch) -> 
         "module",
         [
             _Node("package_clause", start_byte=0, end_byte=len("package main")),
-            _Node("import_statement", start_byte=len("package main\n"), end_byte=len("package main\nimport os")),
+            _Node(
+                "import_statement",
+                start_byte=len("package main\n"),
+                end_byte=len("package main\nimport os"),
+            ),
             _Node(
                 "export_statement",
                 [
@@ -745,7 +792,9 @@ def test_extract_structure_function_and_class_compression_paths(monkeypatch) -> 
     monkeypatch.setattr(
         compressor,
         "_compress_function_ast",
-        lambda node, code, language, lang_config, body_limits, analysis: f"FUNC<{_get_definition_name(node)}>",
+        lambda node, code, language, lang_config, body_limits, analysis: (
+            f"FUNC<{_get_definition_name(node)}>"
+        ),
     )
     monkeypatch.setattr(
         compressor,
@@ -768,7 +817,9 @@ def test_extract_structure_function_and_class_compression_paths(monkeypatch) -> 
 
 def test_compress_function_and_class_ast_cover_truncation_paths(monkeypatch) -> None:
     compressor = CodeAwareCompressor(
-        CodeCompressorConfig(enable_ccr=False, max_body_lines=1, docstring_mode=DocstringMode.FIRST_LINE)
+        CodeCompressorConfig(
+            enable_ccr=False, max_body_lines=1, docstring_mode=DocstringMode.FIRST_LINE
+        )
     )
     analysis = _SymbolAnalysis(calls={"sample": {"helper", "other"}})
     python_code = (
@@ -866,7 +917,11 @@ def test_compress_function_and_class_ast_cover_truncation_paths(monkeypatch) -> 
             _Node(
                 "decorated_definition",
                 [
-                    _Node("decorator", start_byte=class_code.index("    @decorator"), end_byte=class_code.index("    @decorator") + len("    @decorator")),
+                    _Node(
+                        "decorator",
+                        start_byte=class_code.index("    @decorator"),
+                        end_byte=class_code.index("    @decorator") + len("    @decorator"),
+                    ),
                     _Node("function_definition", start_point=(5, 0), end_point=(6, 13)),
                 ],
                 start_point=(4, 0),

@@ -35,8 +35,8 @@ from click.testing import CliRunner
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 
-from headroom.pipeline import PipelineStage
 from headroom.cli.proxy import proxy as proxy_cli
+from headroom.pipeline import PipelineStage
 from headroom.proxy.handlers.anthropic import AnthropicHandlerMixin
 from headroom.proxy.helpers import MAX_MESSAGE_ARRAY_LENGTH, MAX_REQUEST_BODY_SIZE
 from headroom.proxy.models import ProxyConfig
@@ -788,6 +788,7 @@ def test_optimize_pipeline_events_and_presend_adjust_forwarded_request(monkeypat
         handler.config.image_optimize = True
         handler.config.hooks = _Hooks()
         handler.pipeline_extensions = _PipelineExtensions()
+
         async def _capture_retry(method: str, url: str, headers: dict, body: dict):
             handler.captured = (method, url, headers, body)
             return _ResponseStub()
@@ -868,11 +869,23 @@ def test_memory_and_traffic_learning_update_forwarded_messages_and_headers():
                 self._backend = value
 
             def extract_tool_results_from_messages(self, messages):  # noqa: ANN001, ANN201
-                return [{"tool_name": "search", "input": {"q": "hello"}, "output": "ok", "is_error": False}]
+                return [
+                    {
+                        "tool_name": "search",
+                        "input": {"q": "hello"},
+                        "output": "ok",
+                        "is_error": False,
+                    }
+                ]
 
             async def on_tool_result(self, **kwargs) -> None:
                 self.tool_results.append(
-                    (kwargs["tool_name"], kwargs["tool_input"], kwargs["tool_output"], kwargs["is_error"])
+                    (
+                        kwargs["tool_name"],
+                        kwargs["tool_input"],
+                        kwargs["tool_output"],
+                        kwargs["is_error"],
+                    )
                 )
 
             async def on_messages(self, messages) -> None:  # noqa: ANN001
@@ -893,6 +906,7 @@ def test_memory_and_traffic_learning_update_forwarded_messages_and_headers():
         handler.pipeline_extensions = SimpleNamespace(
             emit=lambda *a, **k: SimpleNamespace(messages=None, tools=None, headers=None)
         )
+
         async def _capture_retry(method: str, url: str, headers: dict, body: dict):
             handler.captured = (method, url, headers, body)
             return _ResponseStub()
@@ -924,9 +938,7 @@ def test_memory_and_traffic_learning_update_forwarded_messages_and_headers():
         assert [tool["name"] for tool in handler.captured[3]["tools"]] == ["memory_lookup"]
         assert handler.captured[2]["anthropic-beta"] == "existing,memory-v1"
         assert handler.traffic_learner._backend is backend
-        assert handler.traffic_learner.tool_results == [
-            ("search", {"q": "hello"}, "ok", False)
-        ]
+        assert handler.traffic_learner.tool_results == [("search", {"q": "hello"}, "ok", False)]
         assert handler.traffic_learner.message_batches
 
     with _tokenizer_patch():
@@ -938,8 +950,12 @@ def test_ccr_proactive_expansion_appends_context_to_latest_user_turn():
         handler = _DummyAnthropicHandler()
         handler._turn_counter = 7
         handler.ccr_context_tracker = SimpleNamespace(
-            analyze_query=lambda query, turn: ["relevant"] if query == "hello" and turn == 7 else [],
-            execute_expansions=lambda recommendations: [{"kind": "memory"}] if recommendations else [],
+            analyze_query=lambda query, turn: (
+                ["relevant"] if query == "hello" and turn == 7 else []
+            ),
+            execute_expansions=lambda recommendations: (
+                [{"kind": "memory"}] if recommendations else []
+            ),
             format_expansions_for_context=lambda expansions: "expanded-context",
         )
         handler.config.ccr_proactive_expansion = True
@@ -977,14 +993,17 @@ def test_traffic_learner_fail_open_and_memory_system_context_injection():
                 RuntimeError("traffic failed")
             ),
         )
-        handler._inject_system_context = (
-            lambda messages, context, body: [{"role": "system", "content": context}, *messages]
-        )
+        handler._inject_system_context = lambda messages, context, body: [
+            {"role": "system", "content": context},
+            *messages,
+        ]
         handler.memory_handler = SimpleNamespace(
             config=SimpleNamespace(inject_context=True, inject_tools=False),
             initialized=False,
             backend=None,
-            search_and_format_context=lambda user_id, messages: _return_memory_context("system-memory"),
+            search_and_format_context=lambda user_id, messages: _return_memory_context(
+                "system-memory"
+            ),
             has_memory_tool_calls=lambda response, provider: False,
             handle_memory_tool_calls=lambda response, user_id, provider: _return_tool_calls([]),
         )
@@ -1054,10 +1073,14 @@ def test_bedrock_backend_success_and_error_paths():
         handler = _DummyAnthropicHandler()
         handler.anthropic_backend = SimpleNamespace(name="bedrock", send_message=_send_message)
         handler.pipeline_extensions = SimpleNamespace(
-            emit=lambda stage, **kwargs: emitted.append((stage, kwargs))
-            or SimpleNamespace(messages=None, tools=None, headers=None)
+            emit=lambda stage, **kwargs: (
+                emitted.append((stage, kwargs))
+                or SimpleNamespace(messages=None, tools=None, headers=None)
+            )
         )
-        handler.metrics.record_request = lambda **kwargs: metric_calls.append(kwargs) or _return_none()
+        handler.metrics.record_request = lambda **kwargs: (
+            metric_calls.append(kwargs) or _return_none()
+        )
         handler.cost_tracker = SimpleNamespace(
             check_budget=lambda: (True, None),
             record_tokens=lambda *args: cost_calls.append(args),
@@ -1075,7 +1098,10 @@ def test_bedrock_backend_success_and_error_paths():
             )
         )
         assert response.status_code == 200
-        assert response.body == b'{"content":[{"type":"text","text":"bedrock ok"}],"usage":{"output_tokens":7}}'
+        assert (
+            response.body
+            == b'{"content":[{"type":"text","text":"bedrock ok"}],"usage":{"output_tokens":7}}'
+        )
         assert metric_calls[-1]["provider"] == "bedrock"
         assert metric_calls[-1]["output_tokens"] == 7
         assert cost_calls[-1] == ("claude-3-5-sonnet-latest", 0, 1)
@@ -1153,17 +1179,23 @@ def test_direct_api_error_dump_and_redacted_headers(monkeypatch, tmp_path):
         )
 
         handler = _DummyAnthropicHandler()
-        handler.metrics.record_cache_bust = lambda bust_tokens: cache_busts.append(bust_tokens) or _return_none()
-        handler.metrics.record_request = lambda **kwargs: metric_calls.append(kwargs) or _return_none()
+        handler.metrics.record_cache_bust = lambda bust_tokens: (
+            cache_busts.append(bust_tokens) or _return_none()
+        )
+        handler.metrics.record_request = lambda **kwargs: (
+            metric_calls.append(kwargs) or _return_none()
+        )
         handler.cache = SimpleNamespace(
             get=lambda messages, model: _return_none(),
-            set=lambda *args, **kwargs: cache_sets.append((args, kwargs)) or _return_none()
+            set=lambda *args, **kwargs: cache_sets.append((args, kwargs)) or _return_none(),
         )
         handler.session_tracker_store = SimpleNamespace(
             compute_session_id=lambda *a, **k: "sess-1",
             get_or_create=lambda *a, **k: prefix_tracker,
         )
-        handler._retry_request = lambda method, url, headers, body: _return_response(_ErrorResponse())
+        handler._retry_request = lambda method, url, headers, body: _return_response(
+            _ErrorResponse()
+        )
         handler.pipeline_extensions = SimpleNamespace(
             emit=lambda *a, **k: SimpleNamespace(messages=None, tools=None, headers=None)
         )
@@ -1216,7 +1248,13 @@ def test_direct_api_success_handles_ccr_memory_continuation_and_cache_bust(monke
         prefix_updates: list[dict[str, object]] = []
 
         class _JsonResponse:
-            def __init__(self, payload: dict, *, status_code: int = 200, headers: dict[str, str] | None = None):
+            def __init__(
+                self,
+                payload: dict,
+                *,
+                status_code: int = 200,
+                headers: dict[str, str] | None = None,
+            ):
                 self.status_code = status_code
                 self.headers = headers or {"content-type": "application/json"}
                 self._payload = payload
@@ -1234,7 +1272,9 @@ def test_direct_api_success_handles_ccr_memory_continuation_and_cache_bust(monke
 
         initial_response = _JsonResponse(
             {
-                "content": [{"type": "tool_use", "id": "call1", "name": "headroom_retrieve", "input": {}}],
+                "content": [
+                    {"type": "tool_use", "id": "call1", "name": "headroom_retrieve", "input": {}}
+                ],
                 "usage": {
                     "output_tokens": 2,
                     "cache_read_input_tokens": 0,
@@ -1278,8 +1318,12 @@ def test_direct_api_success_handles_ccr_memory_continuation_and_cache_bust(monke
                 )
             )
         )
-        handler.metrics.record_cache_bust = lambda bust_tokens: cache_busts.append(bust_tokens) or _return_none()
-        handler.metrics.record_request = lambda **kwargs: metric_calls.append(kwargs) or _return_none()
+        handler.metrics.record_cache_bust = lambda bust_tokens: (
+            cache_busts.append(bust_tokens) or _return_none()
+        )
+        handler.metrics.record_request = lambda **kwargs: (
+            metric_calls.append(kwargs) or _return_none()
+        )
         handler.cache = SimpleNamespace(
             get=lambda messages, model: _return_none(),
             set=lambda *args, **kwargs: cache_sets.append((args, kwargs)) or _return_none(),
@@ -1329,7 +1373,7 @@ def test_direct_api_success_handles_ccr_memory_continuation_and_cache_bust(monke
             SimpleNamespace(
                 get_subscription_tracker=lambda: SimpleNamespace(
                     notify_active=lambda auth_header: None,
-                    update_contribution=lambda **kwargs: sub_updates.append(kwargs)
+                    update_contribution=lambda **kwargs: sub_updates.append(kwargs),
                 )
             ),
         )
@@ -1345,7 +1389,9 @@ def test_direct_api_success_handles_ccr_memory_continuation_and_cache_bust(monke
         )
         assert response.status_code == 200
         assert response.body == continuation_response.content
-        assert http_client_calls[0]["json"]["messages"] == [{"role": "user", "content": "continued"}]
+        assert http_client_calls[0]["json"]["messages"] == [
+            {"role": "user", "content": "continued"}
+        ]
         assert http_client_calls[0]["json"]["tools"] == [{"name": "tool"}]
         assert "content-encoding" not in http_client_calls[0]["headers"]
         memory_continuation = continuation_bodies[-1]["messages"]
@@ -1363,7 +1409,9 @@ def test_direct_api_success_handles_ccr_memory_continuation_and_cache_bust(monke
 
     async def _handle_ccr(resp_json, optimized_messages, tools, api_call_fn, provider):  # noqa: ANN001, ANN201
         assert provider == "anthropic"
-        continuation = await api_call_fn([{"role": "user", "content": "continued"}], [{"name": "tool"}])
+        continuation = await api_call_fn(
+            [{"role": "user", "content": "continued"}], [{"name": "tool"}]
+        )
         assert continuation == {"continued": True}
         return {
             "content": [{"type": "tool_use", "id": "call1", "name": "memory_lookup", "input": {}}],

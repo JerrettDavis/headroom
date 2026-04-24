@@ -42,7 +42,9 @@ def test_compute_semantic_score_returns_neutral_on_embedding_failure() -> None:
     assert scorer._compute_semantic_score({"content": "hello"}, 0, [1.0, 0.0]) == 0.5
 
 
-def test_compute_toin_score_handles_non_tool_invalid_content_and_low_confidence(monkeypatch) -> None:
+def test_compute_toin_score_handles_non_tool_invalid_content_and_low_confidence(
+    monkeypatch,
+) -> None:
     scorer = MessageScorer(toin=SimpleNamespace(get_pattern=lambda _: None))
 
     assert scorer._compute_toin_score({"role": "user", "content": "{}"}) == 0.5
@@ -115,7 +117,9 @@ def test_compute_error_score_handles_no_pattern_and_high_confidence_fields(monke
     )
     scorer = MessageScorer(toin=SimpleNamespace(get_pattern=lambda _: pattern))
 
-    assert scorer._compute_error_score({"role": "tool", "content": '{"ok": true}'}) == pytest.approx(0.8)
+    assert scorer._compute_error_score(
+        {"role": "tool", "content": '{"ok": true}'}
+    ) == pytest.approx(0.8)
 
 
 def test_compute_error_score_returns_zero_for_non_tool_and_failures(monkeypatch) -> None:

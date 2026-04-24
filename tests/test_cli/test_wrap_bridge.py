@@ -210,7 +210,9 @@ def test_wrap_claude_with_memory_sync_launches_and_reports_sync_stats(
             )
         return SimpleNamespace(returncode=7)
 
-    monkeypatch.setattr(wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None
+    )
     monkeypatch.setattr(wrap_cli, "_ensure_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         wrap_cli,
@@ -279,7 +281,9 @@ def test_wrap_claude_reports_up_to_date_sync_and_runs_rtk_and_code_graph(
             )
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None
+    )
     monkeypatch.setattr(wrap_cli, "_ensure_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         wrap_cli,
@@ -312,7 +316,9 @@ def test_wrap_claude_surfaces_sync_stderr_and_launch_errors(monkeypatch, tmp_pat
             return SimpleNamespace(returncode=1, stdout="", stderr="x" * 400)
         raise RuntimeError("launch failed")
 
-    monkeypatch.setattr(wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None
+    )
     monkeypatch.setattr(wrap_cli, "_ensure_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         wrap_cli,
@@ -343,7 +349,9 @@ def test_wrap_claude_warns_when_memory_sync_fails(monkeypatch, tmp_path: Path) -
             raise RuntimeError("sync exploded")
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        wrap_cli.shutil, "which", lambda name: "claude" if name == "claude" else None
+    )
     monkeypatch.setattr(wrap_cli, "_ensure_proxy", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         wrap_cli,

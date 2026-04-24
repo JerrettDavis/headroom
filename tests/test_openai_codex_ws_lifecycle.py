@@ -679,7 +679,11 @@ async def test_ws_handler_compresses_first_frame_input(monkeypatch):
 
     payload = json.loads(upstream.sent[0])
     response_body = payload["response"]
-    assert response_body["input"] != json.loads(client_ws._frames[0])["response"]["input"] if client_ws._frames else response_body["input"]
+    assert (
+        response_body["input"] != json.loads(client_ws._frames[0])["response"]["input"]
+        if client_ws._frames
+        else response_body["input"]
+    )
 
 
 @pytest.mark.asyncio

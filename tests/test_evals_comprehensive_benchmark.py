@@ -119,7 +119,10 @@ def test_run_lm_eval_parse_and_compare(monkeypatch, tmp_path: Path) -> None:
     assert fallback[1].metric == "metric"
 
     comparisons = cb.compare_results(
-        [cb.BenchmarkResult(task="gsm8k", metric="acc", score=0.9), cb.BenchmarkResult(task="mmlu", metric="acc", score=0.7)],
+        [
+            cb.BenchmarkResult(task="gsm8k", metric="acc", score=0.9),
+            cb.BenchmarkResult(task="mmlu", metric="acc", score=0.7),
+        ],
         [cb.BenchmarkResult(task="gsm8k", metric="acc", score=0.91)],
     )
     assert len(comparisons) == 1
@@ -160,7 +163,9 @@ def test_comprehensive_benchmark_wrappers_and_main(monkeypatch, tmp_path: Path, 
         cb.run_headroom_benchmark()
 
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
-    headroom = cb.run_headroom_benchmark(model="gpt-4o-mini", tasks=["gsm8k"], limit=5, headroom_port=9999)
+    headroom = cb.run_headroom_benchmark(
+        model="gpt-4o-mini", tasks=["gsm8k"], limit=5, headroom_port=9999
+    )
     assert headroom[0].task == "gsm8k"
 
     monkeypatch.setattr(
@@ -230,7 +235,11 @@ def test_comprehensive_benchmark_wrappers_and_main(monkeypatch, tmp_path: Path, 
     assert proxy_exit.value.code == 1
 
     monkeypatch.setattr(cb, "check_headroom_proxy", lambda port: True)
-    monkeypatch.setattr(cb, "run_comprehensive_benchmark", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        cb,
+        "run_comprehensive_benchmark",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
     monkeypatch.setattr(sys, "argv", ["prog"])
     with pytest.raises(SystemExit) as fail_exit:
         cb.main()

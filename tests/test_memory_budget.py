@@ -40,7 +40,9 @@ def test_budget_manager_optimize_decay_staleness_and_merge(monkeypatch, tmp_path
     budget_module, MemoryEntry = _load_budget(monkeypatch)
     monkeypatch.setattr(budget_module.time, "time", lambda: 1_000_000.0)
 
-    config = budget_module.BudgetConfig(agent_budgets={"generic": 14}, similarity_merge_threshold=0.4)
+    config = budget_module.BudgetConfig(
+        agent_budgets={"generic": 14}, similarity_merge_threshold=0.4
+    )
     manager = budget_module.MemoryBudgetManager(project_path=tmp_path, config=config)
 
     kept_path = tmp_path / "keep.txt"
@@ -102,7 +104,11 @@ def test_budget_manager_optimize_decay_staleness_and_merge(monkeypatch, tmp_path
     assert report.tokens_before > report.tokens_after
     assert report.tokens_saved == report.tokens_before - report.tokens_after
     assert fresh.importance > 0.9
-    merged_entry = next(entry for entry in [fresh, similar_a, similar_b, over_budget] if set(entry.entity_refs) == {"one", "two"})
+    merged_entry = next(
+        entry
+        for entry in [fresh, similar_a, similar_b, over_budget]
+        if set(entry.entity_refs) == {"one", "two"}
+    )
     assert merged_entry.access_count == 3
 
 
@@ -144,9 +150,9 @@ def test_budget_manager_helpers_git_cache_and_similarity(monkeypatch, tmp_path: 
     monkeypatch.setattr(budget_module.subprocess, "run", raise_missing)
     assert no_git._get_git_files() == set()
 
-    assert budget_module.MemoryBudgetManager._text_similarity("alpha beta", "alpha gamma") == pytest.approx(
-        1 / 3
-    )
+    assert budget_module.MemoryBudgetManager._text_similarity(
+        "alpha beta", "alpha gamma"
+    ) == pytest.approx(1 / 3)
     assert budget_module.MemoryBudgetManager._text_similarity("", "alpha") == 0.0
 
     singleton = MemoryEntry(content="solo", importance=0.5, created_at=0, score=0.5)

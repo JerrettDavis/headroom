@@ -319,7 +319,9 @@ def test_apply_strategy_to_content_covers_multiple_strategy_paths(
     monkeypatch.setattr(
         router,
         "_get_smart_crusher",
-        lambda: SimpleNamespace(crush=lambda content, query, bias: SimpleNamespace(compressed="json")),
+        lambda: SimpleNamespace(
+            crush=lambda content, query, bias: SimpleNamespace(compressed="json")
+        ),
     )
     assert router._apply_strategy_to_content(
         '[{"id": 1}]',
@@ -486,15 +488,21 @@ def test_router_helper_methods_cover_images_tools_and_analysis_intent(
     )
     assert tool_map == {"call_1": "Read", "call_2": "Glob"}
 
-    assert router._detect_analysis_intent(
-        [
-            {"role": "assistant", "content": "old"},
-            {"role": "user", "content": "Please analyze and explain this bug"},
-        ]
-    ) is True
-    assert router._detect_analysis_intent(
-        [{"role": "user", "content": ["non-string blocks are ignored"]}]
-    ) is False
+    assert (
+        router._detect_analysis_intent(
+            [
+                {"role": "assistant", "content": "old"},
+                {"role": "user", "content": "Please analyze and explain this bug"},
+            ]
+        )
+        is True
+    )
+    assert (
+        router._detect_analysis_intent(
+            [{"role": "user", "content": ["non-string blocks are ignored"]}]
+        )
+        is False
+    )
     assert router.should_apply([], tokenizer=SimpleNamespace()) is True
 
 
@@ -804,10 +812,10 @@ def test_process_content_blocks_handles_excluded_pinned_cached_and_small_content
     assert route_counts["cache_hit"] == 1
 
 
-def test_process_content_blocks_handles_cache_miss_bias_and_skip(monkeypatch: pytest.MonkeyPatch) -> None:
-    router = ContentRouter(
-        ContentRouterConfig(tool_profiles={"Search": SimpleNamespace(bias=0.5)})
-    )
+def test_process_content_blocks_handles_cache_miss_bias_and_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = ContentRouter(ContentRouterConfig(tool_profiles={"Search": SimpleNamespace(bias=0.5)}))
     content = "tool output " * 120
     seen_biases: list[float] = []
 
@@ -890,7 +898,9 @@ def test_content_router_apply_covers_protection_and_compression_flow(
         content_router_module,
         "_detect_content",
         lambda content: DetectionResult(
-            content_type=ContentType.SOURCE_CODE if str(content).startswith("def fn") else ContentType.PLAIN_TEXT,
+            content_type=ContentType.SOURCE_CODE
+            if str(content).startswith("def fn")
+            else ContentType.PLAIN_TEXT,
             confidence=1.0,
             metadata={},
         ),
@@ -1071,7 +1081,9 @@ def test_content_router_apply_compresses_old_excluded_tool_outputs_with_combined
     assert any(transform.startswith("router:text:0.20") for transform in result.transforms_applied)
 
 
-def test_content_router_apply_moves_tightened_cached_result_to_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_content_router_apply_moves_tightened_cached_result_to_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     router = ContentRouter()
     router.config.read_lifecycle.enabled = False
     tokenizer = SimpleNamespace(count_text=lambda text: len(str(text).split()))
@@ -1086,10 +1098,14 @@ def test_content_router_apply_moves_tightened_cached_result_to_skip(monkeypatch:
     monkeypatch.setattr(
         router,
         "compress",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cache branch should short-circuit")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("cache branch should short-circuit")
+        ),
     )
 
-    result = router.apply([{"role": "assistant", "content": content}], tokenizer=tokenizer, model_limit=1000)
+    result = router.apply(
+        [{"role": "assistant", "content": content}], tokenizer=tokenizer, model_limit=1000
+    )
 
     assert result.messages == [{"role": "assistant", "content": content}]
     assert router._cache.is_skipped(hash(content)) is True

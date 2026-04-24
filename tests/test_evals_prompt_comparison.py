@@ -82,11 +82,11 @@ def test_compare_prompts_and_messages(monkeypatch) -> None:
         ]
     )
     fake_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kwargs: fake_response)
-        )
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: fake_response))
     )
-    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=lambda api_key=None: fake_client))
+    monkeypatch.setitem(
+        sys.modules, "openai", types.SimpleNamespace(OpenAI=lambda api_key=None: fake_client)
+    )
 
     compared = pc.compare_prompts(
         original_prompt="What is 2+2?",
@@ -154,7 +154,9 @@ def test_batch_compare_and_verify(monkeypatch) -> None:
             original=kwargs["original_prompt"],
             headroom_modified=kwargs["headroom_modified_prompt"],
             are_equivalent=kwargs["original_prompt"] == kwargs["headroom_modified_prompt"],
-            differences=["changed"] if kwargs["original_prompt"] != kwargs["headroom_modified_prompt"] else [],
+            differences=["changed"]
+            if kwargs["original_prompt"] != kwargs["headroom_modified_prompt"]
+            else [],
             reasoning="checked",
             metadata=kwargs.get("metadata", {}),
         ),

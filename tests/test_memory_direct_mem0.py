@@ -120,7 +120,12 @@ async def test_direct_mem0_initialization_and_direct_paths(monkeypatch) -> None:
             self.deleted = kwargs
 
         def get(self, **kwargs):
-            return {"id": kwargs["memory_id"], "memory": "got", "user_id": "u", "metadata": {"a": 1}}
+            return {
+                "id": kwargs["memory_id"],
+                "memory": "got",
+                "user_id": "u",
+                "metadata": {"a": 1},
+            }
 
     fake_mem0_client = FakeMem0Client()
 
@@ -137,9 +142,15 @@ async def test_direct_mem0_initialization_and_direct_paths(monkeypatch) -> None:
         payload: dict
 
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
-    monkeypatch.setitem(sys.modules, "qdrant_client", types.SimpleNamespace(QdrantClient=FakeQdrantClient))
-    monkeypatch.setitem(sys.modules, "qdrant_client.models", types.SimpleNamespace(PointStruct=PointStruct))
-    monkeypatch.setitem(sys.modules, "neo4j", types.SimpleNamespace(GraphDatabase=FakeGraphDatabase))
+    monkeypatch.setitem(
+        sys.modules, "qdrant_client", types.SimpleNamespace(QdrantClient=FakeQdrantClient)
+    )
+    monkeypatch.setitem(
+        sys.modules, "qdrant_client.models", types.SimpleNamespace(PointStruct=PointStruct)
+    )
+    monkeypatch.setitem(
+        sys.modules, "neo4j", types.SimpleNamespace(GraphDatabase=FakeGraphDatabase)
+    )
     monkeypatch.setitem(sys.modules, "mem0", types.SimpleNamespace(Memory=FakeMem0Memory))
     monkeypatch.setattr(
         direct_mem0,
@@ -178,7 +189,9 @@ async def test_direct_mem0_initialization_and_direct_paths(monkeypatch) -> None:
         metadata={"m": 1},
         facts=["fact1", "fact2"],
         extracted_entities=[{"entity": "Alice", "entity_type": "person"}],
-        extracted_relationships=[{"source": "Alice", "relationship": "knows", "destination": "Bob"}],
+        extracted_relationships=[
+            {"source": "Alice", "relationship": "knows", "destination": "Bob"}
+        ],
     )
     assert direct.metadata["_direct_write"] is True
     assert direct.metadata["_fact_count"] == 2
@@ -193,7 +206,9 @@ async def test_direct_mem0_initialization_and_direct_paths(monkeypatch) -> None:
     assert direct_no_facts.content == "content-only"
 
     fake_mem0_client.add_result = {"results": [{"id": "fallback-id", "memory": "stored"}]}
-    fallback = await adapter._save_memory_internal("raw", "u1", 0.4, entities=["Alice"], metadata={"x": 1})
+    fallback = await adapter._save_memory_internal(
+        "raw", "u1", 0.4, entities=["Alice"], metadata={"x": 1}
+    )
     assert fallback.id == "fallback-id"
     fake_mem0_client.add_result = {}
     not_extracted = await adapter._save_memory_internal("raw", "u1", 0.4)
@@ -212,7 +227,9 @@ async def test_direct_mem0_tasks_search_and_crud(monkeypatch) -> None:
         lambda: datetime(2024, 1, 1, tzinfo=timezone.utc),
     )
 
-    adapter = direct_mem0.DirectMem0Adapter(direct_mem0.Mem0Config(async_writes=True, enable_graph=False))
+    adapter = direct_mem0.DirectMem0Adapter(
+        direct_mem0.Mem0Config(async_writes=True, enable_graph=False)
+    )
     adapter._initialized = True
     adapter._mem0_client = SimpleNamespace()
 
@@ -269,26 +286,37 @@ async def test_direct_mem0_tasks_search_and_crud(monkeypatch) -> None:
         },
         update=lambda **kwargs: None,
         delete=lambda **kwargs: None,
-        get=lambda **kwargs: {"id": kwargs["memory_id"], "memory": "stored", "user_id": "u1", "metadata": {"a": 1}},
+        get=lambda **kwargs: {
+            "id": kwargs["memory_id"],
+            "memory": "stored",
+            "user_id": "u1",
+            "metadata": {"a": 1},
+        },
     )
     adapter2 = direct_mem0.DirectMem0Adapter()
     adapter2._initialized = True
     adapter2._mem0_client = search_client
-    results = await adapter2.search_memories("python", "u1", entities=["Python"], include_related=True, top_k=5, session_id="s1")
+    results = await adapter2.search_memories(
+        "python", "u1", entities=["Python"], include_related=True, top_k=5, session_id="s1"
+    )
     assert isinstance(results[0], MemorySearchResult)
     assert results[0].memory.content == "Python facts"
     assert await adapter2.search_memories("python", "u1", entities=["Go"], session_id="s1") == []
 
     updated = await adapter2.update_memory("m1", "new", reason="why", user_id="u1")
     assert updated.metadata["update_reason"] == "why"
-    failing_update_client = SimpleNamespace(update=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad")))
+    failing_update_client = SimpleNamespace(
+        update=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad"))
+    )
     adapter2._mem0_client = failing_update_client
     with pytest.raises(ValueError):
         await adapter2.update_memory("m1", "new")
 
     adapter2._mem0_client = search_client
     assert await adapter2.delete_memory("m1") is True
-    adapter2._mem0_client = SimpleNamespace(delete=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad")))
+    adapter2._mem0_client = SimpleNamespace(
+        delete=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad"))
+    )
     assert await adapter2.delete_memory("m1") is False
 
     adapter2._mem0_client = search_client
@@ -296,7 +324,9 @@ async def test_direct_mem0_tasks_search_and_crud(monkeypatch) -> None:
     assert got.metadata == {"a": 1}
     adapter2._mem0_client = SimpleNamespace(get=lambda **kwargs: None)
     assert await adapter2.get_memory("m1") is None
-    adapter2._mem0_client = SimpleNamespace(get=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad")))
+    adapter2._mem0_client = SimpleNamespace(
+        get=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("bad"))
+    )
     assert await adapter2.get_memory("m1") is None
 
     assert adapter2.supports_graph is True

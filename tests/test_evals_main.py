@@ -101,7 +101,11 @@ def test_cmd_benchmark_paths(monkeypatch, tmp_path: Path, capsys) -> None:
             self.use_semantic_similarity = use_semantic_similarity
 
         def run(self, suite, progress_callback):
-            progress_callback(1, 1, types.SimpleNamespace(accuracy_preserved=True, f1_score=1.0, compression_ratio=0.5))
+            progress_callback(
+                1,
+                1,
+                types.SimpleNamespace(accuracy_preserved=True, f1_score=1.0, compression_ratio=0.5),
+            )
             return _BenchResult(suite_name=str(suite[0]))
 
     runner_module.LLMConfig = LLMConfig
@@ -130,14 +134,18 @@ def test_cmd_benchmark_paths(monkeypatch, tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         eval_main.cmd_benchmark(args)
 
-    datasets_module.load_dataset_by_name = lambda name, n: (_ for _ in ()).throw(ImportError("missing extras"))
+    datasets_module.load_dataset_by_name = lambda name, n: (_ for _ in ()).throw(
+        ImportError("missing extras")
+    )
     args.dataset = "squad"
     with pytest.raises(SystemExit):
         eval_main.cmd_benchmark(Namespace(**{**args.__dict__, "output": None}))
     missing_output = capsys.readouterr().out
     assert "Install with: pip install headroom-ai[evals]" in missing_output
 
-    datasets_module.load_dataset_by_name = lambda name, n: (_ for _ in ()).throw(RuntimeError("broken"))
+    datasets_module.load_dataset_by_name = lambda name, n: (_ for _ in ()).throw(
+        RuntimeError("broken")
+    )
     with pytest.raises(SystemExit):
         eval_main.cmd_benchmark(Namespace(**{**args.__dict__, "output": None}))
     assert "Error loading squad: broken" in capsys.readouterr().out

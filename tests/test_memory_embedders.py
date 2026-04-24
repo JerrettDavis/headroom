@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import builtins
 import importlib.util
-import os
 import sys
 import types
 from pathlib import Path
@@ -62,7 +60,9 @@ async def test_local_embedder_and_normalizers(monkeypatch) -> None:
         get_sentence_transformer=lambda model_name, device: fake_model
     )
     monkeypatch.setitem(sys.modules, "headroom.models.ml_models", registry_module)
-    monkeypatch.setitem(sys.modules, "sentence_transformers", types.ModuleType("sentence_transformers"))
+    monkeypatch.setitem(
+        sys.modules, "sentence_transformers", types.ModuleType("sentence_transformers")
+    )
     torch_cuda = SimpleNamespace(is_available=lambda: False)
     torch_mps = SimpleNamespace(is_available=lambda: True)
     monkeypatch.setitem(
@@ -233,13 +233,19 @@ async def test_openai_embedder_paths(monkeypatch) -> None:
     success_client.embeddings = FakeAsyncEmbeddings(
         [SimpleNamespace(data=[SimpleNamespace(embedding=[3.0, 4.0])])]
     )
-    np.testing.assert_allclose(await embedder.embed("hello"), np.array([0.6, 0.8], dtype=np.float32))
-    np.testing.assert_array_equal(await embedder.embed(" "), np.zeros(embedder.dimension, dtype=np.float32))
+    np.testing.assert_allclose(
+        await embedder.embed("hello"), np.array([0.6, 0.8], dtype=np.float32)
+    )
+    np.testing.assert_array_equal(
+        await embedder.embed(" "), np.zeros(embedder.dimension, dtype=np.float32)
+    )
 
     batch_client = FakeAsyncOpenAI("env-key")
     batch_client.embeddings = FakeAsyncEmbeddings(
         [
-            SimpleNamespace(data=[SimpleNamespace(embedding=[3.0, 4.0]), SimpleNamespace(embedding=[5.0, 12.0])]),
+            SimpleNamespace(
+                data=[SimpleNamespace(embedding=[3.0, 4.0]), SimpleNamespace(embedding=[5.0, 12.0])]
+            ),
             SimpleNamespace(data=[SimpleNamespace(embedding=[8.0, 15.0])]),
         ]
     )
@@ -259,7 +265,9 @@ async def test_openai_embedder_paths(monkeypatch) -> None:
         await embedders.OpenAIEmbedder(api_key="k", max_retries=1)._embed_with_retry(["x"])
 
     retry_client = FakeAsyncOpenAI("env-key")
-    retry_client.embeddings = FakeAsyncEmbeddings([APIConnectionError("x"), APIConnectionError("y")])
+    retry_client.embeddings = FakeAsyncEmbeddings(
+        [APIConnectionError("x"), APIConnectionError("y")]
+    )
     monkeypatch.setattr(embedders.OpenAIEmbedder, "_async_client", retry_client)
     with pytest.raises(ConnectionError):
         await embedders.OpenAIEmbedder(api_key="k", max_retries=2)._embed_with_retry(["x"])
@@ -321,6 +329,7 @@ async def test_ollama_embedder_paths(monkeypatch) -> None:
     httpx_module.TimeoutException = TimeoutException
     httpx_module.HTTPStatusError = HTTPStatusError
     monkeypatch.setitem(sys.modules, "httpx", httpx_module)
+
     async def _no_sleep(_delay):
         return None
 
@@ -330,7 +339,12 @@ async def test_ollama_embedder_paths(monkeypatch) -> None:
 
     def async_client_factory(base_url=None, timeout=None):
         client = FakeAsyncClient(
-            [ConnectError("retry"), FakeResponse([3.0, 4.0]), FakeResponse([5.0, 12.0]), FakeResponse([8.0, 15.0])],
+            [
+                ConnectError("retry"),
+                FakeResponse([3.0, 4.0]),
+                FakeResponse([5.0, 12.0]),
+                FakeResponse([8.0, 15.0]),
+            ],
             base_url=base_url,
             timeout=timeout,
         )
@@ -339,7 +353,9 @@ async def test_ollama_embedder_paths(monkeypatch) -> None:
 
     httpx_module.AsyncClient = async_client_factory
 
-    ollama = embedders.OllamaEmbedder(model_name="nomic-embed-text", base_url="http://ollama/", max_retries=2)
+    ollama = embedders.OllamaEmbedder(
+        model_name="nomic-embed-text", base_url="http://ollama/", max_retries=2
+    )
     client = await ollama._get_client()
     assert client.base_url == "http://ollama"
     assert ollama.dimension == 768

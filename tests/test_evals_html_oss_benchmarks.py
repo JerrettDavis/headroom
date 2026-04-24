@@ -69,8 +69,16 @@ def test_evaluate_scrapinghub_and_qa_preservation(monkeypatch) -> None:
             load_dataset=lambda *args, **kwargs: {
                 "train": _FakeDataset(
                     [
-                        {"html": "<html>alpha beta</html>", "articleBody": "alpha beta", "url": "u1"},
-                        {"html": "<html>gamma delta</html>", "articleBody": "gamma delta", "url": "u2"},
+                        {
+                            "html": "<html>alpha beta</html>",
+                            "articleBody": "alpha beta",
+                            "url": "u1",
+                        },
+                        {
+                            "html": "<html>gamma delta</html>",
+                            "articleBody": "gamma delta",
+                            "url": "u2",
+                        },
                     ]
                 )
             }
@@ -103,14 +111,17 @@ def test_evaluate_scrapinghub_and_qa_preservation(monkeypatch) -> None:
     monkeypatch.setitem(
         sys.modules,
         "datasets",
-        types.SimpleNamespace(
-            load_dataset=lambda *args, **kwargs: squad_samples
-        ),
+        types.SimpleNamespace(load_dataset=lambda *args, **kwargs: squad_samples),
     )
-    answer_fn = lambda context, question: "Alice" if "Alice" in context else "Unknown"
+
+    def answer_fn(context, question):
+        return "Alice" if "Alice" in context else "Unknown"
+
     qa_result = hob.evaluate_qa_accuracy_preservation(
         answer_fn=answer_fn,
-        extractor=SimpleNamespace(extract=lambda html: SimpleNamespace(extracted=html, compression_ratio=0.5)),
+        extractor=SimpleNamespace(
+            extract=lambda html: SimpleNamespace(extracted=html, compression_ratio=0.5)
+        ),
         max_questions=2,
         dataset_name="squad",
     )
@@ -133,7 +144,9 @@ def test_evaluate_scrapinghub_and_qa_preservation(monkeypatch) -> None:
     )
     hotpot_result = hob.evaluate_qa_accuracy_preservation(
         answer_fn=lambda context, question: "Paris",
-        extractor=SimpleNamespace(extract=lambda html: SimpleNamespace(extracted=html, compression_ratio=0.4)),
+        extractor=SimpleNamespace(
+            extract=lambda html: SimpleNamespace(extracted=html, compression_ratio=0.4)
+        ),
         max_questions=1,
         dataset_name="hotpotqa",
     )
@@ -190,8 +203,16 @@ def test_run_full_html_oss_benchmark_suite(monkeypatch) -> None:
     assert suite.extraction_result is extraction
     assert suite.qa_result is qa
 
-    monkeypatch.setattr(hob, "evaluate_scrapinghub_benchmark", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("extract fail")))
-    monkeypatch.setattr(hob, "evaluate_qa_accuracy_preservation", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("qa fail")))
+    monkeypatch.setattr(
+        hob,
+        "evaluate_scrapinghub_benchmark",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("extract fail")),
+    )
+    monkeypatch.setattr(
+        hob,
+        "evaluate_qa_accuracy_preservation",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("qa fail")),
+    )
     failure_suite = hob.run_full_benchmark_suite(extractor=extractor, answer_fn=lambda *_args: "x")
     assert failure_suite.extraction_result is None
     assert failure_suite.qa_result is None

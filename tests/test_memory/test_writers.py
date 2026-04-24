@@ -187,7 +187,12 @@ class TestClaudeCodeWriter:
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("C:\\Users\\me")))
         writer = ClaudeCodeMemoryWriter(project_path=Path("C:\\repo\\project"))
         assert writer.default_path() == (
-            Path("C:\\Users\\me") / ".claude" / "projects" / "C:-repo-project" / "memory" / "MEMORY.md"
+            Path("C:\\Users\\me")
+            / ".claude"
+            / "projects"
+            / "C:-repo-project"
+            / "memory"
+            / "MEMORY.md"
         )
 
     def test_export_topics_writes_files(self, tmp_path: Path):
@@ -279,7 +284,9 @@ class TestCursorWriter:
 
     def test_export_returns_empty_when_all_entries_exceed_budget(self, tmp_path: Path):
         writer = CursorMemoryWriter(project_path=tmp_path, token_budget=1)
-        result = writer.export([MemoryEntry(content="too large for budget", importance=0.9)], dry_run=True)
+        result = writer.export(
+            [MemoryEntry(content="too large for budget", importance=0.9)], dry_run=True
+        )
         assert result.memories_skipped_budget == 1
         assert result.memories_exported == 0
 

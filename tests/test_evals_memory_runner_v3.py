@@ -66,8 +66,12 @@ def _load_runner_v3(monkeypatch):
 @pytest.mark.asyncio
 async def test_runner_v3_aggregate_summary_and_save(monkeypatch, tmp_path: Path) -> None:
     runner_v3 = _load_runner_v3(monkeypatch)
-    case1 = SimpleNamespace(question="Q1", answer="A1", category=1, category_name="profile", evidence=["t1"])
-    case2 = SimpleNamespace(question="Q2", answer="A2", category=2, category_name="event", evidence=["t2"])
+    case1 = SimpleNamespace(
+        question="Q1", answer="A1", category=1, category_name="profile", evidence=["t1"]
+    )
+    case2 = SimpleNamespace(
+        question="Q2", answer="A2", category=2, category_name="event", evidence=["t2"]
+    )
     result1 = runner_v3.CaseResultV3(
         case=case1,
         retrieved_turn_ids=["t1"],
@@ -113,9 +117,15 @@ async def test_runner_v3_generation_evaluation_and_wrappers(monkeypatch, tmp_pat
     def fake_completion(**kwargs):
         completion_calls.append(kwargs)
         if len(completion_calls) == 1:
-            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Predicted"))])
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Predicted"))]
+            )
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content='{"score": 0.8, "reasoning": "good"}'))]
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"score": 0.8, "reasoning": "good"}')
+                )
+            ]
         )
 
     monkeypatch.setattr(runner_v3.litellm, "completion", fake_completion)
@@ -146,16 +156,24 @@ async def test_runner_v3_generation_evaluation_and_wrappers(monkeypatch, tmp_pat
     assert predicted == "Error generating answer"
     assert judge_score is None
 
-    case = SimpleNamespace(question="Question?", answer="Ground truth", evidence=["t1"], category=1, category_name="profile")
+    case = SimpleNamespace(
+        question="Question?",
+        answer="Ground truth",
+        evidence=["t1"],
+        category=1,
+        category_name="profile",
+    )
     conv = SimpleNamespace(sample_id="conv1", speaker_a="Alice", speaker_b="Bob")
     memory = SimpleNamespace(content="Stored context", metadata={"dia_id": "t1"})
     result_item = SimpleNamespace(memory=memory)
+
     async def search_memories(**kwargs):
         return [result_item]
 
     backend = SimpleNamespace(search_memories=search_memories)
     evaluator = runner_v3.LoCoMoEvaluatorV3(runner_v3.EvalConfigV3(use_llm_judge=False, top_k=3))
     evaluator._backend = backend
+
     async def fake_generate_answer(*args):
         return "Predicted", 0.75, "reasoned"
 

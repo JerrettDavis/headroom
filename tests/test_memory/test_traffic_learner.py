@@ -265,14 +265,20 @@ class TestTrafficLearner:
         )
         assert learner.get_stats()["patterns_extracted"] == 0
 
-    def test_extract_tool_results_handles_non_list_and_string_results(self, learner: TrafficLearner):
+    def test_extract_tool_results_handles_non_list_and_string_results(
+        self, learner: TrafficLearner
+    ):
         results = learner.extract_tool_results_from_messages(
             [
                 {"role": "assistant", "content": "ignored"},
                 {
                     "role": "user",
                     "content": [
-                        {"type": "tool_result", "tool_use_id": "missing", "content": "Permission denied"},
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "missing",
+                            "content": "Permission denied",
+                        },
                     ],
                 },
             ]
@@ -1211,7 +1217,9 @@ class TestCollectAllPatterns:
         def boom(_db_path):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("headroom.memory.traffic_learner._load_persisted_patterns_from_sqlite", boom)
+        monkeypatch.setattr(
+            "headroom.memory.traffic_learner._load_persisted_patterns_from_sqlite", boom
+        )
         assert learner._collect_all_patterns() == []
 
 

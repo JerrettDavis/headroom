@@ -33,7 +33,9 @@ def _load_wrapper_tools(monkeypatch):
     system_module.MemorySystem = FakeMemorySystem
 
     tools_module = types.ModuleType("headroom.memory.tools")
-    tools_module.get_memory_tools = lambda: [{"type": "function", "function": {"name": "memory_save"}}]
+    tools_module.get_memory_tools = lambda: [
+        {"type": "function", "function": {"name": "memory_save"}}
+    ]
     tools_module.get_memory_tools_optimized = lambda: [
         {"type": "function", "function": {"name": "memory_save_optimized"}}
     ]
@@ -107,7 +109,9 @@ def test_memory_tools_wrapper_sync_paths(monkeypatch) -> None:
     assert wrapper.extra_attr == "value"
 
     messages = [{"role": "user", "content": "remember this"}]
-    response = wrapper.chat.completions.create(messages=messages, tools=[{"name": "custom"}], model="gpt")
+    response = wrapper.chat.completions.create(
+        messages=messages, tools=[{"name": "custom"}], model="gpt"
+    )
     assert messages == [{"role": "user", "content": "remember this"}]
     sent = completions.calls[0]
     assert sent["messages"][0]["role"] == "system"
@@ -118,11 +122,16 @@ def test_memory_tools_wrapper_sync_paths(monkeypatch) -> None:
     assert response._memory_tool_results["bad-json"]["success"] is False
     assert response._memory_tool_results["boom"]["success"] is False
 
-    messages_with_system = [{"role": "system", "content": "base"}, {"role": "user", "content": "hi"}]
+    messages_with_system = [
+        {"role": "system", "content": "base"},
+        {"role": "user", "content": "hi"},
+    ]
     prepared = wrapper.chat.completions._prepare_messages(messages_with_system)
     assert prepared[0]["content"].endswith("Extract facts")
 
-    no_tools = wrapper.chat.completions._process_memory_tool_calls(SimpleNamespace(choices=[]), {"memory_save"})
+    no_tools = wrapper.chat.completions._process_memory_tool_calls(
+        SimpleNamespace(choices=[]), {"memory_save"}
+    )
     assert no_tools == {}
 
     wrapper_no_auto = wrapper_tools.MemoryToolsWrapper(
@@ -131,7 +140,9 @@ def test_memory_tools_wrapper_sync_paths(monkeypatch) -> None:
         user_id="user",
         auto_handle_tools=False,
     )
-    plain = wrapper_no_auto.chat.completions.create(messages=[{"role": "user", "content": "x"}], model="gpt")
+    plain = wrapper_no_auto.chat.completions.create(
+        messages=[{"role": "user", "content": "x"}], model="gpt"
+    )
     assert not hasattr(plain, "_memory_tool_results")
 
 
@@ -178,7 +189,9 @@ async def test_memory_tools_wrapper_async_paths(monkeypatch) -> None:
             return _response_with_tool_calls(_tool_call("a", "memory_save", '{"k":1}'))
 
     async_only = AsyncCompletions()
-    memory = SimpleNamespace(process_tool_call=lambda name, args: asyncio.sleep(0, result={"message": "ok"}))
+    memory = SimpleNamespace(
+        process_tool_call=lambda name, args: asyncio.sleep(0, result={"message": "ok"})
+    )
     completions = wrapper_tools.MemoryToolsCompletions(
         async_only,
         memory,
@@ -199,7 +212,9 @@ async def test_memory_tools_wrapper_async_paths(monkeypatch) -> None:
         memory,
         auto_handle=True,
     )
-    response2 = await async_create.acreate(messages=[{"role": "user", "content": "hi"}], model="gpt")
+    response2 = await async_create.acreate(
+        messages=[{"role": "user", "content": "hi"}], model="gpt"
+    )
     assert response2._memory_tool_results["b"]["message"] == "ok"
 
     class SyncOnly:
@@ -214,16 +229,22 @@ async def test_memory_tools_wrapper_async_paths(monkeypatch) -> None:
             )
 
     sync_only = SyncOnly()
-    completions3 = wrapper_tools.MemoryToolsCompletions(sync_only, wrapper_tools.MemorySystem(object(), "user", None), auto_handle=True)
+    completions3 = wrapper_tools.MemoryToolsCompletions(
+        sync_only, wrapper_tools.MemorySystem(object(), "user", None), auto_handle=True
+    )
 
     class FakeLoop:
         async def run_in_executor(self, executor, func):
             return func()
 
     monkeypatch.setattr(wrapper_tools.asyncio, "get_running_loop", lambda: FakeLoop())
-    response3 = await completions3.acreate(messages=[{"role": "user", "content": "hi"}], model="gpt")
+    response3 = await completions3.acreate(
+        messages=[{"role": "user", "content": "hi"}], model="gpt"
+    )
     assert response3._memory_tool_results["json"]["success"] is False
     assert response3._memory_tool_results["err"]["success"] is False
 
-    wrapped = wrapper_tools.with_memory_tools(SimpleNamespace(chat=SimpleNamespace(completions=sync_only)), object(), "user")
+    wrapped = wrapper_tools.with_memory_tools(
+        SimpleNamespace(chat=SimpleNamespace(completions=sync_only)), object(), "user"
+    )
     assert isinstance(wrapped, wrapper_tools.MemoryToolsWrapper)

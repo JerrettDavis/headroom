@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 import importlib
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
-import types
 from unittest.mock import AsyncMock
 
 import pytest
-
 
 _mcp_module = types.ModuleType("mcp")
 _mcp_server_module = types.ModuleType("mcp.server")
@@ -125,12 +124,15 @@ async def test_handle_search_filters_results_and_reports_errors() -> None:
     assert "query is required" in (await mcp_server._handle_search(backend, {}, "user-1"))[0].text
 
     backend.search_memories = AsyncMock(return_value=[])
-    assert (await mcp_server._handle_search(backend, {"query": "miss"}, "user-1"))[0].text == "No memories found."
+    assert (await mcp_server._handle_search(backend, {"query": "miss"}, "user-1"))[
+        0
+    ].text == "No memories found."
 
     backend.search_memories = AsyncMock(side_effect=RuntimeError("search broke"))
-    assert "Search error: search broke" in (
-        await mcp_server._handle_search(backend, {"query": "fact"}, "user-1")
-    )[0].text
+    assert (
+        "Search error: search broke"
+        in (await mcp_server._handle_search(backend, {"query": "fact"}, "user-1"))[0].text
+    )
 
 
 @pytest.mark.asyncio
@@ -176,7 +178,9 @@ async def test_create_memory_server_run_and_main(monkeypatch, tmp_path: Path) ->
     fake_server = _FakeServer("headroom-memory")
     fake_backend = SimpleNamespace()
     monkeypatch.setattr(mcp_server, "Server", lambda name: fake_server)
-    monkeypatch.setattr(mcp_server, "LocalBackendConfig", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        mcp_server, "LocalBackendConfig", lambda **kwargs: SimpleNamespace(**kwargs)
+    )
     monkeypatch.setattr(mcp_server, "LocalBackend", lambda config: fake_backend)
     monkeypatch.setattr(mcp_server, "_warm_up_backend", AsyncMock())
     monkeypatch.setattr(

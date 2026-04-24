@@ -132,7 +132,16 @@ def _load_core_module(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     sys.modules["headroom.memory.core"] = module
     spec.loader.exec_module(module)
-    return module, factory_module, Memory, MemoryConfig, MemoryFilter, ScopeLevel, VectorSearchResult, TextSearchResult
+    return (
+        module,
+        factory_module,
+        Memory,
+        MemoryConfig,
+        MemoryFilter,
+        ScopeLevel,
+        VectorSearchResult,
+        TextSearchResult,
+    )
 
 
 class FakeStore:
@@ -285,9 +294,16 @@ class FakeCache:
 
 @pytest.mark.asyncio
 async def test_hierarchical_memory_full_flow(monkeypatch) -> None:
-    core, factory, Memory, MemoryConfig, MemoryFilter, ScopeLevel, VectorSearchResult, TextSearchResult = _load_core_module(
-        monkeypatch
-    )
+    (
+        core,
+        factory,
+        Memory,
+        MemoryConfig,
+        MemoryFilter,
+        ScopeLevel,
+        VectorSearchResult,
+        TextSearchResult,
+    ) = _load_core_module(monkeypatch)
     store = FakeStore()
     vector = FakeVectorIndex()
     text = FakeTextIndex()
@@ -302,7 +318,9 @@ async def test_hierarchical_memory_full_flow(monkeypatch) -> None:
     assert created.embedder is embedder
     assert created.cache is cache
 
-    system = core.HierarchicalMemory(store, vector, text, embedder, cache, MemoryConfig(auto_bubble=False))
+    system = core.HierarchicalMemory(
+        store, vector, text, embedder, cache, MemoryConfig(auto_bubble=False)
+    )
     added = await system.add(
         content="hello world",
         user_id="u1",
@@ -360,7 +378,9 @@ async def test_hierarchical_memory_full_flow(monkeypatch) -> None:
     assert text_results[0].score == 1.5
     assert text.last_filter.session_id == "s1"
 
-    updated = await system.update(added.id, content="changed", importance=0.9, entity_refs=["JS"], metadata={"b": 2})
+    updated = await system.update(
+        added.id, content="changed", importance=0.9, entity_refs=["JS"], metadata={"b": 2}
+    )
     assert updated.content == "changed"
     assert updated.importance == 0.9
     assert updated.metadata["b"] == 2
@@ -371,7 +391,9 @@ async def test_hierarchical_memory_full_flow(monkeypatch) -> None:
     assert unchanged.importance == 0.6
     assert await system.update("missing") is None
 
-    history_seed = Memory(content="old", user_id="u1", session_id="s1", entity_refs=["X"], metadata={"m": 1})
+    history_seed = Memory(
+        content="old", user_id="u1", session_id="s1", entity_refs=["X"], metadata={"m": 1}
+    )
     store.memories[history_seed.id] = history_seed
     superseded = await system.supersede(history_seed.id, "new text")
     assert superseded.supersedes == history_seed.id
@@ -379,7 +401,10 @@ async def test_hierarchical_memory_full_flow(monkeypatch) -> None:
     with pytest.raises(ValueError):
         await system.supersede("missing", "new")
     store.history_results = [history_seed, superseded]
-    assert await system.get_history(history_seed.id, include_future=True) == [history_seed, superseded]
+    assert await system.get_history(history_seed.id, include_future=True) == [
+        history_seed,
+        superseded,
+    ]
 
     assert await system.delete("missing") is False
     store.memories[added.id] = added
@@ -423,9 +448,16 @@ async def test_hierarchical_memory_full_flow(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_hierarchical_memory_bubbling_and_context_manager(monkeypatch) -> None:
-    core, _factory, Memory, MemoryConfig, _MemoryFilter, ScopeLevel, _VectorSearchResult, _TextSearchResult = _load_core_module(
-        monkeypatch
-    )
+    (
+        core,
+        _factory,
+        Memory,
+        MemoryConfig,
+        _MemoryFilter,
+        ScopeLevel,
+        _VectorSearchResult,
+        _TextSearchResult,
+    ) = _load_core_module(monkeypatch)
     store = FakeStore()
     vector = FakeVectorIndex()
     text = FakeTextIndex()
@@ -464,4 +496,3 @@ async def test_hierarchical_memory_bubbling_and_context_manager(monkeypatch) -> 
 
     async with core.HierarchicalMemory(store, vector, text, embedder, None, config) as managed:
         assert managed.config is config
-

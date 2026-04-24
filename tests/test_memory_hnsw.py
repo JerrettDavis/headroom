@@ -330,10 +330,15 @@ async def test_hnsw_index_lifecycle_search_filters_and_updates(
     )
     assert indexed == 2
     assert index.size == 2
-    assert await index.index_batch([_memory("still-bad", None), _memory("wrong", [1.0, 2.0, 3.0])]) == 0
+    assert (
+        await index.index_batch([_memory("still-bad", None), _memory("wrong", [1.0, 2.0, 3.0])])
+        == 0
+    )
 
 
-def test_hnsw_persistence_clear_stats_and_memory_budget(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_hnsw_persistence_clear_stats_and_memory_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _, HNSWVectorIndex, IndexedMemoryMetadata, _, _, _ = _deps()
     import numpy as np
 
@@ -412,9 +417,17 @@ def test_hnsw_passes_filter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
         metadata={"custom": "value"},
     )
 
-    assert index._passes_filter(metadata, VectorFilter(user_id="user-1", include_superseded=True)) is True
+    assert (
+        index._passes_filter(metadata, VectorFilter(user_id="user-1", include_superseded=True))
+        is True
+    )
     assert index._passes_filter(metadata, VectorFilter(user_id="other")) is False
-    assert index._passes_filter(metadata, VectorFilter(session_id="session-1", include_superseded=True)) is True
+    assert (
+        index._passes_filter(
+            metadata, VectorFilter(session_id="session-1", include_superseded=True)
+        )
+        is True
+    )
     assert index._passes_filter(metadata, VectorFilter(agent_id="agent-1")) is False
     assert (
         index._passes_filter(
@@ -427,20 +440,27 @@ def test_hnsw_passes_filter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (
         index._passes_filter(
             metadata,
-            VectorFilter(valid_at=datetime(2024, 1, 4, tzinfo=timezone.utc), include_superseded=True),
+            VectorFilter(
+                valid_at=datetime(2024, 1, 4, tzinfo=timezone.utc), include_superseded=True
+            ),
         )
         is True
     )
     assert (
         index._passes_filter(
             metadata,
-            VectorFilter(valid_at=datetime(2024, 1, 6, tzinfo=timezone.utc), include_superseded=True),
+            VectorFilter(
+                valid_at=datetime(2024, 1, 6, tzinfo=timezone.utc), include_superseded=True
+            ),
         )
         is False
     )
     assert index._passes_filter(metadata, VectorFilter(include_superseded=False)) is False
     assert index._passes_filter(metadata, VectorFilter(entity_refs=["missing"])) is False
-    assert index._passes_filter(
-        metadata,
-        VectorFilter(entity_refs=["entity-b"], include_superseded=True),
-    ) is True
+    assert (
+        index._passes_filter(
+            metadata,
+            VectorFilter(entity_refs=["entity-b"], include_superseded=True),
+        )
+        is True
+    )

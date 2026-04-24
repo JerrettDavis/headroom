@@ -154,7 +154,12 @@ async def test_handle_gemini_generate_content_covers_success_passthrough_and_fai
     install_gemini_modules(
         monkeypatch,
         {
-            "contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aGk="}}]}]
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"inlineData": {"mimeType": "image/png", "data": "aGk="}}],
+                }
+            ]
         },
     )
     passthrough = await handler.handle_gemini_generate_content(
@@ -233,7 +238,9 @@ async def test_handle_gemini_generate_content_covers_success_passthrough_and_fai
 
     handler = DummyGeminiHandler()
     handler.rate_limiter = SimpleNamespace(check_request=AsyncMock(return_value=(False, 3.2)))
-    install_gemini_modules(monkeypatch, {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]})
+    install_gemini_modules(
+        monkeypatch, {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]}
+    )
     with pytest.raises(HTTPException) as exc_info:
         await handler.handle_gemini_generate_content(
             FakeRequest(headers={"x-goog-api-key": "secret"}),
@@ -243,9 +250,13 @@ async def test_handle_gemini_generate_content_covers_success_passthrough_and_fai
     assert handler.metrics.rate_limited[-1]["provider"] == "gemini"
 
     handler = DummyGeminiHandler()
-    handler.openai_pipeline = SimpleNamespace(apply=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    handler.openai_pipeline = SimpleNamespace(
+        apply=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     handler.retry_response = RuntimeError("upstream down")
-    install_gemini_modules(monkeypatch, {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]})
+    install_gemini_modules(
+        monkeypatch, {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]}
+    )
     failed = await handler.handle_gemini_generate_content(FakeRequest(), "gemini-pro")
     assert failed.status_code == 502
     assert handler.metrics.failures[-1]["provider"] == "gemini"
@@ -258,11 +269,15 @@ async def test_handle_google_cloudcode_stream_and_stream_generate_content(
     handler = DummyGeminiHandler()
 
     install_gemini_modules(monkeypatch, json.JSONDecodeError("bad", "x", 0))
-    invalid = await handler.handle_google_cloudcode_stream(FakeRequest(),)
+    invalid = await handler.handle_google_cloudcode_stream(
+        FakeRequest(),
+    )
     assert invalid.status_code == 400
 
     install_gemini_modules(monkeypatch, {"model": "gemini-pro", "request": None})
-    missing_request = await handler.handle_google_cloudcode_stream(FakeRequest(),)
+    missing_request = await handler.handle_google_cloudcode_stream(
+        FakeRequest(),
+    )
     assert missing_request.status_code == 400
 
     handler = DummyGeminiHandler()
@@ -290,13 +305,18 @@ async def test_handle_google_cloudcode_stream_and_stream_generate_content(
     )
     assert streamed == {"streamed": True}
     stream_args = handler.stream_calls[-1]["args"]
-    assert stream_args[0] == f"{gemini_module.ANTIGRAVITY_DAILY_API_URL}/v1internal:streamGenerateContent?key=secret"
+    assert (
+        stream_args[0]
+        == f"{gemini_module.ANTIGRAVITY_DAILY_API_URL}/v1internal:streamGenerateContent?key=secret"
+    )
     assert stream_args[2]["request"]["systemInstruction"]["parts"][0]["text"] == "keep me"
     assert stream_args[2]["request"]["contents"][0]["parts"][0]["text"] == "optimized cloud"
 
     handler = DummyGeminiHandler()
     install_gemini_modules(monkeypatch, ValueError("bad json"))
-    invalid_stream = await handler.handle_gemini_stream_generate_content(FakeRequest(), "gemini-pro")
+    invalid_stream = await handler.handle_gemini_stream_generate_content(
+        FakeRequest(), "gemini-pro"
+    )
     assert invalid_stream.status_code == 400
 
     install_gemini_modules(
@@ -325,10 +345,17 @@ async def test_handle_gemini_count_tokens_covers_passthrough_success_and_failure
     install_gemini_modules(
         monkeypatch,
         {
-            "contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": "image/png", "data": "aGk="}}]}]
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"inlineData": {"mimeType": "image/png", "data": "aGk="}}],
+                }
+            ]
         },
     )
-    handler.retry_response = FakeResponse(headers={"content-encoding": "gzip", "content-length": "123"})
+    handler.retry_response = FakeResponse(
+        headers={"content-encoding": "gzip", "content-length": "123"}
+    )
     passthrough = await handler.handle_gemini_count_tokens(
         FakeRequest(query_params={"key": "secret"}),
         "gemini-pro",
@@ -338,7 +365,9 @@ async def test_handle_gemini_count_tokens_covers_passthrough_success_and_failure
     assert "content-encoding" not in passthrough.headers
 
     handler = DummyGeminiHandler()
-    handler.retry_response = FakeResponse(content=b'{"totalTokens":12}', json_data={"totalTokens": 12})
+    handler.retry_response = FakeResponse(
+        content=b'{"totalTokens":12}', json_data={"totalTokens": 12}
+    )
     install_gemini_modules(
         monkeypatch,
         {
@@ -353,7 +382,9 @@ async def test_handle_gemini_count_tokens_covers_passthrough_success_and_failure
 
     handler = DummyGeminiHandler()
     handler.retry_response = RuntimeError("count failed")
-    install_gemini_modules(monkeypatch, {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]})
+    install_gemini_modules(
+        monkeypatch, {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]}
+    )
     failed = await handler.handle_gemini_count_tokens(FakeRequest(), "gemini-pro")
     assert failed.status_code == 502
     assert handler.metrics.failures[-1]["provider"] == "gemini"

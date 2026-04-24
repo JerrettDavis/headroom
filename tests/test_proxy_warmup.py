@@ -362,7 +362,9 @@ async def test_startup_logs_token_mode_disabled_features_and_preload_failures(mo
         assert any("Subscription tracking: DISABLED" in line for line in info_logs)
         assert any("GitHub Copilot quota tracking: DISABLED" in line for line in info_logs)
         assert any("Anonymous telemetry: DISABLED" in line for line in info_logs)
-        assert any("Eager preload failed for FailingTransform: boom" in line for line in warning_logs)
+        assert any(
+            "Eager preload failed for FailingTransform: boom" in line for line in warning_logs
+        )
     finally:
         await proxy.shutdown()
 
@@ -490,7 +492,9 @@ async def test_startup_marks_memory_slots_null_when_backend_not_initialized(monk
     try:
         assert proxy.warmup.memory_backend.status == "null"
         assert proxy.warmup.memory_embedder.status == "null"
-        assert any("Memory: ENABLED (backend=local, initialized=False)" in line for line in info_logs)
+        assert any(
+            "Memory: ENABLED (backend=local, initialized=False)" in line for line in info_logs
+        )
     finally:
         await proxy.shutdown()
 

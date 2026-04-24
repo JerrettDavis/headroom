@@ -20,8 +20,12 @@ def _load_local_backend(monkeypatch):
         session_id: str | None = None
         agent_id: str | None = None
         turn_id: str | None = None
-        created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-        valid_from: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+        created_at: datetime = field(
+            default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+        valid_from: datetime = field(
+            default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        )
         entity_refs: list[str] = field(default_factory=list)
         importance: float = 0.5
         metadata: dict = field(default_factory=dict)
@@ -211,12 +215,30 @@ def _load_local_backend(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     sys.modules["headroom.memory.backends.local"] = module
     spec.loader.exec_module(module)
-    return module, FakeHierarchy, FakeGraphStore, Memory, MemorySearchResult, Entity, Relationship, Subgraph
+    return (
+        module,
+        FakeHierarchy,
+        FakeGraphStore,
+        Memory,
+        MemorySearchResult,
+        Entity,
+        Relationship,
+        Subgraph,
+    )
 
 
 @pytest.mark.asyncio
 async def test_local_backend_initialization_save_and_search(monkeypatch) -> None:
-    local, FakeHierarchy, FakeGraphStore, Memory, MemorySearchResult, Entity, Relationship, Subgraph = _load_local_backend(monkeypatch)
+    (
+        local,
+        FakeHierarchy,
+        FakeGraphStore,
+        Memory,
+        MemorySearchResult,
+        Entity,
+        Relationship,
+        Subgraph,
+    ) = _load_local_backend(monkeypatch)
 
     backend = local.LocalBackend(local.LocalBackendConfig(db_path="mem.db", graph_persist=True))
     await backend._ensure_initialized()
@@ -238,7 +260,9 @@ async def test_local_backend_initialization_save_and_search(monkeypatch) -> None
         turn_id="turn",
         facts=["Alice works at Acme", "Alice likes Python"],
         extracted_entities=[{"entity": "Acme", "entity_type": "org"}],
-        extracted_relationships=[{"source": "Acme", "relationship": "employs", "destination": "Alice"}],
+        extracted_relationships=[
+            {"source": "Acme", "relationship": "employs", "destination": "Alice"}
+        ],
     )
     assert saved.content == "Alice works at Acme"
     assert len(backend._hierarchical_memory.add_calls) == 2
@@ -246,12 +270,35 @@ async def test_local_backend_initialization_save_and_search(monkeypatch) -> None
 
     vector_primary = SimpleNamespace(memory=saved, similarity=0.9)
     duplicate = SimpleNamespace(memory=saved, similarity=0.7)
-    other = Memory(id="mem-related", content="Acme hires Bob", user_id="user", entity_refs=["Acme"], session_id="sess")
+    other = Memory(
+        id="mem-related",
+        content="Acme hires Bob",
+        user_id="user",
+        entity_refs=["Acme"],
+        session_id="sess",
+    )
     backend._hierarchical_memory.memories[other.id] = other
     backend._hierarchical_memory.search_results = [vector_primary, duplicate]
     backend._graph.subgraph = Subgraph(
-        entities=[Entity(id="e2", user_id="user", name="Acme", entity_type="org", metadata={"source_memory_id": "mem-related"})],
-        relationships=[Relationship(id="r1", user_id="user", source_id="e-existing", target_id="e2", relation_type="works_at", metadata={"source_memory_id": "mem-other-session"})],
+        entities=[
+            Entity(
+                id="e2",
+                user_id="user",
+                name="Acme",
+                entity_type="org",
+                metadata={"source_memory_id": "mem-related"},
+            )
+        ],
+        relationships=[
+            Relationship(
+                id="r1",
+                user_id="user",
+                source_id="e-existing",
+                target_id="e2",
+                relation_type="works_at",
+                metadata={"source_memory_id": "mem-other-session"},
+            )
+        ],
         root_entity_ids=["e-existing"],
     )
     backend._hierarchical_memory.memories["mem-other-session"] = Memory(
@@ -282,7 +329,16 @@ async def test_local_backend_initialization_save_and_search(monkeypatch) -> None
 
 @pytest.mark.asyncio
 async def test_local_backend_update_delete_helpers_and_hybrid(monkeypatch) -> None:
-    local, FakeHierarchy, FakeGraphStore, Memory, MemorySearchResult, Entity, _Relationship, Subgraph = _load_local_backend(monkeypatch)
+    (
+        local,
+        FakeHierarchy,
+        FakeGraphStore,
+        Memory,
+        MemorySearchResult,
+        Entity,
+        _Relationship,
+        Subgraph,
+    ) = _load_local_backend(monkeypatch)
 
     backend = local.LocalBackend(local.LocalBackendConfig(graph_persist=False))
     await backend._ensure_initialized()
@@ -314,8 +370,12 @@ async def test_local_backend_update_delete_helpers_and_hybrid(monkeypatch) -> No
     assert backend.supports_text_search is True
     assert await backend.get_graph() is graph
 
-    graph.entities[("user", "alice")] = Entity(id="ent-a", user_id="user", name="Alice", entity_type="person")
-    graph.subgraph = Subgraph(entities=[graph.entities[("user", "alice")]], relationships=[], root_entity_ids=["ent-a"])
+    graph.entities[("user", "alice")] = Entity(
+        id="ent-a", user_id="user", name="Alice", entity_type="person"
+    )
+    graph.subgraph = Subgraph(
+        entities=[graph.entities[("user", "alice")]], relationships=[], root_entity_ids=["ent-a"]
+    )
     assert (await backend.query_subgraph(["Alice"], "user")).root_entity_ids == ["ent-a"]
     empty_subgraph = await backend.query_subgraph(["Unknown"], "user")
     assert empty_subgraph.root_entity_ids == []
@@ -339,8 +399,12 @@ async def test_local_backend_update_delete_helpers_and_hybrid(monkeypatch) -> No
         "search_memories",
         lambda **kwargs: pytest.helpers.awaitable(
             [
-                MemorySearchResult(memory=vector_memory, score=0.8, related_entities=[], related_memories=[]),
-                MemorySearchResult(memory=shared_memory, score=0.2, related_entities=["x"], related_memories=[]),
+                MemorySearchResult(
+                    memory=vector_memory, score=0.8, related_entities=[], related_memories=[]
+                ),
+                MemorySearchResult(
+                    memory=shared_memory, score=0.2, related_entities=["x"], related_memories=[]
+                ),
             ]
         ),
     )
@@ -349,8 +413,12 @@ async def test_local_backend_update_delete_helpers_and_hybrid(monkeypatch) -> No
         "text_search",
         lambda **kwargs: pytest.helpers.awaitable(
             [
-                MemorySearchResult(memory=shared_memory, score=4.0, related_entities=["x"], related_memories=[]),
-                MemorySearchResult(memory=text_memory, score=2.0, related_entities=["A"], related_memories=[]),
+                MemorySearchResult(
+                    memory=shared_memory, score=4.0, related_entities=["x"], related_memories=[]
+                ),
+                MemorySearchResult(
+                    memory=text_memory, score=2.0, related_entities=["A"], related_memories=[]
+                ),
             ]
         ),
     )

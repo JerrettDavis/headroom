@@ -132,7 +132,10 @@ def test_strands_hook_provider_helpers_and_registration(monkeypatch) -> None:
     assert weird_result["content"] == [{"text": "fallback"}]
 
     assert disabled._should_skip_compression({"content": [{"text": "x"}]}) == "compression_disabled"
-    assert provider._should_skip_compression({"status": "error", "content": [{"text": "x"}]}) == "error_result_preserved"
+    assert (
+        provider._should_skip_compression({"status": "error", "content": [{"text": "x"}]})
+        == "error_result_preserved"
+    )
     assert provider._should_skip_compression({"content": []}) == "empty_content"
     assert provider._should_skip_compression({"content": [{"text": "ok"}]}) is None
 
@@ -174,7 +177,9 @@ def test_strands_hook_provider_compression_paths_and_metrics(monkeypatch) -> Non
     provider._compress_tool_result(errored)
     assert provider.metrics_history[-1].skip_reason == "compression_error:RuntimeError"
 
-    fake_crushers[0].result = SimpleNamespace(compressed="this is even longer than before", was_modified=False)
+    fake_crushers[0].result = SimpleNamespace(
+        compressed="this is even longer than before", was_modified=False
+    )
     no_reduction = hooks.AfterToolCallEvent(
         result={"content": [{"text": "this is still a long tool result"}]},
         tool_use={"name": "search", "toolUseId": "tool-4"},

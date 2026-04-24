@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 from headroom.config import IntelligentContextConfig
 from headroom.transforms.intelligent_context import (
     IntelligentContextManager,

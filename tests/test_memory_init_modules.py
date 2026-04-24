@@ -15,7 +15,11 @@ def _stub_module(monkeypatch, name, **attrs):
 
 
 def test_memory_package_init_lazy_exports(monkeypatch) -> None:
-    _stub_module(monkeypatch, "headroom.memory.adapters.graph", InMemoryGraphStore=type("InMemoryGraphStore", (), {}))
+    _stub_module(
+        monkeypatch,
+        "headroom.memory.adapters.graph",
+        InMemoryGraphStore=type("InMemoryGraphStore", (), {}),
+    )
     _stub_module(
         monkeypatch,
         "headroom.memory.backends.local",
@@ -44,14 +48,18 @@ def test_memory_package_init_lazy_exports(monkeypatch) -> None:
         TextBackend=type("TextBackend", (), {}),
         VectorBackend=type("VectorBackend", (), {}),
     )
-    _stub_module(monkeypatch, "headroom.memory.core", HierarchicalMemory=type("HierarchicalMemory", (), {}))
+    _stub_module(
+        monkeypatch, "headroom.memory.core", HierarchicalMemory=type("HierarchicalMemory", (), {})
+    )
     _stub_module(
         monkeypatch,
         "headroom.memory.easy",
         Memory=type("Memory", (), {}),
         MemoryResult=type("MemoryResult", (), {}),
     )
-    _stub_module(monkeypatch, "headroom.memory.factory", create_memory_system=lambda config=None: config)
+    _stub_module(
+        monkeypatch, "headroom.memory.factory", create_memory_system=lambda config=None: config
+    )
     _stub_module(
         monkeypatch,
         "headroom.memory.models",
@@ -106,7 +114,12 @@ def test_memory_package_init_lazy_exports(monkeypatch) -> None:
     mem0_backend = type("Mem0Backend", (), {})
     mem0_config = type("Mem0Config", (), {})
     direct_adapter = type("DirectMem0Adapter", (), {})
-    _stub_module(monkeypatch, "headroom.memory.backends.mem0", Mem0Backend=mem0_backend, Mem0Config=mem0_config)
+    _stub_module(
+        monkeypatch,
+        "headroom.memory.backends.mem0",
+        Mem0Backend=mem0_backend,
+        Mem0Config=mem0_config,
+    )
     _stub_module(
         monkeypatch,
         "headroom.memory.backends.direct_mem0",
@@ -150,7 +163,9 @@ def test_memory_adapters_init_lazy_exports(monkeypatch) -> None:
     _stub_module(monkeypatch, "headroom.memory.adapters.fts5", FTS5TextIndex=fts5)
     _stub_module(monkeypatch, "headroom.memory.adapters.graph", InMemoryGraphStore=graph)
     _stub_module(monkeypatch, "headroom.memory.adapters.sqlite", SQLiteMemoryStore=sqlite)
-    _stub_module(monkeypatch, "headroom.memory.adapters.sqlite_graph", SQLiteGraphStore=sqlite_graph)
+    _stub_module(
+        monkeypatch, "headroom.memory.adapters.sqlite_graph", SQLiteGraphStore=sqlite_graph
+    )
 
     hnsw_cls = type("HNSWVectorIndex", (), {})
     sqlite_vec_cls = type("SQLiteVectorIndex", (), {})
@@ -276,5 +291,13 @@ def test_memory_tools_exports_are_copied() -> None:
     assert copied_optimized == tools.MEMORY_TOOLS_OPTIMIZED
     assert copied_tools is not tools.MEMORY_TOOLS
     assert copied_optimized is not tools.MEMORY_TOOLS_OPTIMIZED
-    assert tools.get_tool_names() == ["memory_save", "memory_search", "memory_update", "memory_delete"]
-    assert tools.MEMORY_SAVE_OPTIMIZED["function"]["parameters"]["properties"]["background"]["type"] == "boolean"
+    assert tools.get_tool_names() == [
+        "memory_save",
+        "memory_search",
+        "memory_update",
+        "memory_delete",
+    ]
+    assert (
+        tools.MEMORY_SAVE_OPTIMIZED["function"]["parameters"]["properties"]["background"]["type"]
+        == "boolean"
+    )

@@ -451,7 +451,9 @@ def test_handle_openai_responses_appends_memory_context_and_converts_tools(monke
     ]
 
 
-def test_handle_openai_responses_converts_optimized_system_message_back_to_instructions(monkeypatch):
+def test_handle_openai_responses_converts_optimized_system_message_back_to_instructions(
+    monkeypatch,
+):
     request = _build_request(
         {
             "model": "gpt-5.4",
@@ -917,7 +919,9 @@ def test_handle_openai_chat_handles_hooks_ccr_and_cache_restore(monkeypatch):
             return None
 
     class _CCRToolInjector:
-        def __init__(self, provider: str, inject_tool: bool, inject_system_instructions: bool) -> None:
+        def __init__(
+            self, provider: str, inject_tool: bool, inject_system_instructions: bool
+        ) -> None:
             self.has_compressed_content = True
             self.detected_hashes = ["hash-1"]
 
@@ -1277,7 +1281,9 @@ def test_handle_openai_chat_continues_after_memory_tool_calls(monkeypatch):
     ]
 
 
-def test_handle_openai_responses_sets_instructions_when_memory_context_has_no_existing_system(monkeypatch):
+def test_handle_openai_responses_sets_instructions_when_memory_context_has_no_existing_system(
+    monkeypatch,
+):
     class _MemoryHandler:
         def __init__(self):
             self.config = SimpleNamespace(inject_context=True, inject_tools=False)
@@ -1414,9 +1420,7 @@ def test_handle_openai_chat_records_costs_and_caches_successful_response(monkeyp
     response = anyio.run(handler.handle_openai_chat, request)
 
     assert response.status_code == 200
-    assert cost_calls == [
-        (("gpt-5.4", 0, 1), {"cache_read_tokens": 3, "uncached_tokens": 7})
-    ]
+    assert cost_calls == [(("gpt-5.4", 0, 1), {"cache_read_tokens": 3, "uncached_tokens": 7})]
     assert handler.cache.calls and handler.cache.calls[0][1] == "gpt-5.4"
     assert metric_calls[0]["cache_read_tokens"] == 3
     assert metric_calls[0]["uncached_input_tokens"] == 7
@@ -1496,9 +1500,7 @@ def test_handle_openai_responses_records_costs_metrics_and_strips_encoding_heade
     )
     handler = _DummyOpenAIHandler()
     handler.metrics.record_request = record_request
-    handler.cost_tracker = SimpleNamespace(
-        record_tokens=lambda *args: cost_calls.append(args)
-    )
+    handler.cost_tracker = SimpleNamespace(record_tokens=lambda *args: cost_calls.append(args))
     handler.response_queue = [
         _ResponseStub(
             {
@@ -1546,7 +1548,11 @@ def test_handle_openai_responses_continues_memory_calls_with_error_payload_when_
             self.initialized = True
 
     request = _build_request(
-        {"model": "gpt-5.4", "input": "hello", "tools": [{"type": "function", "name": "memory_search"}]},
+        {
+            "model": "gpt-5.4",
+            "input": "hello",
+            "tools": [{"type": "function", "name": "memory_search"}],
+        },
         {"Authorization": "Bearer sk-test", "x-headroom-user-id": "user-1"},
     )
     handler = _DummyOpenAIHandler()
