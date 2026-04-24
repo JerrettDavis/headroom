@@ -262,7 +262,7 @@ class TestHelperCoverage:
         real_import = builtins.__import__
 
         def fake_import(name, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-            if name == "headroom.transforms.kompress_compressor":
+            if name.endswith("kompress_compressor"):
                 raise ImportError("missing optional dependency")
             return real_import(name, *args, **kwargs)
 

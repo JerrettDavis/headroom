@@ -684,7 +684,7 @@ class TestClaudeCodeAdapter:
         adapter = ClaudeCodeAdapter(memory_dir)
         original_stat = Path.stat
 
-        def fake_stat(self: Path):
+        def fake_stat(self: Path, *args: Any, **kwargs: Any):
             result = original_stat(self)
             if self == memory_dir / "test.md":
                 text = self.read_text()
@@ -725,7 +725,7 @@ class TestClaudeCodeAdapter:
         adapter = ClaudeCodeAdapter(memory_dir)
         original_stat = Path.stat
 
-        def fake_stat(self: Path):
+        def fake_stat(self: Path, *args: Any, **kwargs: Any):
             if self == file_path:
                 raise OSError("boom")
             return original_stat(self)

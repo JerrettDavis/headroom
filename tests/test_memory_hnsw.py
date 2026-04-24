@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +119,7 @@ def _memory(
         agent_id=agent_id,
         valid_until=valid_until,
         entity_refs=entity_refs or [],
-        created_at=created_at or datetime(2024, 1, 1, tzinfo=UTC),
+        created_at=created_at or datetime(2024, 1, 1, tzinfo=timezone.utc),
         importance=importance,
         embedding=np.array(embedding, dtype=np.float32) if embedding is not None else None,
         metadata={"tag": memory_id},
@@ -142,7 +142,7 @@ def test_indexed_memory_metadata_and_availability_probe(monkeypatch: pytest.Monk
         [1.0, 0.0],
         session_id="session-1",
         agent_id="agent-1",
-        valid_until=datetime(2024, 1, 2, tzinfo=UTC),
+        valid_until=datetime(2024, 1, 2, tzinfo=timezone.utc),
         entity_refs=["entity-a"],
         importance=0.9,
     )
@@ -226,7 +226,7 @@ async def test_hnsw_index_lifecycle_search_filters_and_updates(
         user_id="alice",
         session_id="session-a",
         importance=0.1,
-        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
         entity_refs=["project-a"],
     )
     high = _memory(
@@ -235,7 +235,7 @@ async def test_hnsw_index_lifecycle_search_filters_and_updates(
         user_id="alice",
         agent_id="agent-a",
         importance=0.9,
-        created_at=datetime(2024, 1, 2, tzinfo=UTC),
+        created_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
         entity_refs=["project-a", "shared"],
     )
     newer = _memory(
@@ -243,9 +243,9 @@ async def test_hnsw_index_lifecycle_search_filters_and_updates(
         [0.0, 1.0],
         user_id="bob",
         session_id="session-b",
-        valid_until=datetime(2024, 1, 3, tzinfo=UTC),
+        valid_until=datetime(2024, 1, 3, tzinfo=timezone.utc),
         importance=0.7,
-        created_at=datetime(2024, 1, 3, tzinfo=UTC),
+        created_at=datetime(2024, 1, 3, tzinfo=timezone.utc),
         entity_refs=["project-b"],
     )
 
@@ -264,7 +264,7 @@ async def test_hnsw_index_lifecycle_search_filters_and_updates(
         user_id="alice",
         agent_id="agent-a",
         importance=0.95,
-        created_at=datetime(2024, 1, 4, tzinfo=UTC),
+        created_at=datetime(2024, 1, 4, tzinfo=timezone.utc),
         entity_refs=["project-a", "shared"],
     )
     await index.index(high_updated)
@@ -300,7 +300,7 @@ async def test_hnsw_index_lifecycle_search_filters_and_updates(
         await index.search(
             VectorFilter(
                 query_vector=np.array([0.0, 1.0], dtype=np.float32),
-                valid_at=datetime(2024, 1, 4, tzinfo=UTC),
+                valid_at=datetime(2024, 1, 4, tzinfo=timezone.utc),
                 user_id="bob",
                 include_superseded=True,
             )
@@ -404,10 +404,10 @@ def test_hnsw_passes_filter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
         user_id="user-1",
         session_id="session-1",
         agent_id=None,
-        valid_until=datetime(2024, 1, 5, tzinfo=UTC),
+        valid_until=datetime(2024, 1, 5, tzinfo=timezone.utc),
         entity_refs=["entity-a", "entity-b"],
         content="content",
-        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
         importance=0.5,
         metadata={"custom": "value"},
     )
@@ -427,14 +427,14 @@ def test_hnsw_passes_filter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (
         index._passes_filter(
             metadata,
-            VectorFilter(valid_at=datetime(2024, 1, 4, tzinfo=UTC), include_superseded=True),
+            VectorFilter(valid_at=datetime(2024, 1, 4, tzinfo=timezone.utc), include_superseded=True),
         )
         is True
     )
     assert (
         index._passes_filter(
             metadata,
-            VectorFilter(valid_at=datetime(2024, 1, 6, tzinfo=UTC), include_superseded=True),
+            VectorFilter(valid_at=datetime(2024, 1, 6, tzinfo=timezone.utc), include_superseded=True),
         )
         is False
     )

@@ -93,6 +93,14 @@ async def test_local_embedder_and_normalizers(monkeypatch) -> None:
     assert requested.model_name == "custom"
 
     monkeypatch.delitem(sys.modules, "sentence_transformers", raising=False)
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if name == "sentence_transformers":
+            raise ImportError("missing optional dependency")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(ImportError):
         embedders.LocalEmbedder()._check_dependencies()
 

@@ -108,9 +108,12 @@ def test_graph_models_round_trip_and_subgraph_helpers(monkeypatch) -> None:
 
 
 def test_bridge_config_validates_and_normalizes_paths(monkeypatch) -> None:
+    import headroom as headroom_package
+
     paths_module = types.ModuleType("headroom.paths")
     paths_module.bridge_state_path = lambda: Path("state") / "bridge.json"
     monkeypatch.setitem(sys.modules, "headroom.paths", paths_module)
+    monkeypatch.setattr(headroom_package, "paths", paths_module, raising=False)
 
     bridge_config = _load_module(
         monkeypatch,
