@@ -304,18 +304,18 @@ class TestProjectForPattern:
         return ProjectInfo(name=p.name, project_path=p, data_path=p)
 
     def test_matches_longest_root(self):
-        proj_a = self._project("/x/a")
-        proj_b = self._project("/x/a/b")
+        proj_a = self._project(r"C:\x\a")
+        proj_b = self._project(r"C:\x\a\b")
         pattern = ExtractedPattern(
             category=PatternCategory.ERROR_RECOVERY,
-            content="File `/x/a/b/foo.py` does not exist.",
+            content=r"File `C:\x\a\b\foo.py` does not exist.",
             importance=0.5,
         )
         result = _project_for_pattern(pattern, [proj_a, proj_b])
         assert result is proj_b
 
     def test_returns_none_for_unanchored(self):
-        proj_a = self._project("/x/a")
+        proj_a = self._project(r"C:\x\a")
         pattern = ExtractedPattern(
             category=PatternCategory.PREFERENCE,
             content="User preference: use terse responses",
@@ -324,21 +324,21 @@ class TestProjectForPattern:
         assert _project_for_pattern(pattern, [proj_a]) is None
 
     def test_matches_via_entity_refs(self):
-        proj = self._project("/x/a")
+        proj = self._project(r"C:\x\a")
         pattern = ExtractedPattern(
             category=PatternCategory.ERROR_RECOVERY,
             content="Command failed.",
             importance=0.5,
-            entity_refs=["/x/a/tool.py"],
+            entity_refs=[r"C:\x\a\tool.py"],
         )
         assert _project_for_pattern(pattern, [proj]) is proj
 
     def test_no_false_match_on_prefix_boundary(self):
         # /x/ab should not match a project rooted at /x/a
-        proj_a = self._project("/x/a")
+        proj_a = self._project(r"C:\x\a")
         pattern = ExtractedPattern(
             category=PatternCategory.ERROR_RECOVERY,
-            content="File `/x/ab/foo.py` does not exist.",
+            content=r"File `C:\x\ab\foo.py` does not exist.",
             importance=0.5,
         )
         assert _project_for_pattern(pattern, [proj_a]) is None
@@ -457,6 +457,34 @@ class TestLoadPersistedPatterns:
         )
         assert _load_persisted_patterns_from_sqlite(db) == []
 
+    def test_handles_bad_json_and_bad_importance(self, tmp_path):
+        import sqlite3 as _sql
+
+        db = self._make_db(
+            tmp_path,
+            [
+                {
+                    "content": "Bad row",
+                    "metadata": {"source": "traffic_learner", "category": "environment"},
+                    "entity_refs": ["C:/repo/file.py"],
+                    "importance": 0.9,
+                },
+            ],
+        )
+        conn = _sql.connect(db)
+        conn.execute(
+            "UPDATE memories SET entity_refs = ?, importance = ? WHERE id = '0'",
+            ("{also bad", "oops"),
+        )
+        conn.commit()
+        conn.close()
+
+        patterns = _load_persisted_patterns_from_sqlite(db)
+        assert len(patterns) == 1
+        assert patterns[0].metadata["category"] == "environment"
+        assert patterns[0].entity_refs == []
+        assert patterns[0].importance == 0.5
+
 
 # =============================================================================
 # Category → recommendation routing
@@ -517,6 +545,22 @@ class TestPatternsToRecommendations:
         assert lines[0] == "- B"
         assert lines[1] == "- A"
         assert recs[0].evidence_count == 7
+
+    def test_skips_unmapped_category(self, monkeypatch):
+        from headroom.memory import traffic_learner as tl_mod
+
+        monkeypatch.delitem(tl_mod._CATEGORY_TO_TARGET, PatternCategory.ENVIRONMENT, raising=False)
+        recs = _patterns_to_recommendations(
+            [
+                ExtractedPattern(
+                    category=PatternCategory.ENVIRONMENT,
+                    content="Use uv",
+                    importance=0.7,
+                    evidence_count=2,
+                )
+            ]
+        )
+        assert recs == []
 
 
 # =============================================================================
@@ -815,6 +859,34 @@ def _make_project(path):
 
 class TestFlushToFile:
     @pytest.mark.asyncio
+    async def test_learn_import_failure_is_noop(self, monkeypatch):
+        import builtins
+
+        learner = TrafficLearner(backend=None, agent_type="claude", min_evidence=1)
+        learner._pattern_counts["h"] = (
+            ExtractedPattern(
+                category=PatternCategory.ENVIRONMENT,
+                content="C:/repo/tool.py",
+                importance=0.5,
+                evidence_count=2,
+            ),
+            2,
+        )
+
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "headroom.learn.registry":
+                raise ImportError("missing")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        try:
+            await learner.flush_to_file()
+        finally:
+            monkeypatch.setattr(builtins, "__import__", original_import)
+
+    @pytest.mark.asyncio
     async def test_end_to_end_writes_per_project(self, tmp_path, monkeypatch):
         """Happy path: anchored patterns → bucketed per project → writer called."""
         db = tmp_path / "memory.db"
@@ -881,6 +953,25 @@ class TestFlushToFile:
         _install_plugin_registry(monkeypatch, plugin)
 
         learner = TrafficLearner(backend=None, agent_type="claude", min_evidence=1)
+        await learner.flush_to_file()
+        assert writer.calls == []
+
+    @pytest.mark.asyncio
+    async def test_single_evidence_dropped_during_live_flush(self, tmp_path, monkeypatch):
+        writer = _FakeWriter()
+        plugin = _FakePlugin(roots=[_make_project(str(tmp_path))], writer=writer)
+        _install_plugin_registry(monkeypatch, plugin)
+
+        learner = TrafficLearner(backend=None, agent_type="claude", min_evidence=1)
+        learner._pattern_counts["h"] = (
+            ExtractedPattern(
+                category=PatternCategory.ENVIRONMENT,
+                content=f"{tmp_path}\\tool.py",
+                importance=0.6,
+                evidence_count=1,
+            ),
+            1,
+        )
         await learner.flush_to_file()
         assert writer.calls == []
 
@@ -1015,6 +1106,17 @@ class TestCollectAllPatterns:
         learner = TrafficLearner(backend=backend, min_evidence=1)
         merged = learner._collect_all_patterns()
         assert merged == []
+
+    def test_loader_failure_is_swallowed(self, tmp_path, monkeypatch):
+        backend = _FakeBackend(tmp_path / "memory.db")
+        _init_db(tmp_path / "memory.db")
+        learner = TrafficLearner(backend=backend, min_evidence=1)
+
+        def boom(_db_path):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("headroom.memory.traffic_learner._load_persisted_patterns_from_sqlite", boom)
+        assert learner._collect_all_patterns() == []
 
 
 class TestHydrateEdgeCases:
