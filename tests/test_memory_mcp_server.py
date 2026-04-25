@@ -76,7 +76,7 @@ async def test_warm_up_backend_indexes_memories() -> None:
                 embed=AsyncMock(side_effect=[["warm"], ["first-embedding"]]),
                 embed_batch=AsyncMock(return_value=[["first-embedding"], [9]]),
             ),
-            _store=SimpleNamespace(save=AsyncMock()),
+            _store=SimpleNamespace(save=AsyncMock(), save_batch=AsyncMock()),
             _vector_index=SimpleNamespace(index=AsyncMock()),
         ),
         get_user_memories=AsyncMock(return_value=[mem_without_embedding, mem_with_embedding]),
