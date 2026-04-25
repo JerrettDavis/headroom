@@ -85,8 +85,20 @@ async def test_warm_up_backend_indexes_memories() -> None:
     await mcp_server._warm_up_backend(backend, "user-1")
 
     assert mem_without_embedding.embedding == ["first-embedding"]
-    assert backend._hierarchical_memory._store.save.await_count == 1
-    assert backend._hierarchical_memory._vector_index.index.await_count == 2
+
+    stored_ids = []
+    for call in backend._hierarchical_memory._store.save.await_args_list:
+        stored_ids.append(call.args[0].id)
+    for call in backend._hierarchical_memory._store.save_batch.await_args_list:
+        stored_ids.extend(mem.id for mem in call.args[0])
+    assert stored_ids == ["m1"]
+
+    indexed_ids = []
+    for call in backend._hierarchical_memory._vector_index.index.await_args_list:
+        indexed_ids.append(call.args[0].id)
+    for call in backend._hierarchical_memory._vector_index.index_batch.await_args_list:
+        indexed_ids.extend(mem.id for mem in call.args[0])
+    assert sorted(indexed_ids) == ["m1", "m2"]
 
     backend._hierarchical_memory = None
     await mcp_server._warm_up_backend(backend, "user-1")
