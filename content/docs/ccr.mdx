@@ -156,11 +156,8 @@ response = client.chat.completions.create(
     messages=messages,
 )
 
-# CCR is enabled by default. To disable:
-# headroom proxy --no-ccr-responses
-
-# To disable proactive expansion:
-# headroom proxy --no-ccr-expansion
+# CCR is enabled by default in the current proxy path. Use --no-optimize for
+# full passthrough behavior.
 ```
 </Tab>
 </Tabs>

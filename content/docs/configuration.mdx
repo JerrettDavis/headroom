@@ -221,6 +221,7 @@ normalized = weights.normalized()
 headroom proxy \
   --port 8787 \              # Port to listen on
   --host 0.0.0.0 \           # Host to bind to
+  --mode token \             # token compression mode; use cache for prefix-cache stability
   --budget 10.00 \           # Daily budget limit in USD
   --log-file headroom.jsonl  # Log file path
 ```
@@ -234,18 +235,28 @@ headroom proxy --no-optimize
 # Disable semantic caching
 headroom proxy --no-cache
 
-# Enable LLMLingua ML compression
-headroom proxy --llmlingua
-headroom proxy --llmlingua --llmlingua-device cuda --llmlingua-rate 0.4
+# Preserve provider prefix-cache stability instead of maximizing token removal
+headroom proxy --mode cache
+
+# Enable memory and live learning
+headroom proxy --memory
+headroom proxy --learn --min-evidence 3
 ```
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HEADROOM_LOG_LEVEL` | Logging level | `INFO` |
-| `HEADROOM_STORE_URL` | Database URL | temp directory |
-| `HEADROOM_DEFAULT_MODE` | Default mode | `optimize` |
+| `HEADROOM_HOST` | Proxy bind host | `127.0.0.1` |
+| `HEADROOM_PORT` | Proxy bind port | `8787` |
+| `HEADROOM_MODE` | Proxy optimization mode: `token` or `cache` | `token` |
+| `HEADROOM_WORKERS` | Uvicorn worker count | `1` |
+| `HEADROOM_LIMIT_CONCURRENCY` | Maximum concurrent connections before 503 | `1000` |
+| `HEADROOM_MAX_CONNECTIONS` | Maximum upstream HTTP connections | `500` |
+| `HEADROOM_MAX_KEEPALIVE` | Maximum upstream keep-alive connections | `100` |
+| `HEADROOM_BUDGET` | Daily budget limit in USD | -- |
+| `HEADROOM_TELEMETRY` | Set to `off` to disable anonymous telemetry | enabled |
+| `HEADROOM_STATELESS` | Set to `true` to disable filesystem writes | `false` |
 | `HEADROOM_MODEL_LIMITS` | Custom model config (JSON string or file path) | -- |
 | `HEADROOM_BASE_URL` | Base URL of the Headroom proxy (TypeScript SDK) | `http://localhost:8787` |
 | `HEADROOM_API_KEY` | API key for Headroom Cloud authentication | -- |

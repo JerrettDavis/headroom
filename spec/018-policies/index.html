@@ -2123,9 +2123,8 @@
 <h2 id="override-mechanisms">Override Mechanisms<a class="headerlink" href="#override-mechanisms" title="Permanent link">&para;</a></h2>
 <h3 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h3>
 <p>All settings can be overridden via environment variables:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">HEADROOM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">HEADROOM_MODE</span><span class="o">=</span>passthrough
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">HEADROOM_MAX_TOKENS</span><span class="o">=</span><span class="m">8192</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">HEADROOM_MODE</span><span class="o">=</span>token
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--no-cache
 </span></code></pre></div></p>
 <h3 id="config-file">Config File<a class="headerlink" href="#config-file" title="Permanent link">&para;</a></h3>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ~/.headroom/config.yaml</span>

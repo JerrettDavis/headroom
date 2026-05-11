@@ -1890,10 +1890,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#semantic-cache" class="md-nav__link">
+  <a href="#proxy-cache" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Semantic Cache
+        Proxy Cache
       
     </span>
   </a>
@@ -2171,12 +2171,11 @@
 </table>
 <hr />
 <h2 id="compression-capabilities">Compression Capabilities<a class="headerlink" href="#compression-capabilities" title="Permanent link">&para;</a></h2>
-<h3 id="semantic-cache">Semantic Cache<a class="headerlink" href="#semantic-cache" title="Permanent link">&para;</a></h3>
-<p><strong>Description:</strong> Caches semantically similar requests using CCR pattern.</p>
+<h3 id="proxy-cache">Proxy Cache<a class="headerlink" href="#proxy-cache" title="Permanent link">&para;</a></h3>
+<p><strong>Description:</strong> The proxy has semantic cache support and CCR-backed retrieval, controlled by CLI configuration.</p>
 <p><strong>Configuration:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">HEADROOM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">HEADROOM_CACHE_TTL</span><span class="o">=</span><span class="m">3600</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">HEADROOM_CACHE_MAX_SIZE</span><span class="o">=</span><span class="m">10000</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>headroom<span class="w"> </span>proxy<span class="w">          </span><span class="c1"># cache enabled by default</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--no-cache
 </span></code></pre></div></p>
 <p><strong>Behavior:</strong>
 1. Hash input content

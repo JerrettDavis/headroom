@@ -2071,13 +2071,12 @@
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;8787:8787&quot;</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">HEADROOM_MODE=compress</span>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">HEADROOM_CACHE_ENABLED=true</span>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">headroom-data:/root/.headroom</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
-</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="nt">volumes</span><span class="p">:</span>
-</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="nt">headroom-data</span><span class="p">:</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">HEADROOM_MODE=token</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">headroom-data:/root/.headroom</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="nt">volumes</span><span class="p">:</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">headroom-data</span><span class="p">:</span>
 </span></code></pre></div></p>
 <p><strong>Run:</strong>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker-compose<span class="w"> </span>up<span class="w"> </span>-d
@@ -2144,8 +2143,8 @@
 <tbody>
 <tr>
 <td><code>HEADROOM_MODE</code></td>
-<td><code>audit</code></td>
-<td>Proxy mode (audit/optimize/simulate)</td>
+<td><code>token</code></td>
+<td>Proxy mode (<code>token</code> or <code>cache</code>)</td>
 </tr>
 <tr>
 <td><code>HEADROOM_PORT</code></td>
@@ -2154,7 +2153,7 @@
 </tr>
 <tr>
 <td><code>HEADROOM_HOST</code></td>
-<td><code>0.0.0.0</code></td>
+<td><code>127.0.0.1</code></td>
 <td>Proxy host</td>
 </tr>
 <tr>
@@ -2168,19 +2167,9 @@
 <td>OpenAI API key</td>
 </tr>
 <tr>
-<td><code>HEADROOM_CACHE_ENABLED</code></td>
-<td><code>true</code></td>
-<td>Enable cache</td>
-</tr>
-<tr>
-<td><code>HEADROOM_CACHE_TTL</code></td>
-<td><code>3600</code></td>
-<td>Cache TTL</td>
-</tr>
-<tr>
-<td><code>HEADROOM_TELEMETRY_ENABLED</code></td>
-<td><code>true</code></td>
-<td>Enable telemetry</td>
+<td><code>HEADROOM_TELEMETRY</code></td>
+<td>enabled</td>
+<td>Set to <code>off</code> to disable telemetry</td>
 </tr>
 </tbody>
 </table>

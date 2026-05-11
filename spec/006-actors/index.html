@@ -2038,8 +2038,7 @@
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-...
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Optional overrides</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_MODE</span><span class="o">=</span>compress
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_MODE</span><span class="o">=</span>token
 </span></code></pre></div></p>
 <hr />
 <h3 id="operator">Operator<a class="headerlink" href="#operator" title="Permanent link">&para;</a></h3>
@@ -2130,10 +2129,9 @@
 - SOC2/GDPR considerations</p>
 <p><strong>Security Configuration:</strong>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Maximum privacy settings</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nv">HEADROOM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nv">HEADROOM_TELEMETRY_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nv">HEADROOM_LEARN_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nv">HEADROOM_DASHBOARD_ENABLED</span><span class="o">=</span><span class="nb">false</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nv">HEADROOM_TELEMETRY</span><span class="o">=</span>off
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nv">HEADROOM_STATELESS</span><span class="o">=</span><span class="nb">true</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--no-cache<span class="w"> </span>--no-optimize
 </span></code></pre></div></p>
 <hr />
 <h2 id="interaction-patterns">Interaction Patterns<a class="headerlink" href="#interaction-patterns" title="Permanent link">&para;</a></h2>

@@ -2184,10 +2184,19 @@
 <p><strong>Options:</strong>
 | Flag | Default | Description |
 |------|---------|-------------|
-| <code>--host</code> | <code>0.0.0.0</code> | Bind host |
+| <code>--host</code> | <code>127.0.0.1</code> | Bind host |
 | <code>--port</code> | <code>8787</code> | Bind port |
-| <code>--llmlingua-device</code> | <code>cpu</code> | LLMLingua device (cpu/cuda) |
-| <code>--config</code> | - | Config file path |</p>
+| <code>--mode</code> | <code>token</code> | Optimization mode: <code>token</code> or <code>cache</code> |
+| <code>--workers</code> | <code>1</code> | Uvicorn worker processes |
+| <code>--limit-concurrency</code> | <code>1000</code> | Maximum concurrent connections before 503 |
+| <code>--no-optimize</code> | <code>false</code> | Passthrough mode |
+| <code>--no-cache</code> | <code>false</code> | Disable semantic cache |
+| <code>--no-rate-limit</code> | <code>false</code> | Disable rate limiting |
+| <code>--memory</code> | <code>false</code> | Enable persistent memory |
+| <code>--learn</code> | <code>false</code> | Enable live traffic learning |
+| <code>--backend</code> | <code>anthropic</code> | Backend: anthropic, bedrock, openrouter, anyllm, or litellm-* |
+| <code>--no-telemetry</code> | <code>false</code> | Disable anonymous telemetry |
+| <code>--stateless</code> | <code>false</code> | Disable filesystem writes |</p>
 <hr />
 <h3 id="headroom-evals"><code>headroom evals</code><a class="headerlink" href="#headroom-evals" title="Permanent link">&para;</a></h3>
 <p>Run evaluation suite.</p>
@@ -2209,13 +2218,14 @@
 | <code>--agent</code> | - | Agent type (claude/copilot/codex/aider/cursor/openclaw) |</p>
 <hr />
 <h3 id="headroom-mcp"><code>headroom mcp</code><a class="headerlink" href="#headroom-mcp" title="Permanent link">&para;</a></h3>
-<p>Start MCP server.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>headroom<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span>
+<p>Manage the Headroom MCP server.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>headroom<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span><span class="w"> </span>COMMAND<span class="w"> </span><span class="o">[</span>ARGS<span class="o">]</span>...
 </span></code></pre></div>
-<p><strong>Options:</strong>
-| Flag | Default | Description |
-|------|---------|-------------|
-| <code>--port</code> | <code>8766</code> | MCP server port |</p>
+<p><strong>Commands:</strong>
+- <code>install</code> — Install the MCP server into detected coding agents
+- <code>serve</code> — Start the stdio MCP server
+- <code>status</code> — Check configuration status
+- <code>uninstall</code> — Remove Headroom MCP config</p>
 <hr />
 <h3 id="headroom-perf"><code>headroom perf</code><a class="headerlink" href="#headroom-perf" title="Permanent link">&para;</a></h3>
 <p>Run performance tests.</p>
@@ -2255,9 +2265,12 @@
 <p><strong>Options:</strong>
 | Flag | Default | Description |
 |------|---------|-------------|
-| <code>--agent</code> | <code>auto</code> | Agent type |
-| <code>--mode</code> | <code>auto</code> | Learn mode |
-| <code>--session</code> | - | Session ID |</p>
+| <code>--project</code> | current directory | Project directory to analyze |
+| <code>--all</code> | <code>false</code> | Analyze all discovered projects |
+| <code>--apply</code> | <code>false</code> | Write recommendations instead of dry-run |
+| <code>--agent</code> | <code>auto</code> | Agent to analyze: auto, claude, codex, gemini, or plugin |
+| <code>--model</code> | auto | LLM model for analysis |
+| <code>--workers</code> | auto | Parallel workers for session scanning |</p>
 <hr />
 <h3 id="headroom-stats"><code>headroom stats</code><a class="headerlink" href="#headroom-stats" title="Permanent link">&para;</a></h3>
 <p>Show savings statistics.</p>
@@ -2366,8 +2379,8 @@
 <tbody>
 <tr>
 <td><code>HEADROOM_MODE</code></td>
-<td><code>audit</code></td>
-<td>Operation mode (audit/optimize/simulate)</td>
+<td><code>token</code></td>
+<td>Proxy optimization mode (<code>token</code> or <code>cache</code>)</td>
 </tr>
 <tr>
 <td><code>HEADROOM_PORT</code></td>
@@ -2376,23 +2389,43 @@
 </tr>
 <tr>
 <td><code>HEADROOM_HOST</code></td>
-<td><code>0.0.0.0</code></td>
+<td><code>127.0.0.1</code></td>
 <td>Proxy host</td>
 </tr>
 <tr>
-<td><code>HEADROOM_STORE_URL</code></td>
-<td><code>sqlite:///headroom.db</code></td>
-<td>Storage URL</td>
+<td><code>HEADROOM_WORKERS</code></td>
+<td><code>1</code></td>
+<td>Uvicorn worker count</td>
 </tr>
 <tr>
-<td><code>HEADROOM_PROXY_URL</code></td>
-<td><code>http://localhost:8787</code></td>
-<td>Proxy URL</td>
+<td><code>HEADROOM_LIMIT_CONCURRENCY</code></td>
+<td><code>1000</code></td>
+<td>Maximum concurrent connections before 503</td>
 </tr>
 <tr>
-<td><code>HEADROOM_LOG_LEVEL</code></td>
-<td><code>INFO</code></td>
-<td>Log level</td>
+<td><code>HEADROOM_MAX_CONNECTIONS</code></td>
+<td><code>500</code></td>
+<td>Maximum upstream HTTP connections</td>
+</tr>
+<tr>
+<td><code>HEADROOM_MAX_KEEPALIVE</code></td>
+<td><code>100</code></td>
+<td>Maximum upstream keep-alive connections</td>
+</tr>
+<tr>
+<td><code>HEADROOM_BUDGET</code></td>
+<td>-</td>
+<td>Daily budget limit in USD</td>
+</tr>
+<tr>
+<td><code>HEADROOM_TELEMETRY</code></td>
+<td>enabled</td>
+<td>Set to <code>off</code> to disable anonymous telemetry</td>
+</tr>
+<tr>
+<td><code>HEADROOM_STATELESS</code></td>
+<td><code>false</code></td>
+<td>Disable filesystem writes</td>
 </tr>
 </tbody>
 </table>
@@ -2439,34 +2472,29 @@
 </thead>
 <tbody>
 <tr>
-<td><code>HEADROOM_CACHE_ENABLED</code></td>
-<td><code>true</code></td>
-<td>Enable cache</td>
+<td><code>HEADROOM_TELEMETRY</code></td>
+<td>enabled</td>
+<td>Set to <code>off</code> to disable telemetry</td>
 </tr>
 <tr>
-<td><code>HEADROOM_CACHE_TTL</code></td>
-<td><code>3600</code></td>
-<td>Cache TTL in seconds</td>
+<td><code>HEADROOM_MIN_EVIDENCE</code></td>
+<td><code>5</code></td>
+<td>Minimum observations before live learning persists a pattern</td>
 </tr>
 <tr>
-<td><code>HEADROOM_CACHE_MAX_SIZE</code></td>
-<td><code>10000</code></td>
-<td>Max cache entries</td>
+<td><code>HEADROOM_PROXY_EXTENSIONS</code></td>
+<td>-</td>
+<td>Comma-separated proxy extensions to enable</td>
 </tr>
 <tr>
-<td><code>HEADROOM_LEARN_ENABLED</code></td>
+<td><code>HEADROOM_STATELESS</code></td>
 <td><code>false</code></td>
-<td>Enable learn</td>
+<td>Disable filesystem writes</td>
 </tr>
 <tr>
-<td><code>HEADROOM_DASHBOARD_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable dashboard</td>
-</tr>
-<tr>
-<td><code>HEADROOM_TELEMETRY_ENABLED</code></td>
-<td><code>true</code></td>
-<td>Enable telemetry</td>
+<td><code>HEADROOM_MODEL_LIMITS</code></td>
+<td>-</td>
+<td>Model limits override as JSON or file path</td>
 </tr>
 </tbody>
 </table>

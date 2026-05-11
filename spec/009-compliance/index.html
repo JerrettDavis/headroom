@@ -2127,16 +2127,15 @@
 <p><em>To be documented if applicable.</em></p>
 <hr />
 <h2 id="configuration-for-maximum-privacy">Configuration for Maximum Privacy<a class="headerlink" href="#configuration-for-maximum-privacy" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">HEADROOM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">HEADROOM_TELEMETRY_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">HEADROOM_LEARN_ENABLED</span><span class="o">=</span><span class="nb">false</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">HEADROOM_DASHBOARD_ENABLED</span><span class="o">=</span><span class="nb">false</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">HEADROOM_TELEMETRY</span><span class="o">=</span>off
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">HEADROOM_STATELESS</span><span class="o">=</span><span class="nb">true</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>headroom<span class="w"> </span>proxy<span class="w"> </span>--no-cache<span class="w"> </span>--no-optimize
 </span></code></pre></div>
 <p>This configuration results in:
 - No prompt data stored
 - No data exported
 - No analytics collected
-- Headroom acts as pure compression proxy</p>
+- Headroom acts as a passthrough proxy</p>
 <hr />
 <h2 id="version-history">Version History<a class="headerlink" href="#version-history" title="Permanent link">&para;</a></h2>
 <table>
