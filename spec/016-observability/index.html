@@ -2064,10 +2064,13 @@
 <hr />
 <h3 id="tracing">Tracing<a class="headerlink" href="#tracing" title="Permanent link">&para;</a></h3>
 <p>OpenTelemetry tracing support.</p>
-<p><strong>Configuration:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="o">=</span>http://localhost:4317
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">OTEL_SERVICE_NAME</span><span class="o">=</span>headroom
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">HEADROOM_TRACING_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<p><strong>Configuration (Langfuse):</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>pk-lf-...
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>sk-lf-...
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">HEADROOM_LANGFUSE_ENABLED</span><span class="o">=</span><span class="m">1</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Optional: override endpoint and service name</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># LANGFUSE_BASE_URL=https://cloud.langfuse.com</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># HEADROOM_LANGFUSE_SERVICE_NAME=headroom</span>
 </span></code></pre></div></p>
 <p><strong>Spans:</strong>
 | Span | Description |
@@ -2116,8 +2119,8 @@
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
 </span></code></pre></div></p>
 <p><strong>Configuration:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">HEADROOM_LOG_LEVEL</span><span class="o">=</span>INFO
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">HEADROOM_LOG_FORMAT</span><span class="o">=</span>json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Logging level is controlled via the --log-level CLI flag (headroom proxy --log-level debug)</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># or RUST_LOG env var for the Rust proxy. No HEADROOM_LOG_LEVEL env var exists.</span>
 </span></code></pre></div></p>
 <p>Or in config:
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">logging</span><span class="p">:</span>

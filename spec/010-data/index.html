@@ -2018,10 +2018,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#external-database" class="md-nav__link">
+  <a href="#storage-location" class="md-nav__link">
     <span class="md-ellipsis">
       
-        External Database
+        Storage Location
       
     </span>
   </a>
@@ -2183,19 +2183,14 @@
 </thead>
 <tbody>
 <tr>
-<td><code>HEADROOM_DB_PATH</code></td>
-<td><code>~/.headroom/</code></td>
-<td>Base path for databases</td>
+<td><code>HEADROOM_WORKSPACE_DIR</code></td>
+<td><code>~/.headroom</code></td>
+<td>Workspace root; all DBs live under this directory</td>
 </tr>
 <tr>
-<td><code>HEADROOM_DB_URL</code></td>
-<td>-</td>
-<td>External database URL (overrides default)</td>
-</tr>
-<tr>
-<td><code>HEADROOM_CACHE_PATH</code></td>
-<td><code>~/.headroom/cache/</code></td>
-<td>Compression cache location</td>
+<td><code>HEADROOM_CONFIG_DIR</code></td>
+<td><code>~/.headroom/config</code></td>
+<td>Config root (read-mostly: models.json, per-plugin config)</td>
 </tr>
 </tbody>
 </table>
@@ -2290,9 +2285,9 @@
 <h3 id="manual-backup">Manual Backup<a class="headerlink" href="#manual-backup" title="Permanent link">&para;</a></h3>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>tar<span class="w"> </span>-czf<span class="w"> </span>headroom-backup.tar.gz<span class="w"> </span>~/.headroom/
 </span></code></pre></div>
-<h3 id="external-database">External Database<a class="headerlink" href="#external-database" title="Permanent link">&para;</a></h3>
-<p>Set <code>HEADROOM_DB_URL</code> for external storage:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_DB_URL</span><span class="o">=</span>postgresql://user:pass@host:5432/headroom
+<h3 id="storage-location">Storage Location<a class="headerlink" href="#storage-location" title="Permanent link">&para;</a></h3>
+<p>Relocate all storage by setting the workspace root:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">HEADROOM_WORKSPACE_DIR</span><span class="o">=</span>/mnt/state
 </span></code></pre></div>
 <hr />
 <h2 id="version-history">Version History<a class="headerlink" href="#version-history" title="Permanent link">&para;</a></h2>

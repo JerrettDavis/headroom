@@ -2196,9 +2196,8 @@
 <h3 id="summary-compression">Summary Compression<a class="headerlink" href="#summary-compression" title="Permanent link">&para;</a></h3>
 <p><strong>Description:</strong> Compresses long context using summarization.</p>
 <p><strong>Configuration:</strong>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">HEADROOM_SUMMARY_ENABLED</span><span class="o">=</span><span class="nb">true</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">HEADROOM_SUMMARY_THRESHOLD</span><span class="o">=</span><span class="m">5000</span><span class="w">  </span><span class="c1"># tokens</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">HEADROOM_SUMMARY_RATIO</span><span class="o">=</span><span class="m">0</span>.3<span class="w">  </span><span class="c1"># compress to 30%</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Note: HEADROOM_SUMMARY_* env vars are not yet implemented.</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># Summary compression is currently configured programmatically only.</span>
 </span></code></pre></div></p>
 <p><strong>Behavior:</strong>
 1. Count input tokens
