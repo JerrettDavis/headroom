@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://chopratejas.github.io/headroom/benchmarks/">
+        <link rel="canonical" href="https://chopratejas.github.io/headroom/network-diff-capture/">
       
       
-        <link rel="prev" href="../text-compression/">
+        <link rel="prev" href="../sdk/">
       
       
-        <link rel="next" href="../LATENCY_BENCHMARKS/">
+        <link rel="next" href="../metrics/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Accuracy - Headroom</title>
+        <title>Differential Network Capture - Headroom</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#benchmarks" class="md-skip">
+        <a href="#differential-network-capture" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Accuracy
+              Differential Network Capture
             
           </span>
         </div>
@@ -333,13 +333,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../benchmarks/" class="md-tabs__link">
           
   
   
@@ -357,10 +355,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../cli/" class="md-tabs__link">
           
   
@@ -1361,10 +1361,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -1378,22 +1376,21 @@
     
     
       
-        
-        
-      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1411,7 +1408,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1426,37 +1423,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Accuracy
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
         
   
   
@@ -1472,270 +1442,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#compression-performance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compression Performance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#production-telemetry" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Production Telemetry
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Production Telemetry">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#proxy-overhead" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proxy Overhead
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#compression-rate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compression Rate
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#pipeline-step-timing-production-median" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pipeline Step Timing (Production Median)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#fleet-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fleet Summary
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#accuracy-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Accuracy Benchmarks
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Accuracy Benchmarks">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#html-extraction" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTML Extraction
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#json-compression-smartcrusher" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON Compression (SmartCrusher)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#qa-accuracy-preservation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        QA Accuracy Preservation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limitations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Limitations
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Limitations">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#what-headroom-does-not-compress" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Headroom Does NOT Compress
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#known-overhead-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Known Overhead Sources
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-headroom-adds-the-most-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When Headroom Adds the Most Value
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-headroom-adds-little-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When Headroom Adds Little Value
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#methodology" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Methodology">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#token-level-f1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Token-Level F1
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#compression-ratio" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compression Ratio
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#production-telemetry_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Production Telemetry
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#reproducing-results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reproducing Results
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1808,8 +1514,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -1831,21 +1539,22 @@
     
     
       
+        
+        
+      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -1863,7 +1572,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1962,10 +1671,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../network-diff-capture/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Differential Network Capture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1981,6 +1717,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run-the-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run The Harness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generate-a-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generate A Report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#custom-claude-invocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Claude Invocation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2197,10 +1986,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#compression-performance" class="md-nav__link">
+  <a href="#run-the-harness" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Compression Performance
+        Run The Harness
       
     </span>
   </a>
@@ -2208,232 +1997,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#production-telemetry" class="md-nav__link">
+  <a href="#generate-a-report" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Production Telemetry
+        Generate A Report
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Production Telemetry">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#proxy-overhead" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proxy Overhead
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#compression-rate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compression Rate
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#pipeline-step-timing-production-median" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pipeline Step Timing (Production Median)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#fleet-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fleet Summary
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#accuracy-benchmarks" class="md-nav__link">
+  <a href="#custom-claude-invocation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Accuracy Benchmarks
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Accuracy Benchmarks">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#html-extraction" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTML Extraction
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#json-compression-smartcrusher" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JSON Compression (SmartCrusher)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#qa-accuracy-preservation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        QA Accuracy Preservation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limitations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Limitations
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Limitations">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#what-headroom-does-not-compress" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Headroom Does NOT Compress
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#known-overhead-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Known Overhead Sources
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-headroom-adds-the-most-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When Headroom Adds the Most Value
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-headroom-adds-little-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When Headroom Adds Little Value
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#methodology" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Methodology">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#token-level-f1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Token-Level F1
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#compression-ratio" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compression Ratio
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#production-telemetry_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Production Telemetry
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#reproducing-results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reproducing Results
+        Custom Claude Invocation
       
     </span>
   </a>
@@ -2460,485 +2038,55 @@
   
 
 
-<h1 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h1>
-<p>Headroom's core promise: <strong>compress context without losing accuracy</strong>. This page shows accuracy benchmarks, compression performance, and real-world production telemetry from 250+ active proxy instances.</p>
-<div class="admonition success">
-<p class="admonition-title">Key Results</p>
-<p><strong>98.2% recall</strong> on article extraction with <strong>94.9% compression</strong>.
-<strong>52ms median overhead</strong> in production. <strong>1.4 billion tokens saved</strong> across 249 instances.</p>
-</div>
-<hr />
-<h2 id="compression-performance">Compression Performance<a class="headerlink" href="#compression-performance" title="Permanent link">&para;</a></h2>
-<p>Tested on Apple M-series (CPU), headroom v0.5.18. Each test runs <code>compress()</code> on realistic tool outputs.</p>
-<table>
-<thead>
-<tr>
-<th>Content Type</th>
-<th>Original</th>
-<th>Compressed</th>
-<th>Saved</th>
-<th>Ratio</th>
-<th>Latency</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>JSON array (100 items)</td>
-<td>3,163</td>
-<td>297</td>
-<td>2,866</td>
-<td><strong>90.6%</strong></td>
-<td>1ms</td>
-</tr>
-<tr>
-<td>JSON array (500 items)</td>
-<td>9,526</td>
-<td>1,614</td>
-<td>7,912</td>
-<td><strong>83.1%</strong></td>
-<td>2ms</td>
-</tr>
-<tr>
-<td>Shell output (200 lines)</td>
-<td>3,238</td>
-<td>469</td>
-<td>2,769</td>
-<td><strong>85.5%</strong></td>
-<td>1ms</td>
-</tr>
-<tr>
-<td>Build log (200 lines)</td>
-<td>2,412</td>
-<td>148</td>
-<td>2,264</td>
-<td><strong>93.9%</strong></td>
-<td>1ms</td>
-</tr>
-<tr>
-<td>grep results (150 hits)</td>
-<td>2,624</td>
-<td>2,624</td>
-<td>0</td>
-<td>0.0%</td>
-<td>&lt;1ms</td>
-</tr>
-<tr>
-<td>Python source (~480 lines)</td>
-<td>2,958</td>
-<td>2,958</td>
-<td>0</td>
-<td>0.0%</td>
-<td>&lt;1ms</td>
-</tr>
-<tr>
-<td><strong>Total</strong></td>
-<td><strong>23,921</strong></td>
-<td><strong>8,110</strong></td>
-<td><strong>15,811</strong></td>
-<td><strong>66.1%</strong></td>
-<td><strong>5ms</strong></td>
-</tr>
-</tbody>
-</table>
-<p><strong>Notes:</strong></p>
-<ul>
-<li>grep results and Python source show 0% compression — these are already compact structured formats. SmartCrusher only compresses JSON arrays; code passes through to preserve correctness.</li>
-<li>Latency is for the <code>compress()</code> SDK call, not the full proxy round-trip.</li>
-</ul>
-<hr />
-<h2 id="production-telemetry">Production Telemetry<a class="headerlink" href="#production-telemetry" title="Permanent link">&para;</a></h2>
-<p>Real-world data from <strong>50,000+ proxy sessions</strong> across 250+ unique instances (March 30 – April 2, 2026). Collected via anonymous telemetry beacon (opt-out: <code>HEADROOM_TELEMETRY=off</code>).</p>
-<h3 id="proxy-overhead">Proxy Overhead<a class="headerlink" href="#proxy-overhead" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Percentile</th>
-<th>Latency</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Median (P50)</strong></td>
-<td><strong>52ms</strong></td>
-</tr>
-<tr>
-<td>P90</td>
-<td>309ms</td>
-</tr>
-<tr>
-<td>P99</td>
-<td>4,172ms</td>
-</tr>
-<tr>
-<td>Mean</td>
-<td>161ms</td>
-</tr>
-</tbody>
-</table>
-<p>The median 52ms overhead is negligible compared to LLM inference time (typically 2-10 seconds).</p>
-<h3 id="compression-rate">Compression Rate<a class="headerlink" href="#compression-rate" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Percentile</th>
-<th>Compression</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>P25</td>
-<td>4.8%</td>
-</tr>
-<tr>
-<td><strong>Median</strong></td>
-<td><strong>4.8%</strong></td>
-</tr>
-<tr>
-<td>P75</td>
-<td>6.9%</td>
-</tr>
-<tr>
-<td>Mean</td>
-<td>11.3%</td>
-</tr>
-</tbody>
-</table>
-<p>Median compression is modest because many requests are short conversational turns. Heavy tool-use sessions (file reads, shell output) see 40-80% compression.</p>
-<h3 id="pipeline-step-timing-production-median">Pipeline Step Timing (Production Median)<a class="headerlink" href="#pipeline-step-timing-production-median" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Step</th>
-<th>Median</th>
-<th>P90</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>pipeline_total</code></td>
-<td><strong>16.9ms</strong></td>
-<td>289ms</td>
-<td>Full compression pipeline</td>
-</tr>
-<tr>
-<td><code>content_router</code></td>
-<td>11.7ms</td>
-<td>259ms</td>
-<td>Content detection + routing</td>
-</tr>
-<tr>
-<td><code>compressor:smart_crusher</code></td>
-<td>50.1ms</td>
-<td>50ms</td>
-<td>JSON array compression</td>
-</tr>
-<tr>
-<td><code>compressor:text</code></td>
-<td>32.0ms</td>
-<td>576ms</td>
-<td>Text compression (Kompress ONNX)</td>
-</tr>
-<tr>
-<td><code>compressor:mixed</code></td>
-<td>316ms</td>
-<td>428ms</td>
-<td>Mixed content compression</td>
-</tr>
-<tr>
-<td><code>compressor:code_aware</code></td>
-<td>815ms</td>
-<td>886ms</td>
-<td>Tree-sitter AST compression</td>
-</tr>
-<tr>
-<td><code>_initial_token_count</code></td>
-<td>2.9ms</td>
-<td>16ms</td>
-<td>Token counting (tiktoken)</td>
-</tr>
-<tr>
-<td><code>_deep_copy</code></td>
-<td>0.1ms</td>
-<td>0.3ms</td>
-<td>Message copy overhead</td>
-</tr>
-</tbody>
-</table>
-<h3 id="fleet-summary">Fleet Summary<a class="headerlink" href="#fleet-summary" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Metric</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Clean instances</td>
-<td>249</td>
-</tr>
-<tr>
-<td>Total tokens saved</td>
-<td>1.4 billion</td>
-</tr>
-<tr>
-<td>Total $ saved</td>
-<td>~$4,000</td>
-</tr>
-<tr>
-<td>OS distribution</td>
-<td>Linux 57%, macOS 38%, Windows 5%</td>
-</tr>
-<tr>
-<td>Top version</td>
-<td>0.5.17 (77%)</td>
-</tr>
-<tr>
-<td>Models used</td>
-<td>Claude Opus 4.6, Sonnet 4.6, Haiku 4.5</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="accuracy-benchmarks">Accuracy Benchmarks<a class="headerlink" href="#accuracy-benchmarks" title="Permanent link">&para;</a></h2>
-<h3 id="html-extraction">HTML Extraction<a class="headerlink" href="#html-extraction" title="Permanent link">&para;</a></h3>
-<p><strong>Dataset</strong>: <a href="https://huggingface.co/datasets/allenai/scrapinghub-article-extraction-benchmark">Scrapinghub Article Extraction Benchmark</a>
-<strong>Samples</strong>: 181 HTML pages with ground truth article bodies
-<strong>Baseline</strong>: trafilatura (0.958 F1)</p>
-<table>
-<thead>
-<tr>
-<th>Metric</th>
-<th>Value</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>F1 Score</strong></td>
-<td>0.919</td>
-<td>Token-level overlap with ground truth</td>
-</tr>
-<tr>
-<td><strong>Precision</strong></td>
-<td>0.879</td>
-<td>Proportion of extracted content that's relevant</td>
-</tr>
-<tr>
-<td><strong>Recall</strong></td>
-<td>0.982</td>
-<td>Proportion of ground truth content captured</td>
-</tr>
-<tr>
-<td><strong>Compression</strong></td>
-<td>94.9%</td>
-<td>Average size reduction</td>
-</tr>
-</tbody>
-</table>
-<p>For LLM applications, <strong>recall is critical</strong> — 98.2% means nearly all article content is preserved. The slight precision drop (some extra content) doesn't hurt LLM accuracy.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run it yourself</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;headroom-ai[html]&quot;</span><span class="w"> </span>datasets
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pytest<span class="w"> </span>tests/test_evals/test_html_oss_benchmarks.py::TestExtractionBenchmark<span class="w"> </span>-v<span class="w"> </span>-s
+<h1 id="differential-network-capture">Differential Network Capture<a class="headerlink" href="#differential-network-capture" title="Permanent link">&para;</a></h1>
+<p>Headroom includes a containerized harness for comparing Claude Code traffic sent
+directly to Anthropic with traffic sent through a Headroom proxy. The harness
+uses mitmproxy in two isolated lanes, writes sanitized JSONL captures, and then
+generates Markdown/JSON reports with request route, header, body size, body hash,
+and JSON payload differences.</p>
+<h2 id="run-the-harness">Run The Harness<a class="headerlink" href="#run-the-harness" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>docker/differential-network-capture
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>captures
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>...
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CLAUDE_PROMPT</span><span class="o">=</span><span class="s2">&quot;Summarize this repository in one sentence.&quot;</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build<span class="w"> </span>mitm-direct<span class="w"> </span>mitm-headroom-upstream<span class="w"> </span>headroom-proxy<span class="w"> </span>mitm-headroom-client
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>run<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>claude-direct
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>run<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>claude-headroom
 </span></code></pre></div>
-<h3 id="json-compression-smartcrusher">JSON Compression (SmartCrusher)<a class="headerlink" href="#json-compression-smartcrusher" title="Permanent link">&para;</a></h3>
-<p><strong>Test</strong>: 100 production log entries with critical error at position 67
-<strong>Task</strong>: Find the error, error code, resolution, and affected count</p>
-<table>
-<thead>
-<tr>
-<th>Metric</th>
-<th>Baseline</th>
-<th>Headroom</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Input tokens</td>
-<td>10,144</td>
-<td>1,260</td>
-</tr>
-<tr>
-<td>Correct answers</td>
-<td>4/4</td>
-<td><strong>4/4</strong></td>
-</tr>
-<tr>
-<td>Compression</td>
-<td>—</td>
-<td><strong>87.6%</strong></td>
-</tr>
-</tbody>
-</table>
-<p>SmartCrusher preserves first N items (schema), last N items (recency), all anomalies (errors, warnings), and statistical distribution.</p>
-<h3 id="qa-accuracy-preservation">QA Accuracy Preservation<a class="headerlink" href="#qa-accuracy-preservation" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Metric</th>
-<th>Original HTML</th>
-<th>Extracted</th>
-<th>Delta</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>F1 Score</td>
-<td>0.85</td>
-<td>0.87</td>
-<td>+0.02</td>
-</tr>
-<tr>
-<td>Exact Match</td>
-<td>60%</td>
-<td>62%</td>
-<td>+2%</td>
-</tr>
-</tbody>
-</table>
-<div class="admonition note">
-<p class="admonition-title">Extraction Can Improve Accuracy</p>
-<p>Removing HTML noise sometimes <em>helps</em> LLMs focus on relevant content.</p>
-</div>
-<hr />
-<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
-<h3 id="what-headroom-does-not-compress">What Headroom Does NOT Compress<a class="headerlink" href="#what-headroom-does-not-compress" title="Permanent link">&para;</a></h3>
+<p>The primary captures are written to:</p>
 <ul>
-<li><strong>Short messages</strong> (&lt; 300 tokens) — overhead exceeds savings</li>
-<li><strong>Source code</strong> — passes through unchanged to preserve correctness (unless tree-sitter AST compression is enabled)</li>
-<li><strong>grep/search results</strong> — compact structured format, already minimal</li>
-<li><strong>Images</strong> — counted at fixed token cost (~1,600 tokens), not compressed as text</li>
-<li><strong>System prompts</strong> — preserved for prefix cache compatibility</li>
+<li><code>docker/differential-network-capture/captures/direct.jsonl</code></li>
+<li><code>docker/differential-network-capture/captures/headroom-client.jsonl</code></li>
 </ul>
-<h3 id="known-overhead-sources">Known Overhead Sources<a class="headerlink" href="#known-overhead-sources" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Token counting</strong> (P90: 16ms) — runs tiktoken twice (before + after compression)</li>
-<li><strong>Tree-sitter AST parsing</strong> (P90: 886ms) — expensive for large code files</li>
-<li><strong>Kompress ONNX</strong> (P90: 576ms) — ML inference on CPU for text compression</li>
-<li><strong>Content detection</strong> (Magika) — ML classification of content type</li>
-</ul>
-<h3 id="when-headroom-adds-the-most-value">When Headroom Adds the Most Value<a class="headerlink" href="#when-headroom-adds-the-most-value" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Long agent sessions</strong> with accumulated tool outputs (40-80% compression)</li>
-<li><strong>JSON-heavy workflows</strong> (API responses, database queries) — 83-94% compression</li>
-<li><strong>Build/test output</strong> — 85-94% compression</li>
-<li><strong>Multi-tool agents</strong> — 60-76% compression across tool results</li>
-</ul>
-<h3 id="when-headroom-adds-little-value">When Headroom Adds Little Value<a class="headerlink" href="#when-headroom-adds-little-value" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Short conversational exchanges</strong> — median 4.8% compression</li>
-<li><strong>Code-only sessions</strong> (reading/writing files) — code passes through</li>
-<li><strong>Single-turn requests</strong> — no accumulated context to compress</li>
-</ul>
-<hr />
-<h2 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h2>
-<h3 id="token-level-f1">Token-Level F1<a class="headerlink" href="#token-level-f1" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Precision = |predicted ∩ ground_truth| / |predicted|
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Recall = |predicted ∩ ground_truth| / |ground_truth|
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>F1 = 2 * (Precision * Recall) / (Precision + Recall)
+<p>The Headroom lane also writes
+<code>docker/differential-network-capture/captures/headroom-upstream.jsonl</code>, which is
+the request Headroom forwards to Anthropic after proxy processing.</p>
+<p>By default only <code>api.anthropic.com</code> is logged. Override
+<code>CAPTURE_INCLUDE_HOSTS</code> with a comma-separated list to include other hosts.</p>
+<h2 id="generate-a-report">Generate A Report<a class="headerlink" href="#generate-a-report" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>headroom<span class="w"> </span>capture<span class="w"> </span>network-diff<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--direct<span class="w"> </span>docker/differential-network-capture/captures/direct.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--headroom<span class="w"> </span>docker/differential-network-capture/captures/headroom-client.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--output<span class="w"> </span>docker/differential-network-capture/captures/report.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>--json-output<span class="w"> </span>docker/differential-network-capture/captures/report.json
 </span></code></pre></div>
-<h3 id="compression-ratio">Compression Ratio<a class="headerlink" href="#compression-ratio" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Compression = 1 - (compressed_size / original_size)
+<p>The report redacts sensitive header values and sensitive query values before
+comparison. Request bodies are captured so structural payload differences can be
+identified; keep the generated <code>captures/</code> directory out of commits because it
+may contain prompts, tool outputs, and repository context.</p>
+<p>For Claude Code deferred-tool investigations, the paired exchange table includes
+top-level Anthropic <code>tools</code> counts and serialized tool bytes. A jump from
+<code>tools=0-&gt;N</code> in the Headroom client lane is evidence that Claude Code eagerly
+materialized tool schemas before the request reached Headroom.</p>
+<h2 id="custom-claude-invocation">Custom Claude Invocation<a class="headerlink" href="#custom-claude-invocation" title="Permanent link">&para;</a></h2>
+<p>Set <code>CLAUDE_COMMAND</code> to run the exact command under test in both lanes:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">CLAUDE_COMMAND</span><span class="o">=</span><span class="s1">&#39;claude -p &quot;read README.md and summarize the proxy setup&quot;&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>run<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>claude-direct
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">CLAUDE_COMMAND</span><span class="o">=</span><span class="s1">&#39;claude -p &quot;read README.md and summarize the proxy setup&quot;&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>run<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>claude-headroom
 </span></code></pre></div>
-<p>A 94.9% compression means the output is 5.1% of the original size.</p>
-<h3 id="production-telemetry_1">Production Telemetry<a class="headerlink" href="#production-telemetry_1" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Collected via anonymous beacon (no prompts, no content, no PII)</li>
-<li>Image-inflated instances excluded (base64 counted as text tokens — fixed in v0.5.18)</li>
-<li>Multi-worker beacon spam excluded (per-instance MAX, not SUM)</li>
-<li>Opt-out: <code>HEADROOM_TELEMETRY=off</code></li>
-</ul>
-<hr />
-<h2 id="reproducing-results">Reproducing Results<a class="headerlink" href="#reproducing-results" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Clone the repo</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/chopratejas/headroom.git
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nb">cd</span><span class="w"> </span>headroom
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># Install with eval dependencies</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[evals,html]&quot;</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># Run all benchmarks</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>pytest<span class="w"> </span>tests/test_evals/<span class="w"> </span>-v<span class="w"> </span>-s
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="c1"># Run compression benchmark</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;from headroom import compress; print(compress([{&#39;role&#39;:&#39;user&#39;,&#39;content&#39;:&#39;test&#39;}]))&quot;</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># Run local proxy mode benchmark (no API calls)</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>python<span class="w"> </span>benchmarks/proxy_mode_benchmark.py<span class="w"> </span>--turns<span class="w"> </span><span class="m">12</span><span class="w"> </span>--show-real-harness
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Replay local Claude Code transcripts (no API calls)</span>
-</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>python<span class="w"> </span>benchmarks/claude_session_mode_benchmark.py<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span>
-</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>
-</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="c1"># Compare two refs on the same local Claude transcript corpus</span>
-</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>python<span class="w"> </span>benchmarks/claude_session_branch_compare.py<span class="w"> </span>--left-ref<span class="w"> </span>upstream/main<span class="w"> </span>--right-ref<span class="w"> </span>HEAD<span class="w"> </span>--recent-turns-per-session<span class="w"> </span><span class="m">200</span><span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span>
-</span></code></pre></div>
-<p>This benchmark compares <code>token</code> vs <code>cache</code> proxy modes on the same synthetic conversation:</p>
-<ul>
-<li><code>token</code> should show higher compression.</li>
-<li><code>cache</code> should preserve prior-turn stability and can win in long sessions with strong prefix-cache reuse.</li>
-</ul>
-<p><code>--show-real-harness</code> prints optional steps for running the same comparison with Claude Code, but does not call APIs by default.</p>
-<p><code>claude_session_branch_compare.py</code> runs the real local session replay benchmark twice, once per git ref, in isolated worktrees. It writes:</p>
-<ul>
-<li>per-ref replay outputs under <code>benchmark_results/branch_compare/&lt;label&gt;/</code></li>
-<li>a combined comparison report under <code>benchmark_results/branch_compare/</code></li>
-</ul>
-<p>Use it when you want a clean PR-vs-<code>main</code> comparison on the same transcript slice.</p>
-<p>For a deterministic cache-busting proof case, run:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>benchmarks/synthetic_token_cache_bust_report.py
-</span></code></pre></div>
-<p>That synthetic replay forces <code>token</code> mode to retroactively rewrite a prior tool result on the second turn while <code>cache</code> mode remains stable. Use it to verify the simulator can distinguish:</p>
-<ul>
-<li><code>token</code>: history rewrite + cache bust</li>
-<li><code>cache</code>: no rewrite + no bust</li>
-</ul>
-<p>For a reproducible local report bundle that combines:</p>
-<ul>
-<li>full real-session replay summaries</li>
-<li>local-only processed real input/output excerpts</li>
-<li>synthetic token-bust proof</li>
-<li>synthetic long-form stress tests</li>
-</ul>
-<p>run:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>benchmarks/cache_validation_bundle.py<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output-dir<span class="w"> </span>benchmark_results/cache_validation_bundle_full
-</span></code></pre></div>
-<p>Notes:</p>
-<ul>
-<li>By default the bundle is redaction-safe for sharing:</li>
-<li>real processed reports redact transcript-derived content excerpts</li>
-<li>manifest paths are redacted</li>
-<li>To include local processed content excerpts for private review on your own machine:</li>
-</ul>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>benchmarks/cache_validation_bundle.py<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span><span class="w"> </span>--include-content
-</span></code></pre></div>
-<ul>
-<li>The bundle writes:</li>
-<li><code>index.html</code> / <code>index.md</code>: top-level summary and links</li>
-<li><code>bundle_manifest.json</code>: runtime metadata + corpus fingerprint</li>
-<li><code>real/</code>: full real-session replay reports</li>
-<li><code>real_processed/</code>: processed before/after excerpts from real transcripts</li>
-<li><code>synthetic_token_bust/</code>: minimal explicit cache-bust proof</li>
-<li><code>synthetic_long_suite/</code>: long deterministic rewrite/TTL scenarios</li>
-<li>Checkpoints are scoped under the bundle output directory and fingerprinted by the selected corpus so stale runs do not contaminate new results.</li>
-</ul>
-<p>The Claude session benchmark replays local transcript data from <code>~/.claude/projects</code>
-through <code>baseline</code>, <code>token</code>, and <code>cache</code> modes. It estimates raw tokens, cache
-read/write tokens, paid input/output costs, and prompt-window winners under two
-assumptions:</p>
-<ul>
-<li>cached tokens count against the model window</li>
-<li>cache reads do not count against the model window</li>
-</ul>
-<p>Notes:</p>
-<ul>
-<li>It writes local output to <code>benchmark_results/</code>, which is gitignored.</li>
-<li>It is intentionally conservative on memory. Run with <code>--workers 1</code> for the
-  most stable full-corpus replay. Higher worker counts increase memory use.</li>
-<li>It uses transcript-visible messages only. Hidden Claude Code system/tool schemas
-  are not available in the local <code>.jsonl</code> files, so the numbers are comparative
-  estimates rather than exact provider billing replicas.</li>
-</ul>
+<p>Use <code>CLAUDE_DIRECT_ARGS</code> and <code>CLAUDE_HEADROOM_ARGS</code> when each lane needs
+different flags.</p>
 
 
 
