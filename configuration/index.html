@@ -3136,6 +3136,11 @@ backends are opt-in.</p>
 <td>Full path to the subscription tracker state. Always wins when set.</td>
 <td>derived from <code>${HEADROOM_WORKSPACE_DIR}</code></td>
 </tr>
+<tr>
+<td><code>HEADROOM_EMBEDDER_RUNTIME</code></td>
+<td>Set to <code>pytorch_mps</code> to run the memory embedder via the torch sentence-transformers backend on the Apple GPU (MPS). Only engages when Apple MPS is actually available; otherwise it logs a warning and uses the existing default embedder selection path. <code>pytorch_mps</code> is the only accepted value. Requires the <code>[pytorch-mps]</code> extra. See <a href="../memory/#embedding-runtime--gpu-offload-apple-silicon">Memory</a>.</td>
+<td>default embedder selection</td>
+</tr>
 </tbody>
 </table>
 <h2 id="filesystem-contract">Filesystem Contract<a class="headerlink" href="#filesystem-contract" title="Permanent link">&para;</a></h2>
