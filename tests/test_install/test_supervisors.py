@@ -312,8 +312,10 @@ def test_install_supervisor_darwin_windows_and_unsupported(monkeypatch, tmp_path
         "sc.exe",
         "create",
         "headroom-default",
-        'binPath= cmd.exe /c "C:\\tmp\\default\\run-headroom.cmd"',
-        "start= auto",
+        "binPath=",
+        'cmd.exe /c "C:\\tmp\\default\\run-headroom.cmd"',
+        "start=",
+        "auto",
     ] in calls
     assert [
         "schtasks",

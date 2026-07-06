@@ -263,7 +263,7 @@ def install_supervisor(manifest: DeploymentManifest) -> list[ArtifactRecord]:
     if _is_windows() and manifest.supervisor_kind == SupervisorKind.SERVICE.value:
         service_bin = f'cmd.exe /c "{windows_run_cmd_path(manifest.profile)}"'
         subprocess.run(
-            ["sc.exe", "create", manifest.service_name, f"binPath= {service_bin}", "start= auto"],
+            ["sc.exe", "create", manifest.service_name, "binPath=", service_bin, "start=", "auto"],
             check=True,
         )
         subprocess.run(
