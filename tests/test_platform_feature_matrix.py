@@ -29,6 +29,9 @@ def test_platform_feature_matrix_is_complete() -> None:
             status = coverage["status"]
             assert status in VALID_STATUSES, f"{feature_id}/{platform} has invalid status"
             assert coverage["tests"], f"{feature_id}/{platform} must cite tests or workflows"
+            for test_ref in coverage["tests"]:
+                path = Path(test_ref.split("#", 1)[0])
+                assert path.exists(), f"{feature_id}/{platform} cites missing path {test_ref}"
             if status in {"partial", "gap", "blocked"}:
                 assert coverage.get("gap"), f"{feature_id}/{platform} must explain {status}"
 
@@ -41,6 +44,7 @@ def test_platform_feature_matrix_covers_issue_1843_regression_areas() -> None:
         "install_windows_service",
         "single_instance_start",
         "compression_fail_open",
+        "proxy_functional_smoke",
         "ccr_persistence",
         "toin_skip_recommendations",
     } <= feature_ids
@@ -56,7 +60,11 @@ def test_platform_feature_matrix_sanity_tests_are_enumerated() -> None:
         "runtime_selection",
         "health_startup",
         "compression_backpressure",
+        "proxy_route_smoke",
     } <= sanity_ids
     for item in matrix["sanity_tests"]:
         assert item["description"]
         assert item["tests"]
+        for test_ref in item["tests"]:
+            path = Path(test_ref.split("#", 1)[0])
+            assert path.exists(), f"{item['id']} cites missing path {test_ref}"
