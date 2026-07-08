@@ -738,6 +738,13 @@ class CostTracker:
             uncached_tokens: Non-cached input tokens from API response usage.
             output_tokens: Output tokens from API response usage.
         """
+        if tokens_saved < 0:
+            logger.debug(
+                "clamping negative token savings for %s from %d to 0",
+                model,
+                tokens_saved,
+            )
+            tokens_saved = 0
         self._tokens_saved_by_model[model] = (
             self._tokens_saved_by_model.get(model, 0) + tokens_saved
         )

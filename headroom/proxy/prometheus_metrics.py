@@ -590,6 +590,14 @@ class PrometheusMetrics:
         client: str | None = None,
     ):
         """Record metrics for a request."""
+        if tokens_saved < 0:
+            logger.debug(
+                "clamping negative token savings for %s/%s from %d to 0",
+                provider,
+                model,
+                tokens_saved,
+            )
+            tokens_saved = 0
         async with self._lock:
             self.requests_total += 1
             self.requests_by_provider[provider] += 1
