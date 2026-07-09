@@ -590,12 +590,17 @@ class PrometheusMetrics:
         client: str | None = None,
     ):
         """Record metrics for a request."""
+        # Post-guard invariant (all providers): Headroom never forwards a request
+        # larger than the original — handlers revert any inflation before sending
+        # (verified clean on the wire). So compression savings are >= 0; a negative
+        # here is an intermediate/hook token-count artifact that never reached the
+        # model. Clamp so total_tokens_removed / avg_compression_pct reflect the
+        # actually-forwarded bytes instead of surfacing spurious negatives.
         if tokens_saved < 0:
             logger.debug(
-                "clamping negative token savings for %s/%s from %d to 0",
-                provider,
-                model,
+                "metrics.record: clamping negative tokens_saved=%d to 0 for %s (artifact; wire not inflated)",
                 tokens_saved,
+                model,
             )
             tokens_saved = 0
         async with self._lock:
