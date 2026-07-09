@@ -9,69 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Fixed
-- `headroom wrap claude` no longer leaves a dead `ANTHROPIC_BASE_URL` in a
-  project's `.claude/settings.local.json` after an unclean exit (`SIGKILL`,
-  OOM, reboot, or terminal/tmux close via `SIGHUP`, which was not caught).
-  `_write_claude_wrap_base_url`/`_restore_claude_wrap_base_url` only removed
-  or restored the entry from the wrap process's own `finally` block, so a
-  crash skipped it and every later bare `claude` invocation in that project
-  inherited the stale proxy URL and hung indefinitely retrying a dead port.
-  A wrap session now stamps a sidecar marker (pid, port, prior value); the
-  next `wrap`, `unwrap`, or `headroom doctor` run detects a marker whose pid
-  is dead or reused and restores the recorded prior value automatically.
-  `claude()` also now catches `SIGHUP` alongside the existing `SIGTERM`
-  handler ([#1768](https://github.com/headroomlabs-ai/headroom/issues/1768)).
-- Non-finite values (`NaN`, `Infinity`) in `proxy_savings.json` or in upstream
-  cost/token metadata no longer crash the proxy or corrupt the savings
-  dashboard. `SavingsTracker`'s numeric coercion caught only `TypeError` and
-  `ValueError`, so `int(float('inf'))` raised an uncaught `OverflowError` while
-  loading persisted state (`SavingsTracker.__init__` failed and the proxy would
-  not start), and `float('nan')`/`float('inf')` passed straight through, then
-  serialized to `NaN`/`Infinity` literals that the dashboard's `JSON.parse`
-  rejects. `json.loads` accepts those literals, so one bad write poisoned every
-  later start. Both coercion helpers now also catch `OverflowError` and reject
-  non-finite floats, failing open to safe defaults.
-- `headroom learn` now honors `CLAUDE_CONFIG_DIR`. It resolved the Claude
-  config directory as `~/.claude` and wrote global memory to
-  `~/.claude/CLAUDE.md`, so users who relocate their Claude config via that
-  env var had `learn` scan the wrong directory and detect no projects. The
-  scanner and memory writer now read/write the configured directory
-  ([#1630](https://github.com/headroomlabs-ai/headroom/issues/1630)).
-- `--backend bedrock` now fails fast with an actionable error when temporary
-  AWS credentials (`AWS_SESSION_TOKEN`) are used but botocore is not installed
-  (e.g. the slim default Docker image). litellm's session-token auth path
-  imports botocore, so the missing dependency previously surfaced only at
-  request time as a misleading `authentication_error: No module named
-  'botocore'`. The proxy now tells the user to install the `bedrock` extra up
-  front ([#1551](https://github.com/headroomlabs-ai/headroom/issues/1551)).
-- Content detection no longer crashes the proxy on text containing an
-  orphaned `+++ ` target line with no preceding `--- ` source line (common in
-  `set -x` xtrace output and partial diffs). The bundled `unidiff` 0.4.0 parser
-  panics on that input instead of returning an error; the Rust diff detector now
-  contains the panic and treats the fragment as plain text, so the request is
-  compressed and forwarded normally instead of returning HTTP 500
-  ([#1547](https://github.com/headroomlabs-ai/headroom/issues/1547)).
-- Proactive expansion blocks injected into user turns are now wrapped in
-  `<headroom_proactive_expansion>` XML tags, giving downstream consumers
-  (LLMs, loggers, attribution parsers) a machine-readable provenance
-  boundary and preventing misattribution in multi-agent threads.
-- **cli:** the startup banner no longer advertises
-  `HEADROOM_COMPRESSION_STABLE_AFTER_TURN` and
-  `HEADROOM_STALE_READ_COMPRESS_AFTER_TURNS` as tuning knobs. Both were read
-  only to render the `Performance Tuning` banner section and were never wired
-  into the compression path, so setting them changed the banner but had no
-  effect on behavior. The banner now surfaces only the embedding sidecar,
-  which is a real, consumed setting.
-- **memory/embedder:** cap CPU thread oversubscription in the local
-  torch/sentence-transformers embedder. Concurrent encodes previously each
-  fanned out to ~`os.cpu_count()` BLAS/OpenMP threads, so under load the memory
-  path starved the asyncio event loop and spiked `/livez` latency to several
-  seconds. CPU encodes now run on a dedicated, size-limited executor whose
-  workers each pin their thread pool, bounding total embedding threads to
-  `HEADROOM_EMBED_CONCURRENCY` × `HEADROOM_EMBED_NUM_THREADS` (defaults
-  `min(4, cpu)` × 1). The ONNX embedder already capped its threads; this brings
-  the torch path to parity
-  ([#198](https://github.com/headroomlabs-ai/headroom/issues/198)).
+- **proxy:** the savings store now fsyncs its parent directory after the
+  atomic rename, so the most recent `proxy_savings.json` write survives a
+  power-loss or crash. `_save_locked` fsynced the temp file's contents but
+  never the directory entry the rename created, leaving the rename itself
+  non-durable on POSIX. Best-effort — a no-op on Windows and virtual
+  filesystems where directory fsync is unsupported.
+
+### Features
+
+* **transforms:** add opt-in audit-safe mode to `SmartCrusher` — `SmartCrusherConfig(audit_safe=True, protected_patterns=[...], fail_closed_on_protected_loss=True)`. Rows matching a protected pattern are scanned before JSON-array compression and guaranteed to survive the compressed output verbatim afterward (never dropped, never replaced by an opaque `<<ccr:...>>` marker only). Applies on both the `crush_array_json` convenience API and the `_smart_crush_content` path `apply()` uses for real tool-output compression. If a protected row still can't be preserved after the splice-back pass, the crusher fails closed by returning the original uncompressed content (or ships a best-effort result with a warning when `fail_closed_on_protected_loss=False`). Default is `audit_safe=False` — no behavior change for existing callers ([#1705](https://github.com/chopratejas/headroom/issues/1705)).
 
 ### Changed
 
@@ -80,11 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-* **proxy:** add provider-only HTTP proxy routing via `--http-proxy` and
-  `HEADROOM_HTTP_PROXY`. Upstream LLM provider calls can now use an HTTP proxy
-  without setting process-wide `HTTP_PROXY`/`HTTPS_PROXY` variables that are
-  inherited by tool executions; proxied provider clients use HTTP/1.1 so HTTPS
-  provider APIs can tunnel through CONNECT.
+* **proxy:** add provider-only HTTP proxy routing via `--http-proxy` and `HEADROOM_HTTP_PROXY`. Upstream LLM provider calls can now use an HTTP proxy without setting process-wide `HTTP_PROXY`/`HTTPS_PROXY` variables that are inherited by tool executions; proxied provider clients use HTTP/1.1 so HTTPS provider APIs can tunnel through CONNECT.
 * **proxy:** add output shaping for OpenAI Responses traffic on `/v1/responses` HTTP requests and Codex WebSocket `response.create` frames, with stable output-savings holdout keys and counted WS token strata for the experiment.
 * **wrap:** `headroom wrap claude --1m` preserves the 1M context window. Behind a custom `ANTHROPIC_BASE_URL` (the proxy) Claude Code drops the `context-1m` beta header and caps the window at 200k for entitled subscription users; the opt-in flag sets `ANTHROPIC_MODEL=<opus>[1m]` on the launched process so the 1M window activates through Headroom. A model already selected via `ANTHROPIC_MODEL` is preserved (only the `[1m]` suffix is appended) ([#1158](https://github.com/chopratejas/headroom/issues/1158)).
 * **learn:** weight loops in `headroom learn`. A new loop detector (`headroom/learn/loops.py`) recognizes repeated tool-call patterns — including RTK re-fetch loops, where RTK's output truncation makes the agent re-run larger-limit variants of a *successful* command — collapses output-limit variants to one signature, measures the wasted tokens, surfaces loops as a highest-priority digest section, and weights loop guardrails above one-off rules by their measured waste. Previously loops had no special weight and a no-failure re-fetch loop was skipped entirely. Adds an RTK-loop eval (`benchmarks/rtk_loop_learn_eval.py`) that reproduces a loop, runs it through Learn, and asserts the generated guardrail ranks first and prevents re-triggering.
@@ -100,10 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* **proxy/openai:** thread the savings-profile kwargs into the live `/v1/chat/completions` compression path. The chat handler called `openai_pipeline.apply()` without `proxy_pipeline_kwargs(config)`, so `HEADROOM_SAVINGS_PROFILE=agent-90` (and the individual `compress_user_messages`/`target_ratio`/`min_tokens_to_compress`/... knobs) were silently dropped — OpenAI-compatible clients like OpenCode kept protecting user messages and missed the configured profile. Both the token-mode and non-token chat branches now pass the profile kwargs, matching `handlers/anthropic.py` and the dedicated OpenAI compress endpoint ([#1534](https://github.com/headroomlabs-ai/headroom/issues/1534)).
 * **proxy:** forward Codex Desktop `/v1/responses` posts byte-faithfully so they stop returning upstream `400 {"detail":"Bad Request"}`. `handle_openai_responses` decoded the inbound body to inspect it but always re-serialized a canonical body on the way out, and it never stripped the inbound `content-encoding` header — so a `content-encoding: zstd` Codex Desktop request was forwarded as already-decoded JSON still advertising `zstd`, and the upstream ChatGPT Codex endpoint rejected it. The handler now keeps the original decoded bytes and forwards them verbatim whenever nothing (compression or memory injection) mutated the request, and drops the stale `content-encoding` header, mirroring the byte-faithful passthrough the chat and Anthropic paths already use ([#1542](https://github.com/headroomlabs-ai/headroom/issues/1542)).
 * **wrap/codex:** `headroom unwrap codex` now removes the Headroom rtk instruction block from the Codex global `AGENTS.md`. `wrap codex` injects it there, but unwrap only restored `config.toml` and MCP state, so a plain `codex` launch kept following the "prefix shell commands with `rtk`" guidance and failed once the managed rtk binary was off PATH. Unwrap now strips the marker-fenced block (preserving the rest of the file), mirroring `unwrap copilot` ([#1421](https://github.com/headroomlabs-ai/headroom/issues/1421)).
 * **proxy/auth:** classify real Anthropic OAuth tokens correctly. `classify_auth_mode` matched OAuth on the `sk-ant-oat-` prefix, but real access tokens are `sk-ant-oat01-...` (a version number, no dash after `oat`), so every real subscription/OAuth token fell through to the `sk-` branch and was tagged `PAYG` — enabling aggressive lossy compression, auto `cache_control`, and `prompt_cache_key` injection on subscription-bound requests the classifier is meant to route to the passthrough-prefer path. The prefix is now the dash-less `sk-ant-oat` (still matches the legacy dashed shape). The existing parity tests only passed because they used a synthetic `sk-ant-oat-01-` fixture; a regression test now covers the real `sk-ant-oat01-` format.
 * **install:** stop leaking a file descriptor on every `headroom install start`. `start_detached_agent()` opened the agent log file and handed it to `subprocess.Popen` but never closed the parent's copy, so each call leaked one fd (and pinned the log file open against rotation). The parent now closes its copy in a `try/finally` once the child has inherited it — the close also runs if `Popen` raises ([#1554](https://github.com/headroomlabs-ai/headroom/issues/1554)).
+* **cli/proxy:** honor `HEADROOM_MIN_TOKENS=0` / `HEADROOM_MAX_ITEMS=0`. The Click `proxy` command built these with `_get_env_int_optional(name) or 500`/`or 50`, so an explicit `0` — a legitimate value (`min_tokens_to_crush=0` means "crush every item") — was treated as falsy and silently replaced with the default. The `headroom proxy` argparse path already preserved `0` via `_get_env_int`, so the two entry points disagreed. The Click path now uses the same None-checking helper.
 * **proxy:** include the system prompt, tools, and the response-shaping request fields in the SemanticCache key. `_compute_key` hashed only `{model, messages}`, so two non-streaming requests with identical messages but a different top-level `system` prompt, tool set, sampling config, or output-shaping field collided on one key and the second caller was served the first's cached response — generated under different request semantics, in the default config (`cache_enabled` defaults on). The key now folds the request fields that shape generation — `temperature`/`top_p`/`top_k`/`max_tokens`/`stop`, plus OpenAI `tool_choice`/`response_format`/`parallel_tool_calls`/`seed`/`presence_penalty`/`frequency_penalty`/`logit_bias`/`n`/`logprobs`/`top_logprobs`/`reasoning_effort`/`verbosity`/`modalities` and Anthropic `thinking`/`tool_choice`/`output_config` — canonicalizing `system`/`tools` so a moved `cache_control` breakpoint does not fragment it, and the handlers snapshot the fields once at the cache read and reuse them at write so a body mutated by the pipeline cannot diverge the key. Non-streaming path only.
 * **learn (verbosity):** `--verbosity --apply --all` now aggregates the savings baseline across every project instead of overwriting it per project (last-project-wins), which previously left the output shaper with a tiny, unrepresentative baseline. The applied verbosity level comes from the project with the most samples ([#1288](https://github.com/headroomlabs-ai/headroom/pull/1288)).
 * **proxy/anthropic:** restore token-mode compression on continued Claude Code turns with a frozen prefix and deferred CCR tool injection. Token mode now runs request-side compression even when the client did not pre-register `headroom_retrieve`, relying on the existing marker-triggered injection override to keep emitted CCR markers redeemable ([#1487](https://github.com/headroomlabs-ai/headroom/issues/1487)).
@@ -152,8 +97,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **install (macOS):** fix `headroom install restart` / `install start` for launchd `persistent-service` deployments. `stop` `bootout`s the job but `start` only ran `launchctl kickstart`, which cannot recover the un-bootstrapped state `stop`/`restart` leave behind (launchctl error 113), so the proxy was left stopped. `start` now tries `kickstart` (fast path for an already-bootstrapped job) and, on failure, `bootstrap`s the plist fresh — retrying for ~15s to ride out the transient `bootstrap` EIO (error 5) window while launchd releases the label after a `bootout`. `stop` tolerates only the already-absent case (`bootout` ESRCH / error 3) and still raises on any other `bootout` failure ([#1289](https://github.com/headroomlabs-ai/headroom/issues/1289)).
 * **wrap:** isolate wrapped proxy subprocess stdout/stderr into `proxy-stdio.log`, so `proxy.log` remains the canonical rotating runtime log and Windows rollover failures from `RotatingFileHandler` are no longer blocked by wrapper stdio handles ([#1184](https://github.com/chopratejas/headroom/issues/1184)).
 * **langchain:** fix `HeadroomChatModel.ainvoke()` crashing with `AttributeError: 'AsyncStream' object has no attribute 'model_dump'` when the wrapped model has `streaming=True`. `_agenerate()` now uses a per-call non-streaming copy of the wrapped model instead of mutating shared state across an `await` ([#1285](https://github.com/headroomlabs-ai/headroom/issues/1285)).
+* **proxy:** a transient rtk/lean-ctx stat-read failure (timeout, non-zero exit, bad JSON) no longer corrupts the dashboard's CLI-filtering session metrics. Failed reads now return "no data" instead of a synthetic zero payload, and the session baseline is only ever pinned from successful installed-tool reads — previously one hiccup re-pinned the baseline to zero and the next successful read inflated session savings by the tool's entire lifetime, at every proxy boot and `POST /stats/reset`.
+* **proxy:** Concurrent large requests no longer 502 on a transient HTTP/2 stream reset. A single upstream `StreamReset` poisons the shared h2 connection and raises `RemoteProtocolError` / `LocalProtocolError` on every in-flight request; those transport errors weren't in the proxy's retry paths, so they collapsed straight to a 502 with no reconnect. The Anthropic non-streaming and streaming retry paths now treat any `httpx.TransportError` (including h2 protocol errors) as retryable before the first client byte, so the bad connection is dropped and the request re-sent on a fresh one ([#1639](https://github.com/headroomlabs-ai/headroom/issues/1639)).
+* **install:** `headroom wrap claude` no longer leaves a dead `ANTHROPIC_BASE_URL` in a project's `.claude/settings.local.json` after an unclean exit (`SIGKILL`, OOM, reboot, or terminal/tmux close via `SIGHUP`, which was not caught). `_write_claude_wrap_base_url`/`_restore_claude_wrap_base_url` only removed or restored the entry from the wrap process's own `finally` block, so a crash skipped it and every later bare `claude` invocation in that project inherited the stale proxy URL and hung indefinitely retrying a dead port. A wrap session now stamps a sidecar marker (pid, port, prior value); the next `wrap`, `unwrap`, or `headroom doctor` run detects a marker whose pid is dead or reused and restores the recorded prior value automatically. `claude()` also now catches `SIGHUP` alongside the existing `SIGTERM` handler ([#1768](https://github.com/headroomlabs-ai/headroom/issues/1768)).
+* **proxy:** Non-finite values (`NaN`, `Infinity`) in `proxy_savings.json` or in upstream cost/token metadata no longer crash the proxy or corrupt the savings dashboard. `SavingsTracker`'s numeric coercion caught only `TypeError` and `ValueError`, so `int(float('inf'))` raised an uncaught `OverflowError` while loading persisted state (`SavingsTracker.__init__` failed and the proxy would not start), and `float('nan')`/`float('inf')` passed straight through, then serialized to `NaN`/`Infinity` literals that the dashboard's `JSON.parse` rejects. `json.loads` accepts those literals, so one bad write poisoned every later start. Both coercion helpers now also catch `OverflowError` and reject non-finite floats, failing open to safe defaults.
+* **learn:** `headroom learn` now honors `CLAUDE_CONFIG_DIR`. It resolved the Claude config directory as `~/.claude` and wrote global memory to `~/.claude/CLAUDE.md`, so users who relocate their Claude config via that env var had `learn` scan the wrong directory and detect no projects. The scanner and memory writer now read/write the configured directory ([#1630](https://github.com/headroomlabs-ai/headroom/issues/1630)).
+* **cli:** `--backend bedrock` now fails fast with an actionable error when temporary AWS credentials (`AWS_SESSION_TOKEN`) are used but botocore is not installed (e.g. the slim default Docker image). litellm's session-token auth path imports botocore, so the missing dependency previously surfaced only at request time as a misleading `authentication_error: No module named 'botocore'`. The proxy now tells the user to install the `bedrock` extra up front ([#1551](https://github.com/headroomlabs-ai/headroom/issues/1551)).
+* **compression:** Content detection no longer crashes the proxy on text containing an orphaned `+++ ` target line with no preceding `--- ` source line (common in `set -x` xtrace output and partial diffs). The bundled `unidiff` 0.4.0 parser panics on that input instead of returning an error; the Rust diff detector now contains the panic and treats the fragment as plain text, so the request is compressed and forwarded normally instead of returning HTTP 500 ([#1547](https://github.com/headroomlabs-ai/headroom/issues/1547)).
+* **proxy:** persist lifetime cache-read savings (tokens + USD) in `proxy_savings.json` (schema v4, additive) so cache-mode savings survive proxy restarts and upgrades. Previously prefix-cache read savings lived only in process memory and every restart reset the dashboard's cache figure to zero; the "Cache Reads (lifetime)" tile now reads the persisted value and the Prefix Cache Impact card renders after a restart with zero traffic, marking session-scoped tiles "no activity since restart".
+* **compression:** Proactive expansion blocks injected into user turns are now wrapped in`<headroom_proactive_expansion>` XML tags, giving downstream consumers (LLMs, loggers, attribution parsers) a machine-readable provenance boundary and preventing misattribution in multi-agent threads.
+* **cli:** the startup banner no longer advertises `HEADROOM_COMPRESSION_STABLE_AFTER_TURN` and `HEADROOM_STALE_READ_COMPRESS_AFTER_TURNS` as tuning knobs. Both were read only to render the `Performance Tuning` banner section and were never wired into the compression path, so setting them changed the banner but had no effect on behavior. The banner now surfaces only the embedding sidecar, which is a real, consumed setting.
+* **memory/embedder:** cap CPU thread oversubscription in the local torch/sentence-transformers embedder. Concurrent encodes previously each fanned out to ~`os.cpu_count()` BLAS/OpenMP threads, so under load the memory path starved the asyncio event loop and spiked `/livez` latency to several seconds. CPU encodes now run on a dedicated, size-limited executor whose workers each pin their thread pool, bounding total embedding threads to `HEADROOM_EMBED_CONCURRENCY` × `HEADROOM_EMBED_NUM_THREADS` (defaults `min(4, cpu)` × 1). The ONNX embedder already capped its threads; this brings the torch path to parity ([#198](https://github.com/headroomlabs-ai/headroom/issues/198)).
+* **proxy:** Buffered passthrough routes (e.g. `GET /v1/models`) no longer return an opaque HTTP 502 when an OpenAI-compatible upstream closes a pooled keep-alive connection mid-response (`httpx.RemoteProtocolError` / "incomplete chunked read"). Headroom now retries the request once on a fresh connection — mirroring a direct `curl` — and only returns a clear `upstream_protocol_error` 502 if the upstream is genuinely sending an incomplete response ([#1112](https://github.com/chopratejas/headroom/issues/1112)).
+* **ccr:** buffered Anthropic CCR re-streaming now preserves adaptive-thinking response shape, including empty `thinking` blocks, `signature_delta`, `redacted_thinking.data`, verbatim `stop_reason` values such as `refusal`, and `stop_details`.
+* **cursor:** `headroom wrap cursor` no longer injects the `rtk` custom-instructions block into `.cursorrules` when rtk's own native Cursor hook registers successfully. rtk supports a real hook for Cursor via `rtk init --agent cursor` (the same mechanism headroom already uses for Claude Code), which rewrites shell commands transparently — the injected `.cursorrules` text duplicated that guidance for no benefit. `wrap cursor` now tries the native hook first and only falls back to injecting `.cursorrules` if hook registration fails (#756).
+* **proxy:** The Headroom dashboard no longer tunnels `GET /favicon.ico` to the wrapped upstream provider. No route matched that path, so it fell through to the proxy's catch-all passthrough route and was forwarded to the configured Anthropic/OpenAI/etc. backend — burning a real upstream request (and possibly failing auth) for a browser's automatic favicon fetch on `/dashboard`. A dedicated `/favicon.ico` route now answers with `204 No Content` directly, registered ahead of the passthrough catch-all (#1787).
+
+## [0.31.0](https://github.com/headroomlabs-ai/headroom/compare/v0.30.0...v0.31.0) (2026-07-09)
 
 
+### Features
+
+* **cache:** provider-agnostic cache-mode delta + cc-agnostic prefix comparison ([#1868](https://github.com/headroomlabs-ai/headroom/issues/1868)) ([7c2f0ea](https://github.com/headroomlabs-ai/headroom/commit/7c2f0ea07953beaed45b25bd0fc8c5a34d60cb3f))
+* **ccr:** wire retrieve-tool interception into OpenAI Responses handler ([#1898](https://github.com/headroomlabs-ai/headroom/issues/1898)) ([62cd307](https://github.com/headroomlabs-ai/headroom/commit/62cd3072a2ea9bcd8410e400cab6f678501b5b37))
+* **compression:** add audit-safe mode with protected pattern matching ([#1899](https://github.com/headroomlabs-ai/headroom/issues/1899)) ([bb112dd](https://github.com/headroomlabs-ai/headroom/commit/bb112dd1762bf744a05689d54c50aed28265ee90))
+* **content-router:** accept any real compression (remove min-savings floor) ([#1771](https://github.com/headroomlabs-ai/headroom/issues/1771)) ([6c31db9](https://github.com/headroomlabs-ai/headroom/commit/6c31db97fbd68f88c39a71785335fc8917702fc3))
+* **content-router:** lossless-first dispatch, cross-turn dedup, and A7 lossy-after-fold ([#1818](https://github.com/headroomlabs-ai/headroom/issues/1818)) ([60af15f](https://github.com/headroomlabs-ai/headroom/commit/60af15f96f1792ad50bf259a765ee188db73d1aa))
+* **proxy:** add provider-only HTTP proxy ([#1807](https://github.com/headroomlabs-ai/headroom/issues/1807)) ([ebe0a3b](https://github.com/headroomlabs-ai/headroom/commit/ebe0a3bd7bbc8bbe4ee52bdb1ed7420a405dc224))
+* **proxy:** add turn-hook extension point for buffered model turns ([#1891](https://github.com/headroomlabs-ai/headroom/issues/1891)) ([ec950f7](https://github.com/headroomlabs-ai/headroom/commit/ec950f7ef131fb124b60a8e75bc6af7ab733cc7f))
+
+
+### Bug Fixes
+
+* **build:** enable Intel macOS pip installs via ort-load-dynamic ([#1538](https://github.com/headroomlabs-ai/headroom/issues/1538)) ([32ce99e](https://github.com/headroomlabs-ai/headroom/commit/32ce99e4b4a7d75f31429a553f2211a83992047a))
+* **cache:** avoid fallback session collisions ([#1827](https://github.com/headroomlabs-ai/headroom/issues/1827)) ([0f606b6](https://github.com/headroomlabs-ai/headroom/commit/0f606b6281dd4c55e1c5a32cc97c418b66860df1))
+* **ccr:** make expired retrieve misses terminal ([#1781](https://github.com/headroomlabs-ai/headroom/issues/1781)) ([9cbdba4](https://github.com/headroomlabs-ai/headroom/commit/9cbdba4dc1f38f73d255211eec439674f3f2f9f1))
+* **ccr:** preserve Anthropic re-stream shape ([#1854](https://github.com/headroomlabs-ai/headroom/issues/1854)) ([f663894](https://github.com/headroomlabs-ai/headroom/commit/f663894f6072dbd13f5a1caa05dfea6657f5a3b0))
+* **ccr:** preserve thinking blocks in buffered stream re-synthesis ([#1897](https://github.com/headroomlabs-ai/headroom/issues/1897)) ([ede085c](https://github.com/headroomlabs-ai/headroom/commit/ede085cc11d74778e43ce0fb0828a53a0a06a14b))
+* **cli/proxy:** preserve explicit HEADROOM_MIN_TOKENS=0 / MAX_ITEMS=0 ([#1886](https://github.com/headroomlabs-ai/headroom/issues/1886)) ([3a33af1](https://github.com/headroomlabs-ai/headroom/commit/3a33af1af3224594581d0d27ea5b4df1a1c6ba48))
+* **code-compressor:** CJK-aware relevance-query symbol matching ([#1747](https://github.com/headroomlabs-ai/headroom/issues/1747)) ([b38315c](https://github.com/headroomlabs-ai/headroom/commit/b38315cf72e4248cc76cc0e0d10dfa24a4a332e0))
+* **codex:** discover updated Codex state stores ([#1889](https://github.com/headroomlabs-ai/headroom/issues/1889)) ([9d42eba](https://github.com/headroomlabs-ai/headroom/commit/9d42ebaa1ab6e22e7b1398a3c0618d0d35895f40))
+* **codex:** OpenCode Zen telemetry attribution ([#1648](https://github.com/headroomlabs-ai/headroom/issues/1648)) ([f18c6bd](https://github.com/headroomlabs-ai/headroom/commit/f18c6bd896f7b5a153e3b29f7a27b64c65b08fc5))
+* **content-detector:** detect and compress space-separated JSON objects ([#1742](https://github.com/headroomlabs-ai/headroom/issues/1742)) ([5194bdc](https://github.com/headroomlabs-ai/headroom/commit/5194bdc5a6e53d331ce0303aba670e8814bb5fd2))
+* **content-router:** token-measure lossless folds at the acceptance gate ([#1772](https://github.com/headroomlabs-ai/headroom/issues/1772)) ([c5493ea](https://github.com/headroomlabs-ai/headroom/commit/c5493ea93bae798d489a82167c1f7bcff79eaecb))
+* **copilot:** normalize subscription routing host ([#1836](https://github.com/headroomlabs-ai/headroom/issues/1836)) ([afd9cbd](https://github.com/headroomlabs-ai/headroom/commit/afd9cbdfafba0d31bd376a4a43dbcd41b30ec909))
+* **copilot:** route mixed-model requests per model ([#1785](https://github.com/headroomlabs-ai/headroom/issues/1785)) ([5af5e22](https://github.com/headroomlabs-ai/headroom/commit/5af5e22862a0ce0a3d934c2f1e76ea7c1fad71e7))
+* **dashboard:** deduplicate repeated savings metrics ([#1804](https://github.com/headroomlabs-ai/headroom/issues/1804)) ([88f935a](https://github.com/headroomlabs-ai/headroom/commit/88f935a1eb52ec81cdd60db44627279d411b74ab))
+* **dashboard:** distinguish unavailable RTK from zero stats in Docker ([#1900](https://github.com/headroomlabs-ai/headroom/issues/1900)) ([87f6e93](https://github.com/headroomlabs-ai/headroom/commit/87f6e93c14a9365695142084bc6966d7de70f437))
+* **dashboard:** distinguish unavailable RTK from zero stats in Docker ([#1901](https://github.com/headroomlabs-ai/headroom/issues/1901)) ([361adcd](https://github.com/headroomlabs-ai/headroom/commit/361adcd1a00bbdcb949a3efc7b685937d4e84547))
+* **dashboard:** price proxy savings without litellm ([#1728](https://github.com/headroomlabs-ai/headroom/issues/1728)) ([188e382](https://github.com/headroomlabs-ai/headroom/commit/188e382b44d09d7f16717377f908869292aab4d9))
+* detect and clear stale ANTHROPIC_BASE_URL from crashed wrap sessions ([#1768](https://github.com/headroomlabs-ai/headroom/issues/1768)) ([#1837](https://github.com/headroomlabs-ai/headroom/issues/1837)) ([84509a4](https://github.com/headroomlabs-ai/headroom/commit/84509a4b892cc256331106c807a3a56107f1eec2))
+* **docker:** persist headroom workspace in compose ([#1839](https://github.com/headroomlabs-ai/headroom/issues/1839)) ([5e29c06](https://github.com/headroomlabs-ai/headroom/commit/5e29c06aaf5e3d7d9e591914dc656f24eb72cc07))
+* **docker:** report source build version ([#1862](https://github.com/headroomlabs-ai/headroom/issues/1862)) ([3807488](https://github.com/headroomlabs-ai/headroom/commit/38074888ac871b8b44418066d66b6a37159978ed))
+* **evals:** default unparseable judge scores below pass threshold ([#1892](https://github.com/headroomlabs-ai/headroom/issues/1892)) ([42ebbc6](https://github.com/headroomlabs-ai/headroom/commit/42ebbc6cce02a0fd5e0a6e614348d47f4099649a))
+* **install:** pass sc.exe create as raw command line so binPath= quoting survives ([#1654](https://github.com/headroomlabs-ai/headroom/issues/1654)) ([#1702](https://github.com/headroomlabs-ai/headroom/issues/1702)) ([d6e0710](https://github.com/headroomlabs-ai/headroom/commit/d6e07102283745a44aece2222f84c1599eabf90a))
+* **install:** persist --no-http2 override through install apply ([#1676](https://github.com/headroomlabs-ai/headroom/issues/1676)) ([6fb5f3b](https://github.com/headroomlabs-ai/headroom/commit/6fb5f3bc3dfa60e56744f85cf049524d43104a31))
+* **mcp:** isolate ClaudeRegistrar CLI config env ([#1888](https://github.com/headroomlabs-ai/headroom/issues/1888)) ([1c947b1](https://github.com/headroomlabs-ai/headroom/commit/1c947b1103fa66563a01ea638f1669ee053018e6))
+* **mcp:** surface dead proxy state ([#1786](https://github.com/headroomlabs-ai/headroom/issues/1786)) ([931eed8](https://github.com/headroomlabs-ai/headroom/commit/931eed879d26512b2dbdf3ea4246e4f7b2c97a70))
+* **memory:** resolve Trae cwd metadata from user reminders ([#1737](https://github.com/headroomlabs-ai/headroom/issues/1737)) ([#1887](https://github.com/headroomlabs-ai/headroom/issues/1887)) ([3e85eb1](https://github.com/headroomlabs-ai/headroom/commit/3e85eb1880af5663cf083492f1dc1415a354bd99))
+* **opencode:** use local MCP config ([#1383](https://github.com/headroomlabs-ai/headroom/issues/1383)) ([4bd3ddf](https://github.com/headroomlabs-ai/headroom/commit/4bd3ddfaa5c5655540494b96e4f5d47724460c7d))
+* **proxy/openai:** thread savings-profile kwargs into chat completions ([#1606](https://github.com/headroomlabs-ai/headroom/issues/1606)) ([7ff842d](https://github.com/headroomlabs-ai/headroom/commit/7ff842da170b5bceb5d67048473eeb8a18e09a51))
+* **proxy/openai:** translate max_tokens -&gt; max_completion_tokens on chat path ([#1774](https://github.com/headroomlabs-ai/headroom/issues/1774)) ([285808b](https://github.com/headroomlabs-ai/headroom/commit/285808b90ea5532fe319c94d408699cb46b2e5f8))
+* **proxy:** bound Codex WS compression fallback latency ([#1802](https://github.com/headroomlabs-ai/headroom/issues/1802)) ([d24a3f8](https://github.com/headroomlabs-ai/headroom/commit/d24a3f842551d36c14dc0ec146a9302e256c5c0f))
+* **proxy:** bound HF tokenizer load and offload token counting off event loop ([#1738](https://github.com/headroomlabs-ai/headroom/issues/1738)) ([46d5d68](https://github.com/headroomlabs-ai/headroom/commit/46d5d685d9bcdced1f77ffdc0f2d3a8ee8a1f319))
+* **proxy:** cancel retry backoff on shutdown ([#1834](https://github.com/headroomlabs-ai/headroom/issues/1834)) ([da2d8dc](https://github.com/headroomlabs-ai/headroom/commit/da2d8dc9dbf3edfcd1c3f6429db32374a6bebc64))
+* **proxy:** compress Anthropic user text blocks when enabled ([#1875](https://github.com/headroomlabs-ai/headroom/issues/1875)) ([e36439a](https://github.com/headroomlabs-ai/headroom/commit/e36439a9411bf7fc93b4a5dceac50aa4570a6105))
+* **proxy:** freeze must forward cached (compressed) prefix byte-identical — stop token-mode cache busting ([#1850](https://github.com/headroomlabs-ai/headroom/issues/1850)) ([248ae0f](https://github.com/headroomlabs-ai/headroom/commit/248ae0f3e0d4d7ff2e23837e628880dcbda4411a))
+* **proxy:** fsync savings dir after atomic rename ([#1764](https://github.com/headroomlabs-ai/headroom/issues/1764)) ([7de2c1e](https://github.com/headroomlabs-ai/headroom/commit/7de2c1e4c2ca8aefd73d3c419dfbcdd881a63bd2))
+* **proxy:** keep cache_control bounded + stable so the freeze overlay stops busting ([#1852](https://github.com/headroomlabs-ai/headroom/issues/1852)) ([4820134](https://github.com/headroomlabs-ai/headroom/commit/48201345be16a8b5aad74e8c390850dce0f34ec4))
+* **proxy:** persist lifetime cache-read savings across restarts ([#1665](https://github.com/headroomlabs-ai/headroom/issues/1665)) ([908997e](https://github.com/headroomlabs-ai/headroom/commit/908997ef61d91a7e912637c785176719a5f1c719))
+* **proxy:** preserve streaming passthrough beta headers ([#1783](https://github.com/headroomlabs-ai/headroom/issues/1783)) ([0f553a8](https://github.com/headroomlabs-ai/headroom/commit/0f553a8ebbd6d790ca622f95f389b5e7d11a41ce))
+* **proxy:** release _active_streams session lock on setup-phase errors ([#1864](https://github.com/headroomlabs-ai/headroom/issues/1864)) ([2ccd831](https://github.com/headroomlabs-ai/headroom/commit/2ccd831032e23248879bd38c5bde947d3a0a54f3))
+* **proxy:** retry HTTP/2 stream resets instead of 502ing ([#1645](https://github.com/headroomlabs-ai/headroom/issues/1645)) ([2ce19c2](https://github.com/headroomlabs-ai/headroom/commit/2ce19c2c55710cdc5f7a4bb88803f05e4b31feff))
+* **proxy:** retry passthrough on transient upstream connection close ([#1513](https://github.com/headroomlabs-ai/headroom/issues/1513)) ([5d14080](https://github.com/headroomlabs-ai/headroom/commit/5d14080c948b04ccd997d2434b37604440701888))
+* **proxy:** route Foundry Anthropic messages ([#1878](https://github.com/headroomlabs-ai/headroom/issues/1878)) ([739f654](https://github.com/headroomlabs-ai/headroom/commit/739f654bbd71b3e31ade40ae9eadf812b362beec))
+* **proxy:** serve /favicon.ico locally instead of tunneling upstream ([#1787](https://github.com/headroomlabs-ai/headroom/issues/1787)) ([#1847](https://github.com/headroomlabs-ai/headroom/issues/1847)) ([3076e32](https://github.com/headroomlabs-ai/headroom/commit/3076e3217228cbb208849d5005a2cd5e1d69606e))
+* **proxy:** stop rtk stat failures from corrupting session baseline ([#1693](https://github.com/headroomlabs-ai/headroom/issues/1693)) ([681b9a8](https://github.com/headroomlabs-ai/headroom/commit/681b9a8c1a96af564767d221e92e0ef6620f8a37))
+* **proxy:** strip 1m model suffix before upstream forwarding ([#1840](https://github.com/headroomlabs-ai/headroom/issues/1840)) ([e22d745](https://github.com/headroomlabs-ai/headroom/commit/e22d7453d4c6fcf084135ad65c21dd4feb9927ad))
+* **proxy:** subtract cache write premiums from net savings ([#1800](https://github.com/headroomlabs-ai/headroom/issues/1800)) ([53a465b](https://github.com/headroomlabs-ai/headroom/commit/53a465b121e0a7f45f862a21829639423226a5eb))
+* **router:** honor MCP aliases in excluded tools ([#1822](https://github.com/headroomlabs-ai/headroom/issues/1822)) ([#1863](https://github.com/headroomlabs-ai/headroom/issues/1863)) ([140d6e4](https://github.com/headroomlabs-ai/headroom/commit/140d6e4f9609eefd674dc435cfcaa9d4e451f9b0))
+* **rtk:** link managed rtk onto PATH instead of mutating the hook ([#1698](https://github.com/headroomlabs-ai/headroom/issues/1698)) ([140cb05](https://github.com/headroomlabs-ai/headroom/commit/140cb05fbc76e0cd1a54d2a8f98cbbd634a227cd))
+* **streaming:** preserve server_tool_use sse blocks ([#1826](https://github.com/headroomlabs-ai/headroom/issues/1826)) ([4ac5493](https://github.com/headroomlabs-ai/headroom/commit/4ac54934cbebe77f72a2cd7432ea792f17a5fd65))
+* **toin:** publish skip compression recommendations ([#1782](https://github.com/headroomlabs-ai/headroom/issues/1782)) ([be51008](https://github.com/headroomlabs-ai/headroom/commit/be51008c701f18e6856efc65d46401dbd2c9856f))
+* **transforms:** normalize diff compressor context ([#1801](https://github.com/headroomlabs-ai/headroom/issues/1801)) ([838c523](https://github.com/headroomlabs-ai/headroom/commit/838c5234a877d4cf96f9e914cfd39d6d6addb211))
+* **transforms:** pass through ragged tables instead of misaligning columns ([#1713](https://github.com/headroomlabs-ai/headroom/issues/1713)) ([c7665ca](https://github.com/headroomlabs-ai/headroom/commit/c7665ca08863da12dc9c656bd8bdf1f55c95bda7))
+* use rtk native Cursor hook instead of injecting .cursorrules ([#756](https://github.com/headroomlabs-ai/headroom/issues/756)) ([#1846](https://github.com/headroomlabs-ai/headroom/issues/1846)) ([1573f1f](https://github.com/headroomlabs-ai/headroom/commit/1573f1fd0763408246f5dd0d7a92f32464f5fdbb))
+* **wrap:** replace stale-proxy detection with Vite-style port fallback ([#1406](https://github.com/headroomlabs-ai/headroom/issues/1406)) ([b4205c6](https://github.com/headroomlabs-ai/headroom/commit/b4205c68e63e1e12e354508d8c3ac7d54781268b))
+
+
+### Performance Improvements
+
+* **proxy:** cap compression workers to CPU count ([#1803](https://github.com/headroomlabs-ai/headroom/issues/1803)) ([0a3851b](https://github.com/headroomlabs-ai/headroom/commit/0a3851b24004727e734b61af4e3f59ce3b0bfe10))
+* **savings:** batch tracker persistence off the request hot path ([#1817](https://github.com/headroomlabs-ai/headroom/issues/1817)) ([451b9f0](https://github.com/headroomlabs-ai/headroom/commit/451b9f0867f1eb7cf3a1b479f67a4e3106f7e9be))
+
+
+### Dependencies
+
+* bump the cargo-minor-patch group across 1 directory with 7 updates ([#1909](https://github.com/headroomlabs-ai/headroom/issues/1909)) ([45601d9](https://github.com/headroomlabs-ai/headroom/commit/45601d93bcd92f7f66d4c3483d9f4512a10e933c))
+* bump the npm-minor-patch group across 4 directories with 18 updates ([#1907](https://github.com/headroomlabs-ai/headroom/issues/1907)) ([8872bbc](https://github.com/headroomlabs-ai/headroom/commit/8872bbc6a2fa210e9f26d33d1ff8e019954bddd9))
 
 ## [0.29.0](https://github.com/headroomlabs-ai/headroom/compare/v0.28.0...v0.29.0) (2026-07-03)
 

@@ -146,6 +146,19 @@ class CCRResponseHandler:
             parts = candidates[0].get("content", {}).get("parts", [])
             return [part for part in parts if "functionCall" in part]
 
+        elif provider == "openai_responses":
+            # OpenAI Responses API format: top-level `output[]` array with
+            # flat `function_call` items (no nested "function" object, no
+            # `choices[].message.tool_calls` wrapper like chat completions).
+            output = response.get("output", [])
+            if isinstance(output, list):
+                return [
+                    item
+                    for item in output
+                    if isinstance(item, dict) and item.get("type") == "function_call"
+                ]
+            return []
+
         return []
 
     def _parse_ccr_tool_calls(
@@ -172,6 +185,11 @@ class CCRResponseHandler:
                     # Google uses function name as identifier for matching responses
                     # The functionResponse.name must match the functionCall.name
                     tool_call_id = tc.get("functionCall", {}).get("name", CCR_TOOL_NAME)
+                elif provider == "openai_responses":
+                    # Responses API function_call items key off `call_id`,
+                    # which is what the matching `function_call_output` item
+                    # must echo back (its own `id` is a separate item id).
+                    tool_call_id = tc.get("call_id", tc.get("id", ""))
                 else:
                     # Anthropic and OpenAI use explicit IDs
                     tool_call_id = tc.get("id", "")
@@ -318,6 +336,23 @@ class CCRResponseHandler:
                 ]
             }
 
+        elif provider == "openai_responses":
+            # Responses API: `function_call_output` items, echoed back into
+            # `input[]` alongside (not nested under) the preceding
+            # function_call items. Sentinel key mirrors the "openai"
+            # multi-message pattern above — handle_response() extends
+            # rather than appends when it sees this key.
+            return {
+                "_openai_responses_tool_results": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": result.tool_call_id,
+                        "output": result.content,
+                    }
+                    for result in results
+                ]
+            }
+
         elif provider == "google":
             # Google/Gemini: user message with functionResponse parts
             # Format: {"role": "user", "parts": [{"functionResponse": {"name": "...", "response": {...}}}]}
@@ -376,6 +411,13 @@ class CCRResponseHandler:
                 "content": message.get("content"),
                 "tool_calls": message.get("tool_calls"),
             }
+        elif provider == "openai_responses":
+            # Responses API: the model's turn is the full `output[]` array
+            # (function_call items, message items, reasoning items, ...),
+            # echoed back verbatim as `input[]` items — not a single
+            # role/content dict like chat completions. Sentinel key mirrors
+            # `_openai_tool_results`; handle_response() extends on it.
+            return {"_openai_responses_output_items": response.get("output", [])}
         elif provider == "google":
             # Google/Gemini format: role is "model", content is in candidates[0].content.parts
             candidates = response.get("candidates", [])
@@ -466,9 +508,18 @@ class CCRResponseHandler:
             )
 
             # Build continuation messages
-            # Add assistant message (the response that had tool calls)
+            # Add assistant message (the response that had tool calls).
+            # Responses API turns are a list of output items rather than a
+            # single role/content dict, so extend on that sentinel instead
+            # of appending it as one entry.
             assistant_msg = self._extract_assistant_message(current_response, provider)
-            current_messages.append(assistant_msg)
+            if (
+                isinstance(assistant_msg, dict)
+                and "_openai_responses_output_items" in assistant_msg
+            ):
+                current_messages.extend(assistant_msg["_openai_responses_output_items"])
+            else:
+                current_messages.append(assistant_msg)
 
             # Add tool results
             tool_result_msg = self._create_tool_result_message(results, provider)
@@ -476,6 +527,8 @@ class CCRResponseHandler:
             if provider == "openai" and "_openai_tool_results" in tool_result_msg:
                 # OpenAI uses multiple messages for tool results
                 current_messages.extend(tool_result_msg["_openai_tool_results"])
+            elif "_openai_responses_tool_results" in tool_result_msg:
+                current_messages.extend(tool_result_msg["_openai_responses_tool_results"])
             else:
                 current_messages.append(tool_result_msg)
 
@@ -734,62 +787,103 @@ class StreamingCCRHandler:
             "usage": {},
         }
 
-        current_text = ""
-        current_tool: dict[str, Any] | None = None
+        blocks_by_index: dict[int, dict[str, Any]] = {}
+        current_block: dict[str, Any] | None = None
 
         for event in events:
             event_type = event.get("type", "")
 
             if event_type == "content_block_start":
                 block = event.get("content_block", {})
-                if block.get("type") == "text":
-                    current_text = block.get("text", "")
-                elif block.get("type") == "tool_use":
-                    current_tool = {
-                        "type": "tool_use",
-                        "id": block.get("id", ""),
-                        "name": block.get("name", ""),
-                        "input": {},
-                    }
-
-            elif event_type == "content_block_delta":
-                delta = event.get("delta", {})
-                if delta.get("type") == "text_delta":
-                    current_text += delta.get("text", "")
-                elif delta.get("type") == "input_json_delta":
-                    # Accumulate JSON for tool input
-                    if current_tool is not None:
-                        partial = delta.get("partial_json", "")
-                        # This is tricky - partial JSON needs accumulation
-                        # For simplicity, we'll try to parse when complete
-                        current_tool["_partial_json"] = (
-                            current_tool.get("_partial_json", "") + partial
-                        )
-
-            elif event_type == "content_block_stop":
-                if current_text:
-                    response["content"].append(
+                block_index = event.get("index", len(blocks_by_index))
+                btype = block.get("type")
+                current_block = {"type": btype}
+                if btype == "text":
+                    current_block["text"] = block.get("text", "")
+                elif btype == "tool_use":
+                    current_block.update(
                         {
-                            "type": "text",
-                            "text": current_text,
+                            "id": block.get("id", ""),
+                            "name": block.get("name", ""),
+                            "input": {},
                         }
                     )
-                    current_text = ""
-                if current_tool:
-                    # Parse accumulated JSON
-                    partial = current_tool.pop("_partial_json", "")
-                    if partial:
-                        try:
-                            current_tool["input"] = json.loads(partial)
-                        except json.JSONDecodeError:
-                            current_tool["input"] = {}
-                    response["content"].append(current_tool)
-                    current_tool = None
+                elif btype == "thinking":
+                    current_block["thinking_buffer"] = block.get("thinking", "")
+                    if "signature" in block:
+                        current_block["signature"] = block["signature"]
+                elif btype == "redacted_thinking":
+                    if "data" in block:
+                        current_block["data"] = block["data"]
+                elif btype:
+                    current_block = dict(block)
+                blocks_by_index[block_index] = current_block
+
+            elif event_type == "content_block_delta":
+                idx = event.get("index")
+                target = (blocks_by_index.get(idx) if idx is not None else None) or current_block
+                if target is None:
+                    continue
+                delta = event.get("delta", {})
+                dtype = delta.get("type")
+                if dtype == "text_delta":
+                    target["text"] = target.get("text", "") + delta.get("text", "")
+                elif dtype == "input_json_delta":
+                    if target.get("type") == "tool_use":
+                        partial = delta.get("partial_json", "")
+                        target["_partial_json"] = target.get("_partial_json", "") + partial
+                elif dtype == "thinking_delta":
+                    target["thinking_buffer"] = target.get("thinking_buffer", "") + delta.get(
+                        "thinking", ""
+                    )
+                elif dtype == "signature_delta":
+                    if "signature" in delta:
+                        target["signature"] = delta["signature"]
+                elif dtype == "citations_delta":
+                    citation = delta.get("citation")
+                    if citation is not None:
+                        target.setdefault("citations", []).append(citation)
+
+            elif event_type == "content_block_stop":
+                idx = event.get("index")
+                target = (blocks_by_index.get(idx) if idx is not None else None) or current_block
+                if target is not None:
+                    if target.get("type") == "tool_use" and "_partial_json" in target:
+                        partial = target.pop("_partial_json", "")
+                        if partial:
+                            try:
+                                target["input"] = json.loads(partial)
+                            except json.JSONDecodeError:
+                                target["input"] = {}
+                    if target.get("type") == "thinking" and "thinking_buffer" in target:
+                        target["thinking"] = target.pop("thinking_buffer")
+                    if target not in response["content"]:
+                        response["content"].append(target)
+                    current_block = None
+
+            elif event_type == "message_start":
+                msg = event.get("message", {})
+                if "id" in msg:
+                    response["id"] = msg["id"]
+                if "model" in msg:
+                    response["model"] = msg["model"]
+                if "role" in msg:
+                    response["role"] = msg["role"]
+                if "stop_reason" in msg:
+                    response["stop_reason"] = msg["stop_reason"]
+                if "stop_details" in msg:
+                    response["stop_details"] = msg["stop_details"]
+                if msg.get("usage"):
+                    response["usage"].update(msg["usage"])
 
             elif event_type == "message_delta":
                 delta = event.get("delta", {})
                 if "stop_reason" in delta:
                     response["stop_reason"] = delta["stop_reason"]
+                if "stop_details" in delta:
+                    response["stop_details"] = delta["stop_details"]
+                if event.get("usage"):
+                    response["usage"].update(event["usage"])
 
             elif event_type == "message_stop":
                 pass
@@ -859,11 +953,10 @@ class StreamingCCRHandler:
         to chunk the response more granularly.
         """
         if self.provider == "anthropic":
-            # Anthropic SSE format
-            yield b"event: message_start\n"
-            yield f"data: {json.dumps({'type': 'message_start', 'message': response})}\n\n".encode()
-            yield b"event: message_stop\n"
-            yield b'data: {"type": "message_stop"}\n\n'
+            from headroom.proxy.handlers.streaming import StreamingMixin
+
+            for chunk in StreamingMixin()._response_to_sse(response, "anthropic"):
+                yield chunk
         else:
             # OpenAI SSE format
             yield f"data: {json.dumps(response)}\n\n".encode()

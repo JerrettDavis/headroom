@@ -44,8 +44,13 @@ if TYPE_CHECKING:
 import httpx
 
 from headroom.agent_savings import proxy_pipeline_kwargs
-from headroom.copilot_auth import apply_copilot_api_auth, build_copilot_upstream_url
+from headroom.copilot_auth import (
+    apply_copilot_api_auth,
+    build_copilot_upstream_url,
+    is_copilot_api_url,
+)
 from headroom.pipeline import PipelineStage, summarize_routing_markers
+from headroom.providers.copilot import model_prefers_responses_api
 from headroom.proxy.auth_mode import (
     classify_auth_mode,
     classify_client,
@@ -81,6 +86,25 @@ _OPENAI_CHAT_COMPLETIONS_PATH = "/chat/completions"
 _OPENAI_RESPONSES_PATH = "/responses"
 _OPENAI_ORIGINAL_PATH_HEADER = "x-headroom-original-path"
 _OPENAI_BASE_URL_HEADER = "x-headroom-base-url"
+_OPENCODE_ZEN_HOSTS = {"opencode.ai", "www.opencode.ai"}
+
+
+def _normalize_openai_max_tokens(body: dict[str, Any]) -> None:
+    """Rename the legacy ``max_tokens`` to ``max_completion_tokens`` in-place.
+
+    GPT-5 / o-series chat models reject ``max_tokens`` and require
+    ``max_completion_tokens``; gpt-4o/4.1 accept the latter too. So translating
+    is a safe, one-way shim for current OpenAI models that lets openai-compatible
+    clients (opencode, older SDKs) which still send ``max_tokens`` work unchanged.
+    No-op when there is no ``max_tokens``; keeps an already-set
+    ``max_completion_tokens`` and just drops the rejected legacy key.
+    """
+    if not isinstance(body, dict) or "max_tokens" not in body:
+        return
+    legacy = body.get("max_tokens")
+    if legacy is not None and body.get("max_completion_tokens") is None:
+        body["max_completion_tokens"] = legacy
+    body.pop("max_tokens", None)
 
 
 def _header_get(headers: dict[str, str], name: str) -> str | None:
@@ -90,6 +114,25 @@ def _header_get(headers: dict[str, str], name: str) -> str | None:
         if key.lower() == lowered:
             return value
     return None
+
+
+def _custom_base_passthrough_telemetry(method: str, path: str, base_url: str) -> tuple[str, str]:
+    """Return passthrough telemetry metadata for narrow custom-base exceptions."""
+    # OpenCode Zen sends provider-prefixed OpenAI-compatible traffic through
+    # custom-base routing. Keep this exact to avoid labeling arbitrary
+    # custom-base tool traffic as LLM provider telemetry.
+    if method.upper() != "POST":
+        return "", ""
+    try:
+        host = (urlparse(base_url.strip()).hostname or "").lower()
+    except ValueError:
+        return "", ""
+    if host not in _OPENCODE_ZEN_HOSTS:
+        return "", ""
+    normalized_path = path[1:] if path.startswith("/") else path
+    if normalized_path == "zen/v1/chat/completions":
+        return "chat/completions", "zen"
+    return "", ""
 
 
 def _resolve_openai_handler_path(
@@ -128,6 +171,14 @@ def _resolve_openai_upstream_base(request_headers: dict[str, str]) -> str | None
     if urlparse(normalized).scheme not in {"http", "https"}:
         return None
     return normalized
+
+
+def _resolve_openai_chat_handler_path(base_url: str, model: str | None) -> str:
+    """Return the upstream path suffix for an OpenAI chat-completions request."""
+
+    if is_copilot_api_url(base_url) and model_prefers_responses_api(model):
+        return _OPENAI_RESPONSES_PATH
+    return _OPENAI_CHAT_COMPLETIONS_PATH
 
 
 def _append_request_query(url: str, query: str) -> str:
@@ -564,6 +615,73 @@ def _responses_input_to_waste_messages(instructions: Any, input_data: Any) -> li
     return messages
 
 
+def _has_headroom_retrieve_tool_responses(tools: Any) -> bool:
+    """Return True when the Responses API tool list includes CCR retrieve.
+
+    Responses API tool defs are flat (``{"type": "function", "name": ...}``)
+    rather than nested under a "function" key like chat-completions
+    tool_calls, so this can't reuse the chat-completions tool-list check.
+    Mirrors ``AnthropicHandler._has_headroom_retrieve_tool``.
+    """
+    from headroom.ccr import CCR_TOOL_NAME
+
+    if not isinstance(tools, list):
+        return False
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        if tool.get("name") == CCR_TOOL_NAME:
+            return True
+        function = tool.get("function")
+        if isinstance(function, dict) and function.get("name") == CCR_TOOL_NAME:
+            return True
+    return False
+
+
+def _responses_input_to_items(input_data: Any) -> list[dict[str, Any]]:
+    """Normalize a Responses ``input`` field into an item list for CCR continuation.
+
+    ``input`` is either a plain string or an already-item-shaped list; the
+    CCR continuation loop needs a list it can append output/tool-result
+    items onto.
+    """
+    if isinstance(input_data, list):
+        return list(input_data)
+    if isinstance(input_data, str) and input_data:
+        return [{"role": "user", "content": input_data}]
+    return []
+
+
+def _openai_responses_to_sse(response: dict[str, Any]) -> list[bytes]:
+    """Convert a complete Responses API JSON body into a minimal SSE stream.
+
+    Used only for the buffered-CCR path: the client asked for
+    ``stream: true`` but we forced a non-streaming upstream call so CCR
+    retrieval could be resolved server-side. This reconstructs just enough
+    of the real event sequence (``response.created`` + ``response.completed``)
+    for Responses API clients that key off the terminal event's full
+    response object — it does not replay incremental output-item/text
+    deltas. Mirrors the equivalent simplification in
+    ``StreamingMixin._response_to_sse`` for the Anthropic buffered path.
+    """
+    created_response = {**response, "status": "in_progress", "output": []}
+    events: list[bytes] = []
+    for seq, (event_type, event_response) in enumerate(
+        (
+            ("response.created", created_response),
+            ("response.completed", response),
+        )
+    ):
+        payload = {
+            "type": event_type,
+            "sequence_number": seq,
+            "response": event_response,
+        }
+        events.append(f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode())
+    events.append(b"data: [DONE]\n\n")
+    return events
+
+
 def _output_shaping_holdout_fraction() -> float:
     from headroom.proxy import runtime_env
 
@@ -927,20 +1045,32 @@ class OpenAIHandlerMixin:
         not just the generic passthrough route that already honors it. Falls
         back to the configured ``OPENAI_API_URL`` (``OPENAI_TARGET_API_URL``).
         """
-        custom = request.headers.get("x-headroom-base-url", "").strip()
-        return custom or self.OPENAI_API_URL
+        return _resolve_openai_upstream_base(request.headers) or self.OPENAI_API_URL
 
     @staticmethod
     def _strict_previous_turn_frozen_count(
         messages: list[dict[str, Any]],
         base_frozen_count: int,
     ) -> int:
-        """Freeze all prior turns in cache mode; only final user turn is mutable."""
+        """Freeze all prior turns in cache mode; only the final OBSERVATION turn
+        is mutable (the newest delta we compress-once-then-freeze).
+
+        The newest observation is the compressible delta. Its role depends on the
+        harness: text/back-tick harnesses (mini-swe-agent, Codex) append it as
+        ``role:"user"``, but OpenAI function-calling harnesses (Kimi / any
+        fireworks/OpenAI-compatible tool-based model) append it as ``role:"tool"``
+        (and legacy function-calling as ``role:"function"``). Gating solely on
+        ``role == "user"`` froze the ENTIRE conversation on every OpenAI
+        tool-based turn — so NOTHING was ever compressed on those models (the
+        delta was frozen before the content router saw it). Treat tool/function
+        observations as the mutable tail too; assistant/system endings still
+        freeze everything (they are not observations).
+        """
         if not messages:
             return base_frozen_count
         final_idx = len(messages) - 1
-        if messages[final_idx].get("role") == "user":
-            return max(base_frozen_count, final_idx)
+        if messages[final_idx].get("role") in ("user", "tool", "function"):
+            return final_idx
         return len(messages)
 
     @staticmethod
@@ -1628,6 +1758,50 @@ class OpenAIHandlerMixin:
                     tools_bytes_saved=tools_before_bytes - tools_after_bytes,
                 )
 
+        # Server-side Tool Search deferral (OpenAI Responses, gpt-5.4+): mark
+        # non-core function/MCP tools defer_loading + inject {"type": "tool_search"}
+        # so OpenAI keeps their heavy parameter schemas out of the model's context
+        # until searched (every tool stays callable, cache preserved). No-op for
+        # older models / small tool sets / clients already using tool search. The
+        # deferred defs still ride in the request body (OpenAI needs them to load
+        # on demand), so this is a provider-side context saving, not a request-byte
+        # one — hence a transform tag but no tokens_saved claim.
+        from headroom.proxy.helpers import inject_tool_search_deferral_openai
+
+        _deferred_tools = inject_tool_search_deferral_openai(working.get("tools"), model)
+        if _deferred_tools is not working.get("tools"):
+            if working is payload:
+                working = copy.deepcopy(payload)
+            working["tools"] = _deferred_tools
+            modified = True
+            transforms.append("openai:responses:tool_search_deferral")
+
+        # Turn hooks (opt-in extensions): a registered hook may inspect or rewrite
+        # the outbound tools before we send — the extensible counterpart to the
+        # built-in deferral above. Gated on the registry so it is a no-op (no copy,
+        # no context construction) when no hook is registered.
+        from headroom.proxy.turn_hooks import (
+            TurnContext,
+            registered_turn_hooks,
+            run_request_hooks,
+        )
+
+        if registered_turn_hooks():
+            if working is payload:
+                working = copy.deepcopy(payload)
+            _req_ctx = TurnContext(
+                provider="openai",
+                model=str(model),
+                messages=working.get("input") or working.get("messages") or [],
+                tools=working.get("tools"),
+                config=getattr(self, "config", None),
+            )
+            run_request_hooks(_req_ctx)
+            if _req_ctx.tools is not working.get("tools"):
+                working["tools"] = _req_ctx.tools
+            modified = True
+            transforms.append("openai:responses:turn_hook")
+
         live_units_started = time.perf_counter()
         (
             router_payload,
@@ -1858,6 +2032,17 @@ class OpenAIHandlerMixin:
         model = body.get("model", "unknown")
         messages = body.get("messages", [])
         original_client_messages = copy.deepcopy(messages)
+        custom_upstream_base_url = _resolve_openai_upstream_base(request.headers)
+        upstream_base_url = self._resolve_openai_upstream(request)
+        handler_path_suffix = _resolve_openai_chat_handler_path(
+            upstream_base_url,
+            model,
+        )
+        handler_path = (
+            _resolve_openai_handler_path(request.headers, handler_path=handler_path_suffix)
+            if custom_upstream_base_url is not None
+            else f"/v1{handler_path_suffix}"
+        )
         input_event = self.pipeline_extensions.emit(
             PipelineStage.INPUT_RECEIVED,
             operation="proxy.request",
@@ -1866,7 +2051,7 @@ class OpenAIHandlerMixin:
             model=model,
             messages=messages,
             tools=body.get("tools"),
-            metadata={"path": "/v1/chat/completions", "stream": body.get("stream", False)},
+            metadata={"path": handler_path, "stream": body.get("stream", False)},
         )
         if input_event.messages is not None:
             messages = input_event.messages
@@ -1962,6 +2147,21 @@ class OpenAIHandlerMixin:
             stripped_count=_pre_strip_count_chat,
             request_id=request_id,
         )
+        upstream_base_url = _resolve_openai_upstream_base(request.headers)
+        handler_path = (
+            _resolve_openai_handler_path(
+                request.headers,
+                handler_path=_OPENAI_CHAT_COMPLETIONS_PATH,
+            )
+            if upstream_base_url is not None
+            else "/v1/chat/completions"
+        )
+        _, custom_chat_provider = _custom_base_passthrough_telemetry(
+            request.method,
+            handler_path,
+            upstream_base_url or "",
+        )
+        openai_chat_outcome_provider = custom_chat_provider or "openai"
 
         # Memory: Get user ID when memory is enabled. Reads `request.headers`
         # directly because `headers` was stripped of `x-headroom-*` for the
@@ -2012,7 +2212,7 @@ class OpenAIHandlerMixin:
             rate_key = headers.get("authorization", "default")[:20]
             allowed, wait_seconds = await self.rate_limiter.check_request(rate_key)
             if not allowed:
-                await self.metrics.record_rate_limited(provider="openai")
+                await self.metrics.record_rate_limited(provider=openai_chat_outcome_provider)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limited. Retry after {wait_seconds:.1f}s",
@@ -2059,7 +2259,7 @@ class OpenAIHandlerMixin:
                     provider="openai",
                     model=model,
                     messages=messages,
-                    metadata={"cache_hit": True, "path": "/v1/chat/completions"},
+                    metadata={"cache_hit": True, "path": handler_path},
                 )
                 # Response-cache hit: same pattern as the anthropic
                 # cache-hit site. ``from_response_cache=True`` is the
@@ -2069,7 +2269,7 @@ class OpenAIHandlerMixin:
                 await self._record_request_outcome(
                     RequestOutcome(
                         request_id=request_id,
-                        provider="openai",
+                        provider=openai_chat_outcome_provider,
                         model=model,
                         original_tokens=0,
                         optimized_tokens=0,
@@ -2163,8 +2363,8 @@ class OpenAIHandlerMixin:
 
         openai_frozen_count = openai_prefix_tracker.get_frozen_message_count()
         if is_cache_mode(self.config.mode):
-            openai_frozen_count = self._strict_previous_turn_frozen_count(
-                original_client_messages,
+            openai_frozen_count = OpenAIHandlerMixin._strict_previous_turn_frozen_count(
+                messages,
                 openai_frozen_count,
             )
 
@@ -2199,8 +2399,14 @@ class OpenAIHandlerMixin:
                     # Zone 1: Swap cached compressed versions
                     working_messages = comp_cache.apply_cached(messages)
 
-                    # Re-freeze boundary
-                    openai_frozen_count = comp_cache.compute_frozen_count(messages)
+                    # Re-freeze boundary. Token mode can use the compression
+                    # cache's positional frozen count. Cache mode must keep the
+                    # latest observation mutable even when the compression
+                    # cache has no compressible entry for it yet; otherwise
+                    # OpenAI-compatible tool-call clients freeze the entire
+                    # conversation and report near-zero savings.
+                    if not is_cache_mode(self.config.mode):
+                        openai_frozen_count = comp_cache.compute_frozen_count(messages)
 
                     result = await self._run_compression_in_executor(
                         lambda: self.openai_pipeline.apply(
@@ -2208,9 +2414,24 @@ class OpenAIHandlerMixin:
                             model=model,
                             model_limit=context_limit,
                             context=extract_user_query(working_messages),
-                            frozen_message_count=openai_frozen_count,
+                            frozen_message_count=(
+                                OpenAIHandlerMixin._strict_previous_turn_frozen_count(
+                                    working_messages,
+                                    openai_frozen_count,
+                                )
+                                if is_cache_mode(self.config.mode)
+                                else openai_frozen_count
+                            ),
                             biases=_hook_biases,
                             compression_policy=compression_policy,
+                            # Thread the savings-profile knobs (e.g.
+                            # HEADROOM_SAVINGS_PROFILE=agent-90) onto the live
+                            # chat-completions path, matching handlers/
+                            # anthropic.py and the dedicated OpenAI compress
+                            # endpoint. Without this the profile's
+                            # compress_user_messages/target_ratio/etc. were
+                            # silently dropped here (#1534).
+                            **proxy_pipeline_kwargs(self.config),
                         ),
                         timeout=COMPRESSION_TIMEOUT_SECONDS,
                     )
@@ -2226,15 +2447,27 @@ class OpenAIHandlerMixin:
                     # so tokens_saved captures both Zone 1 + Zone 2 savings.
                     optimized_tokens = result.tokens_after
                 else:
+                    apply_frozen_count = (
+                        OpenAIHandlerMixin._strict_previous_turn_frozen_count(
+                            messages,
+                            openai_frozen_count,
+                        )
+                        if is_cache_mode(self.config.mode)
+                        else openai_frozen_count
+                    )
                     result = await self._run_compression_in_executor(
                         lambda: self.openai_pipeline.apply(
                             messages=messages,
                             model=model,
                             model_limit=context_limit,
                             context=extract_user_query(messages),
-                            frozen_message_count=openai_frozen_count,
+                            frozen_message_count=apply_frozen_count,
                             biases=_hook_biases,
                             compression_policy=compression_policy,
+                            # Same savings-profile threading as the token-mode
+                            # branch above — the non-token chat path must honor
+                            # the configured profile too (#1534).
+                            **proxy_pipeline_kwargs(self.config),
                         ),
                         timeout=COMPRESSION_TIMEOUT_SECONDS,
                     )
@@ -2533,7 +2766,7 @@ class OpenAIHandlerMixin:
             messages=optimized_messages,
             tools=tools,
             headers=headers,
-            metadata={"path": "/v1/chat/completions", "stream": stream},
+            metadata={"path": handler_path, "stream": stream},
         )
         if presend_event.messages is not None:
             optimized_messages = presend_event.messages
@@ -2545,6 +2778,61 @@ class OpenAIHandlerMixin:
             headers = presend_event.headers
         optimized_tokens = tokenizer.count_messages(body["messages"])
         tokens_saved = original_tokens - optimized_tokens
+
+        # Turn hooks (opt-in extensions): a registered hook may rewrite the
+        # outbound tools/messages before we send. Buffered requests only — a
+        # streamed turn can't be re-driven to resolve whatever the model asks to
+        # load. Gated on the registry so it is a no-op when none are registered;
+        # the net tool-schema token delta is recorded so it shows up as a saving.
+        from headroom.proxy.turn_hooks import (
+            TurnContext,
+            registered_turn_hooks,
+            run_request_hooks,
+        )
+
+        if registered_turn_hooks() and not stream:
+            _th_tools_before = body.get("tools")
+            _th_tok_before = (
+                tokenizer.count_text(json.dumps(_th_tools_before, default=str))
+                if _th_tools_before
+                else 0
+            )
+            _th_ctx = TurnContext(
+                provider="openai",
+                model=str(model),
+                messages=body["messages"],
+                tools=_th_tools_before,
+                config=self.config,
+            )
+            run_request_hooks(_th_ctx)
+            # A hook may either replace ctx.messages/ctx.tools or mutate them in
+            # place (the contract allows both). Use object identity only to decide
+            # whether body needs reassignment; measure the saving from the FINAL
+            # tools object regardless, so an in-place shrink is still counted.
+            if _th_ctx.messages is not body["messages"]:
+                optimized_messages = _th_ctx.messages
+                body["messages"] = optimized_messages
+            if _th_ctx.tools is not _th_tools_before:
+                tools = _th_ctx.tools
+                body["tools"] = tools
+            _th_tok_after = (
+                tokenizer.count_text(json.dumps(_th_ctx.tools, default=str)) if _th_ctx.tools else 0
+            )
+            _th_saved = max(0, _th_tok_before - _th_tok_after)
+            if _th_saved > 0:
+                tags["turn_hook_tools_saved_tokens"] = (
+                    int(tags.get("turn_hook_tools_saved_tokens", 0) or 0) + _th_saved
+                )
+                transforms_applied.append(f"turn_hook:tools:{_th_saved}tok")
+
+        # Compatibility shim: GPT-5 / o-series chat models REJECT the legacy
+        # `max_tokens` ("Unsupported parameter … Use 'max_completion_tokens'
+        # instead"); gpt-4o/4.1 accept `max_completion_tokens` too. openai-
+        # compatible clients (opencode, older SDKs) still send `max_tokens`, so
+        # translate it here — the proxy already owns the outbound body — and
+        # those requests work unchanged. No-op when the caller already set
+        # `max_completion_tokens`.
+        _normalize_openai_max_tokens(body)
 
         # Route through LiteLLM/any-llm backend if configured
         if self.anthropic_backend is not None:
@@ -2558,7 +2846,7 @@ class OpenAIHandlerMixin:
                         model=model,
                         messages=body["messages"],
                         tools=tools,
-                        metadata={"path": "/v1/chat/completions", "stream": True},
+                        metadata={"path": handler_path, "stream": True},
                     )
                     # Streaming: use stream_openai_message() → SSE events
                     return await self._stream_openai_via_backend(
@@ -2593,7 +2881,7 @@ class OpenAIHandlerMixin:
                         tools=tools,
                         response=backend_response.body,
                         metadata={
-                            "path": "/v1/chat/completions",
+                            "path": handler_path,
                             "stream": False,
                             "status_code": backend_response.status_code,
                         },
@@ -2606,7 +2894,7 @@ class OpenAIHandlerMixin:
                         model=model,
                         response=backend_response.body,
                         metadata={
-                            "path": "/v1/chat/completions",
+                            "path": handler_path,
                             "stream": False,
                             "status_code": backend_response.status_code,
                         },
@@ -2686,6 +2974,25 @@ class OpenAIHandlerMixin:
                                 tools,
                                 api_call_fn,
                                 provider="openai",
+                            )
+                            # Turn hooks (opt-in extensions) may inspect the turn
+                            # or re-drive the model before we hand back the
+                            # response. Inert when no hook is registered.
+                            from headroom.proxy.turn_hooks import (
+                                TurnContext,
+                                run_response_hooks,
+                            )
+
+                            final_resp_json = await run_response_hooks(
+                                TurnContext(
+                                    provider="openai",
+                                    model=str(model),
+                                    messages=optimized_messages,
+                                    tools=tools,
+                                    config=self.config,
+                                ),
+                                final_resp_json,
+                                api_call_fn,
                             )
                             backend_response.body = final_resp_json
                             logger.info(
@@ -2786,14 +3093,6 @@ class OpenAIHandlerMixin:
                 )
 
         # Direct OpenAI API (no backend configured)
-        upstream_base_url = _resolve_openai_upstream_base(request.headers)
-        handler_path = (
-            _resolve_openai_handler_path(
-                request.headers, handler_path=_OPENAI_CHAT_COMPLETIONS_PATH
-            )
-            if upstream_base_url is not None
-            else "/v1/chat/completions"
-        )
         url = build_copilot_upstream_url(
             upstream_base_url or self.OPENAI_API_URL,
             handler_path,
@@ -2817,7 +3116,7 @@ class OpenAIHandlerMixin:
                     model=model,
                     messages=body["messages"],
                     tools=tools,
-                    metadata={"path": "/v1/chat/completions", "stream": True},
+                    metadata={"path": handler_path, "stream": True},
                 )
                 return await self._stream_response(
                     url,
@@ -2834,10 +3133,59 @@ class OpenAIHandlerMixin:
                     optimization_latency,
                     pipeline_timing=pipeline_timing,
                     prefix_tracker=openai_prefix_tracker,
+                    outcome_provider=openai_chat_outcome_provider,
                 )
             else:
                 headers = await apply_copilot_api_auth(headers, url=url)
                 response = await self._retry_request("POST", url, headers, body)
+
+                # Turn hooks: a registered extension may re-drive this turn
+                # (e.g. resolve a tool the model asked to load) before we treat
+                # the response as final. Buffered path only; no-op when no hook
+                # is registered.
+                from headroom.proxy.turn_hooks import (
+                    TurnContext as _TurnContext,
+                )
+                from headroom.proxy.turn_hooks import (
+                    registered_turn_hooks as _registered_turn_hooks,
+                )
+                from headroom.proxy.turn_hooks import (
+                    run_response_hooks,
+                )
+
+                if _registered_turn_hooks() and response.status_code == 200:
+                    try:
+                        _hook_resp_json = response.json()
+                    except (ValueError, json.JSONDecodeError):
+                        _hook_resp_json = None
+                    if isinstance(_hook_resp_json, dict):
+                        _hook_ctx = _TurnContext(
+                            provider="openai",
+                            model=str(model),
+                            messages=body["messages"],
+                            tools=body.get("tools"),
+                            config=self.config,
+                        )
+
+                        async def _hook_call_model(_msgs):
+                            body["messages"] = _msgs
+                            _r = await self._retry_request("POST", url, headers, body)
+                            return _r.json()
+
+                        _hook_final = await run_response_hooks(
+                            _hook_ctx, _hook_resp_json, _hook_call_model
+                        )
+                        if _hook_final is not _hook_resp_json:
+                            response = httpx.Response(
+                                status_code=200,
+                                headers={
+                                    k: v
+                                    for k, v in response.headers.items()
+                                    if k.lower() not in ("content-encoding", "content-length")
+                                },
+                                content=json.dumps(_hook_final).encode(),
+                            )
+
                 self.pipeline_extensions.emit(
                     PipelineStage.POST_SEND,
                     operation="proxy.request",
@@ -2848,7 +3196,7 @@ class OpenAIHandlerMixin:
                     tools=tools,
                     response=response,
                     metadata={
-                        "path": "/v1/chat/completions",
+                        "path": handler_path,
                         "stream": False,
                         "status_code": response.status_code,
                     },
@@ -2861,7 +3209,7 @@ class OpenAIHandlerMixin:
                     model=model,
                     response=response,
                     metadata={
-                        "path": "/v1/chat/completions",
+                        "path": handler_path,
                         "stream": False,
                         "status_code": response.status_code,
                     },
@@ -2996,6 +3344,8 @@ class OpenAIHandlerMixin:
                 # OpenAI has no write penalty — uncached = total - cached
                 uncached_input_tokens = max(0, total_input_tokens - cache_read_tokens)
 
+                # (record_tokens clamps negative savings to 0 universally — the
+                # forwarded request is never larger than the original.)
                 if self.cost_tracker:
                     self.cost_tracker.record_tokens(
                         model,
@@ -3085,7 +3435,7 @@ class OpenAIHandlerMixin:
                 await self._record_request_outcome(
                     RequestOutcome(
                         request_id=request_id,
-                        provider="openai",
+                        provider=openai_chat_outcome_provider,
                         model=model,
                         original_tokens=original_tokens,
                         optimized_tokens=total_input_tokens,
@@ -3141,7 +3491,7 @@ class OpenAIHandlerMixin:
                     headers=response_headers,
                 )
         except Exception as e:
-            await self.metrics.record_failed(provider="openai")
+            await self.metrics.record_failed(provider=openai_chat_outcome_provider)
             # Log full error details internally for debugging
             logger.error(f"[{request_id}] OpenAI request failed: {type(e).__name__}: {e}")
             # Return sanitized error message to client (don't expose internal details)
@@ -3170,7 +3520,7 @@ class OpenAIHandlerMixin:
         - Built-in tools: web_search, file_search, code_interpreter
         """
         from fastapi import HTTPException
-        from fastapi.responses import JSONResponse, Response
+        from fastapi.responses import JSONResponse, Response, StreamingResponse
 
         from headroom.proxy.helpers import (
             MAX_REQUEST_BODY_SIZE,
@@ -3751,8 +4101,34 @@ class OpenAIHandlerMixin:
             except Exception:
                 pass
 
+        # CCR: a stream:true request whose tool list carries headroom_retrieve
+        # can't be intercepted mid-SSE-stream without full event-level
+        # splicing (#1877 proposals B/C, out of scope here). Instead, force
+        # a buffered stream:false upstream call so retrieval can be resolved
+        # server-side, then reconstruct a minimal SSE stream for the client.
+        # Mirrors AnthropicHandler's buffered_stream_ccr decision.
+        _ccr_response_handler = getattr(self, "ccr_response_handler", None)
+        _ccr_handler_config = getattr(_ccr_response_handler, "config", None)
+        _ccr_response_handler_enabled = bool(
+            _ccr_response_handler and getattr(_ccr_handler_config, "enabled", True)
+        )
+        buffered_stream_ccr = bool(
+            stream
+            and _ccr_response_handler_enabled
+            and _has_headroom_retrieve_tool_responses(body.get("tools"))
+        )
+        if buffered_stream_ccr:
+            if body.get("stream") is not False:
+                body["stream"] = False
+                body_mutation_tracker.mark_mutated("ccr_streaming_retrieve_buffered_non_stream")
+            logger.info(
+                f"[{request_id}] CCR: stream:true /v1/responses request has "
+                "headroom_retrieve available; using buffered stream:false "
+                "upstream request for server-side retrieval handling"
+            )
+
         try:
-            if stream:
+            if stream and not buffered_stream_ccr:
                 # Streaming for Responses API uses semantic events
                 return await self._stream_response(
                     url,
@@ -3838,6 +4214,106 @@ class OpenAIHandlerMixin:
                         f"[{request_id}] Failed to extract cached tokens from OpenAI passthrough response: {e}"
                     )
 
+                # CCR Response Handling: intercept headroom_retrieve tool
+                # calls server-side so a Responses API function_call the
+                # downstream caller can't resolve (e.g. Strands, or a
+                # buffered-stream request) never reaches the client. Mirrors
+                # the chat-completions backend-path block (handle_openai_chat
+                # ~2775-2848), adapted for the Responses API's flat
+                # function_call / output[] shape instead of Messages API
+                # tool_calls. Runs before memory tool handling below so a
+                # retrieve call never gets treated as an unresolved tool_call
+                # by the memory-tool branch.
+                if (
+                    _ccr_response_handler
+                    and resp_json
+                    and response.status_code == 200
+                    and _ccr_response_handler.has_ccr_tool_calls(resp_json, "openai_responses")
+                ):
+                    logger.info(
+                        f"[{request_id}] CCR: Detected retrieval tool call (responses), handling..."
+                    )
+
+                    async def api_call_fn(
+                        items: list[dict[str, Any]],
+                        tls: list[dict[str, Any]] | None,
+                    ) -> dict[str, Any]:
+                        continuation_body = {**body, "input": items}
+                        if tls is not None:
+                            continuation_body["tools"] = tls
+                        # Fresh stateless continuation: resend the full
+                        # item history rather than chaining through
+                        # previous_response_id, matching how
+                        # CCRResponseHandler accumulates `current_messages`
+                        # for every other provider. `body["stream"]` is
+                        # left as-is: for a buffered_stream_ccr request it
+                        # was already forced False above, and continuations
+                        # must stay non-streaming so this handler (not
+                        # `_stream_response`) can parse the JSON reply.
+                        continuation_body.pop("previous_response_id", None)
+                        continuation_body["stream"] = False
+
+                        continuation_headers = {
+                            k: v
+                            for k, v in headers.items()
+                            if k.lower()
+                            not in (
+                                "content-encoding",
+                                "transfer-encoding",
+                                "accept-encoding",
+                                "content-length",
+                            )
+                        }
+                        logger.info(
+                            f"[{request_id}] CCR: Issuing Responses continuation "
+                            f"({len(items)} input items)"
+                        )
+                        cont_response = await self._retry_request(
+                            "POST",
+                            url,
+                            continuation_headers,
+                            continuation_body,
+                            request_id=request_id,
+                            forwarder_name="openai_responses_ccr_continuation",
+                            path_for_log=url,
+                        )
+                        return cont_response.json()
+
+                    try:
+                        final_resp_json = await _ccr_response_handler.handle_response(
+                            resp_json,
+                            _responses_input_to_items(body.get("input")),
+                            body.get("tools"),
+                            api_call_fn,
+                            provider="openai_responses",
+                        )
+                        resp_json = final_resp_json
+                        # Remove encoding headers since content is now
+                        # uncompressed JSON we synthesized.
+                        ccr_response_headers = {
+                            k: v
+                            for k, v in response.headers.items()
+                            if k.lower() not in ("content-encoding", "content-length")
+                        }
+                        response = httpx.Response(
+                            status_code=200,
+                            content=json.dumps(final_resp_json).encode(),
+                            headers=ccr_response_headers,
+                        )
+                        logger.info(
+                            f"[{request_id}] CCR: Retrieval handled successfully (responses)"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"[{request_id}] CCR: Response handling failed (responses): {e}"
+                        )
+                        # NO SILENT FALLBACK: re-raise so the client sees a
+                        # clear failure instead of an unresolved tool_call
+                        # it can't act on. Matches the OpenAI backend-path
+                        # block in handle_openai_chat; see
+                        # feedback_no_silent_fallbacks.
+                        raise
+
                 # Memory: handle memory tool calls in Responses API response
                 if (
                     self.memory_handler
@@ -3919,6 +4395,7 @@ class OpenAIHandlerMixin:
                         cache_read_tokens,
                     )
                     uncached_input_tokens = max(0, total_input_tokens - cache_read_tokens)
+                    # (record_tokens clamps negative savings to 0 universally.)
                     self.cost_tracker.record_tokens(
                         model,
                         tokens_saved,
@@ -3995,6 +4472,52 @@ class OpenAIHandlerMixin:
                 response_headers = dict(response.headers)
                 response_headers.pop("content-encoding", None)
                 response_headers.pop("content-length", None)
+
+                if buffered_stream_ccr and response.status_code == 200 and resp_json:
+                    sse_headers = {
+                        k: v
+                        for k, v in response_headers.items()
+                        if k.lower() not in ("content-length", "content-type")
+                    }
+                    if _ccr_response_handler and _ccr_response_handler.has_ccr_tool_calls(
+                        resp_json, "openai_responses"
+                    ):
+                        # Handling above didn't fully resolve the retrieve
+                        # call (e.g. max rounds hit, or it was mixed with a
+                        # non-CCR tool call). Fail closed rather than stream
+                        # a response the client can't act on — matches the
+                        # Anthropic buffered path's residual-CCR guard.
+                        logger.warning(
+                            f"[{request_id}] CCR: Buffered streaming Responses "
+                            "reply still contains headroom_retrieve after "
+                            "handling; failing closed"
+                        )
+
+                        async def _residual_ccr_error_sse():
+                            error_event = {
+                                "type": "error",
+                                "error": {
+                                    "message": "Unable to safely complete streamed CCR retrieval.",
+                                },
+                            }
+                            yield f"event: error\ndata: {json.dumps(error_event)}\n\n".encode()
+
+                        return StreamingResponse(
+                            _residual_ccr_error_sse(),
+                            media_type="text/event-stream",
+                            headers=sse_headers,
+                            status_code=502,
+                        )
+
+                    async def _buffered_ccr_sse():
+                        for event in _openai_responses_to_sse(resp_json):
+                            yield event
+
+                    return StreamingResponse(
+                        _buffered_ccr_sse(),
+                        media_type="text/event-stream",
+                        headers=sse_headers,
+                    )
 
                 return Response(
                     content=response.content,
@@ -6748,7 +7271,11 @@ class OpenAIHandlerMixin:
         client = classify_client(headers)
         tags = extract_tags(headers)
         # PR-A5 (P5-49): strip internal x-headroom-* before forwarding upstream.
-        from headroom.proxy.helpers import _strip_internal_headers, log_outbound_headers
+        from headroom.proxy.helpers import (
+            _strip_internal_headers,
+            log_outbound_headers,
+            request_with_transient_retry,
+        )
 
         _pre_strip_count_pt = sum(1 for k in headers if k.lower().startswith("x-headroom-"))
         headers = _strip_internal_headers(headers)
@@ -6771,7 +7298,12 @@ class OpenAIHandlerMixin:
         if _prefers_http1_passthrough(base_url):
             passthrough_client = self.http_client_h1 or self.http_client
         try:
-            response = await passthrough_client.request(  # type: ignore[union-attr]
+            # Retry once on a transient keep-alive close (httpx
+            # RemoteProtocolError / "incomplete chunked read"): the upstream
+            # closed a pooled connection httpx then reused. A fresh connection
+            # succeeds, mirroring what a direct curl call does. See GH #1112.
+            response = await request_with_transient_retry(
+                passthrough_client,  # type: ignore[arg-type]
                 method=request.method,
                 url=url,
                 headers=headers,
@@ -6791,6 +7323,37 @@ class OpenAIHandlerMixin:
                         "error": {
                             "type": "connection_error",
                             "message": f"Failed to connect to upstream API: {e}",
+                        }
+                    }
+                ),
+                status_code=502,
+                media_type="application/json",
+            )
+        except httpx.RemoteProtocolError as e:
+            # Persisted across the retry: the upstream really is sending an
+            # incomplete response. Return a clear 502 instead of letting the
+            # raw protocol error surface as an opaque/unhandled 502.
+            logger.warning(
+                "Passthrough upstream closed connection without a complete "
+                "response after retry: %s %s -> %s: %s",
+                request.method,
+                path,
+                url,
+                e,
+            )
+            return Response(
+                content=json.dumps(
+                    {
+                        "error": {
+                            "type": "upstream_protocol_error",
+                            # Full exception detail is logged server-side above;
+                            # keep the client-facing message generic so upstream
+                            # exception/stack-trace text is not exposed (CodeQL
+                            # py/stack-trace-exposure).
+                            "message": (
+                                "Upstream closed the connection without sending "
+                                "a complete response."
+                            ),
                         }
                     }
                 ),
