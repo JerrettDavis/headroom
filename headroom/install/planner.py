@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable
 
 import click
 
@@ -28,11 +27,13 @@ SUPPORTED_TARGETS = [
     ToolTarget.AIDER,
     ToolTarget.CURSOR,
     ToolTarget.OPENCLAW,
+    ToolTarget.OPENCODE,
 ]
 PROVIDER_SCOPE_TARGETS = [
     ToolTarget.CLAUDE,
     ToolTarget.CODEX,
     ToolTarget.OPENCLAW,
+    ToolTarget.OPENCODE,
 ]
 
 
@@ -68,63 +69,38 @@ def resolve_targets(
     valid = {target.value for target in valid_targets}
     requested = [target.strip().lower() for target in requested_targets]
 
+    if provider_mode == ProviderSelectionMode.ALL.value:
+        return [target.value for target in valid_targets]
+
+    if provider_mode == ProviderSelectionMode.AUTO.value:
+        detected = [target for target in detect_targets() if target in valid]
+        return detected or [
+            ToolTarget.CLAUDE.value,
+            ToolTarget.CODEX.value,
+            *([] if scope == ConfigScope.PROVIDER.value else [ToolTarget.COPILOT.value]),
+        ]
+
+    # Manual selection is the only mode that consults `requested`, so the
+    # provider-scope validation belongs here. Running it earlier rejected
+    # unsupported entries that `all`/`auto` ignore entirely — e.g.
+    # `install apply --scope provider --providers all --target cursor` raised
+    # instead of returning the provider target set.
     if scope == ConfigScope.PROVIDER.value:
         unsupported = [target for target in requested if target and target not in valid]
         if unsupported:
             unsupported_list = ", ".join(sorted(set(unsupported)))
             raise click.ClickException(
-                "Provider scope supports only claude, codex, and openclaw; "
+                "Provider scope supports only claude, codex, openclaw, and opencode; "
                 f"unsupported targets: {unsupported_list}"
             )
 
-    context = TargetResolutionContext(
-        scope=scope,
-        valid_targets=valid_targets,
-        valid_values=valid,
-        requested=requested,
-    )
-    resolver = _TARGET_RESOLVERS.get(provider_mode, _resolve_manual_targets)
-    return resolver(context)
-
-
-@dataclass(frozen=True)
-class TargetResolutionContext:
-    """Inputs shared by install target resolution strategies."""
-
-    scope: str
-    valid_targets: list[ToolTarget]
-    valid_values: set[str]
-    requested: list[str]
-
-
-def _resolve_all_targets(context: TargetResolutionContext) -> list[str]:
-    return [target.value for target in context.valid_targets]
-
-
-def _resolve_auto_targets(context: TargetResolutionContext) -> list[str]:
-    detected = [target for target in detect_targets() if target in context.valid_values]
-    return detected or [
-        ToolTarget.CLAUDE.value,
-        ToolTarget.CODEX.value,
-        *([] if context.scope == ConfigScope.PROVIDER.value else [ToolTarget.COPILOT.value]),
-    ]
-
-
-def _resolve_manual_targets(context: TargetResolutionContext) -> list[str]:
     normalized = []
     seen: set[str] = set()
-    for value in context.requested:
-        if value in context.valid_values and value not in seen:
+    for value in requested:
+        if value in valid and value not in seen:
             seen.add(value)
             normalized.append(value)
     return normalized
-
-
-_TARGET_RESOLVERS: dict[str, Callable[[TargetResolutionContext], list[str]]] = {
-    ProviderSelectionMode.ALL.value: _resolve_all_targets,
-    ProviderSelectionMode.AUTO.value: _resolve_auto_targets,
-    ProviderSelectionMode.MANUAL.value: _resolve_manual_targets,
-}
 
 
 def build_tool_envs(port: int, backend: str, targets: list[str]) -> dict[str, dict[str, str]]:
@@ -148,6 +124,7 @@ def build_manifest(
     memory_enabled: bool,
     telemetry_enabled: bool,
     image: str,
+    no_http2: bool = False,
 ) -> DeploymentManifest:
     """Create a normalized deployment manifest."""
 
@@ -172,8 +149,9 @@ def build_manifest(
         base_env["HEADROOM_ANYLLM_PROVIDER"] = anyllm_provider
     if region:
         base_env["HEADROOM_REGION"] = region
-    if not telemetry_enabled:
-        base_env["HEADROOM_TELEMETRY"] = "off"
+    # Telemetry is opt-in (off by default). Write the value explicitly so the
+    # generated manifest is unambiguous and doesn't depend on the runtime default.
+    base_env["HEADROOM_TELEMETRY"] = "on" if telemetry_enabled else "off"
     if memory_enabled:
         base_env["HEADROOM_MEMORY_ENABLED"] = "1"
 
@@ -187,14 +165,15 @@ def build_manifest(
         "--backend",
         backend,
     ]
-    if not telemetry_enabled:
-        proxy_args.append("--no-telemetry")
+    proxy_args.append("--telemetry" if telemetry_enabled else "--no-telemetry")
     if memory_enabled:
         proxy_args.extend(["--memory", "--memory-db-path", str(_paths.memory_db_path())])
     if anyllm_provider:
         proxy_args.extend(["--anyllm-provider", anyllm_provider])
     if region:
         proxy_args.extend(["--region", region])
+    if no_http2:
+        proxy_args.append("--no-http2")
 
     container_name = f"headroom-{normalized_profile}"
     return DeploymentManifest(

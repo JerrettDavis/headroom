@@ -4,7 +4,14 @@ import json
 import httpx
 import pytest
 
+from headroom.providers.codex import (
+    CodexRoutingDecision as ExportedCodexRoutingDecision,
+)
+from headroom.providers.codex import (
+    resolve_codex_routing as exported_resolve_codex_routing,
+)
 from headroom.providers.codex.model_metadata import (
+    codex_model_registry_entry,
     fetch_chatgpt_codex_model_ids,
     normalize_codex_registry_headers,
     synthetic_model_get_response,
@@ -12,6 +19,7 @@ from headroom.providers.codex.model_metadata import (
 )
 from headroom.providers.codex.runtime import (
     decode_openai_bearer_payload,
+    resolve_codex_routing,
     resolve_codex_routing_headers,
 )
 
@@ -47,10 +55,36 @@ def test_codex_runtime_resolves_chatgpt_account_from_openai_oauth_jwt() -> None:
     assert headers["ChatGPT-Account-ID"] == "acct-from-jwt"
 
 
+def test_codex_runtime_exposes_named_routing_decision() -> None:
+    decision = resolve_codex_routing({"ChatGPT-Account-ID": "acct-explicit"})
+
+    assert decision.is_chatgpt_auth is True
+    assert decision.headers == {"ChatGPT-Account-ID": "acct-explicit"}
+
+
+def test_codex_package_exports_routing_decision() -> None:
+    decision = exported_resolve_codex_routing({"ChatGPT-Account-ID": "acct-root"})
+
+    assert isinstance(decision, ExportedCodexRoutingDecision)
+    assert decision.is_chatgpt_auth is True
+    assert decision.headers == {"ChatGPT-Account-ID": "acct-root"}
+
+
+def test_codex_runtime_ignores_malformed_oauth_jwt() -> None:
+    assert decode_openai_bearer_payload({"authorization": "Bearer header.***.sig"}) is None
+
+    headers, is_chatgpt_auth = resolve_codex_routing_headers(
+        {"authorization": "Bearer header.***.sig"}
+    )
+
+    assert is_chatgpt_auth is False
+    assert headers == {"authorization": "Bearer header.***.sig"}
+
+
 def test_codex_registry_headers_normalize_account_and_accept_headers() -> None:
     headers = normalize_codex_registry_headers(
         {
-            "host": "localhost:8787",
+            "Host": "localhost:8787",
             "authorization": "Bearer token",
             "ChatGPT-Account-ID": "acct",
             "Accept": "text/event-stream",
@@ -112,3 +146,17 @@ def test_codex_synthetic_model_metadata_responses() -> None:
         "owned_by": "openai",
     }
     assert unknown.status_code == 404
+
+
+def test_codex_model_registry_entry_preserves_upstream_fields_and_defaults() -> None:
+    entry = codex_model_registry_entry(
+        "gpt-5.3-codex-spark",
+        {"display_name": "Spark", "context_window": 12345},
+    )
+
+    assert entry["slug"] == "gpt-5.3-codex-spark"
+    assert entry["display_name"] == "Spark"
+    assert entry["context_window"] == 12345
+    assert entry["default_reasoning_level"] == "medium"
+    assert entry["supports_parallel_tool_calls"] is True
+    assert entry["supported_in_api"] is True

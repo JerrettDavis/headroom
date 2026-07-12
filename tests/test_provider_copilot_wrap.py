@@ -13,14 +13,13 @@ from headroom.providers.copilot.wrap import (
     copilot_model_from_args,
     default_wire_api_for_model,
     detect_running_proxy_backend,
-    has_explicit_provider_auth,
+    is_auto_model,
     model_configured,
     model_prefers_responses_api,
     provider_key_source,
     query_proxy_config,
     resolve_provider_type,
-    resolve_subscription_provider_type,
-    should_use_oauth,
+    strip_auto_model_args,
     validate_configuration,
 )
 
@@ -48,71 +47,32 @@ def test_detect_running_proxy_backend_requires_string_backend(monkeypatch) -> No
 
 
 def test_resolve_provider_type_prefers_explicit_and_env() -> None:
-    assert resolve_provider_type("anthropic", "openai") == "openai"
+    assert (
+        resolve_provider_type(
+            "anthropic",
+            "openai",
+            {"COPILOT_PROVIDER_TYPE": "anthropic", "HEADROOM_BACKEND": "anthropic"},
+        )
+        == "openai"
+    )
+    assert (
+        resolve_provider_type(
+            "anthropic",
+            "auto",
+            {"COPILOT_PROVIDER_TYPE": "openai", "HEADROOM_BACKEND": "anthropic"},
+        )
+        == "openai"
+    )
+    assert (
+        resolve_provider_type(
+            None,
+            "auto",
+            {"COPILOT_PROVIDER_TYPE": "not-a-provider", "HEADROOM_BACKEND": "anthropic"},
+        )
+        == "anthropic"
+    )
     assert resolve_provider_type(None, "auto", {"HEADROOM_BACKEND": "anthropic"}) == "anthropic"
     assert resolve_provider_type(None, "auto", {"HEADROOM_BACKEND": "anyllm"}) == "openai"
-
-
-def test_copilot_oauth_policy_is_provider_owned() -> None:
-    assert has_explicit_provider_auth({"COPILOT_PROVIDER_API_KEY": "sk-test"}) is True
-    assert has_explicit_provider_auth({"COPILOT_PROVIDER_BEARER_TOKEN": "gho-test"}) is True
-    assert has_explicit_provider_auth({}) is False
-
-    assert (
-        should_use_oauth(
-            backend="anthropic",
-            provider_type="openai",
-            env={},
-            has_oauth_auth=True,
-        )
-        is True
-    )
-    assert (
-        should_use_oauth(
-            backend="anyllm",
-            provider_type="openai",
-            env={},
-            has_oauth_auth=True,
-        )
-        is False
-    )
-    assert (
-        should_use_oauth(
-            backend="anthropic",
-            provider_type="anthropic",
-            env={},
-            has_oauth_auth=True,
-        )
-        is False
-    )
-    assert (
-        should_use_oauth(
-            backend="anyllm",
-            provider_type="anthropic",
-            env={"COPILOT_PROVIDER_API_KEY": "sk-test"},
-            has_oauth_auth=False,
-            force_subscription=True,
-        )
-        is True
-    )
-
-
-def test_resolve_subscription_provider_type_is_provider_owned() -> None:
-    accepted = resolve_subscription_provider_type(backend="anthropic", provider_type="auto")
-    translated = resolve_subscription_provider_type(backend="anyllm", provider_type="auto")
-    anthropic = resolve_subscription_provider_type(
-        backend="anthropic",
-        provider_type="anthropic",
-    )
-
-    assert accepted.provider_type == "openai"
-    assert accepted.error is None
-    assert translated.provider_type == "auto"
-    assert translated.error is not None
-    assert "translated backends" in translated.error
-    assert anthropic.provider_type == "anthropic"
-    assert anthropic.error is not None
-    assert "--provider-type anthropic" in anthropic.error
 
 
 def test_validate_configuration_accepts_supported_combinations() -> None:
@@ -229,6 +189,70 @@ def test_model_configured_detects_env_and_cli_variants() -> None:
     assert model_configured(("--model", "gpt-4o"), {}) is True
     assert model_configured(("--model=gpt-4o",), {}) is True
     assert model_configured(("--other", "value"), {}) is False
+    # ``auto`` is not a valid BYOK model — must be treated as unconfigured.
+    assert model_configured(("--model", "auto"), {}) is False
+    assert model_configured(("--model=auto",), {}) is False
+    assert model_configured((), {"COPILOT_MODEL": "auto"}) is False
+    assert model_configured((), {"COPILOT_PROVIDER_MODEL_ID": "auto"}) is False
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("auto", True),
+        ("Auto", True),
+        ("AUTO", True),
+        ("  auto  ", True),
+        ("gpt-4o", False),
+        ("gpt-5", False),
+        ("claude-sonnet-4.6", False),
+        (None, False),
+        ("", False),
+    ],
+)
+def test_is_auto_model(model: str | None, expected: bool) -> None:
+    assert is_auto_model(model) is expected
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        # Strips --model auto (space-separated)
+        (
+            ("--model", "auto", "--port", "8788"),
+            ("--port", "8788"),
+        ),
+        # Strips --model=auto (equals form)
+        (
+            ("--model=auto", "-p", "hello"),
+            ("-p", "hello"),
+        ),
+        # Case-insensitive stripping
+        (
+            ("--model", "AUTO", "--allow-all-tools"),
+            ("--allow-all-tools",),
+        ),
+        # Leaves concrete models untouched
+        (
+            ("--model", "gpt-4o", "--port", "8788"),
+            ("--model", "gpt-4o", "--port", "8788"),
+        ),
+        # Leaves --model=gpt-4o untouched
+        (
+            ("--model=gpt-4o",),
+            ("--model=gpt-4o",),
+        ),
+        # Empty args unchanged
+        ((), ()),
+        # --model at end with no value (malformed) — leave as-is, don't crash
+        (("--model",), ("--model",)),
+    ],
+)
+def test_strip_auto_model_args(
+    args: tuple[str, ...],
+    expected: tuple[str, ...],
+) -> None:
+    assert strip_auto_model_args(args) == expected
 
 
 def test_build_launch_env_applies_project_path_prefix() -> None:
