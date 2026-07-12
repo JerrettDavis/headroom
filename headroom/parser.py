@@ -24,6 +24,11 @@ JSON_BLOCK_PATTERN = re.compile(r"\{[\s\S]{500,}\}")
 # exit codes) and are not evidence of a re-read.
 REREAD_MIN_TOKENS = 50
 
+# Canonical CCR retrieval-marker shapes. Mirrors the alternation in
+# transforms/compression_units._CCR_MARKER_RE; kept local because the parser
+# is a base module and importing from transforms would create a cycle.
+CCR_RETRIEVAL_MARKER_RE = re.compile(r"Retrieve more: hash=|Retrieve original: hash=|<<ccr:[^>]+>>")
+
 # Repeats this close (in message positions) to the previous serve are
 # polling, not re-reads. Consecutive tool turns sit 2 apart (the
 # assistant tool_use message lies between results); 3 also absorbs a
@@ -46,6 +51,52 @@ RAG_PATTERN = re.compile("|".join(RAG_MARKERS), re.IGNORECASE)
 def compute_hash(text: str) -> str:
     """Compute hash of text, truncated to 16 chars."""
     return hashlib.md5(text.encode()).hexdigest()[:16]  # nosec B324
+
+
+def _coerce_tool_call_to_dict(tc: Any) -> dict[str, Any]:
+    """Normalize a single tool_call into the canonical OpenAI dict shape.
+
+    `tc` is usually already an OpenAI-format dict
+    (``{"id": ..., "function": {"name": ..., "arguments": ...}}``), but
+    streaming integrations can hand us the raw provider SDK object instead.
+    The OpenAI Python SDK's streaming path yields ``ChoiceDeltaToolCall``
+    objects (and the non-streaming path ``ChatCompletionMessageToolCall``),
+    which are Pydantic models with attribute access and NO ``.get()`` — so
+    calling ``tc.get("function")`` blows up with
+    ``'ChoiceDeltaToolCall' object has no attribute 'get'`` (issue #1312,
+    seen via the Agno wrapper streaming tool calls).
+
+    Accept both. Dicts pass through untouched; attribute-style objects are
+    read via ``getattr`` and flattened to a dict with the same keys the
+    parser expects (``id`` + nested ``function.name`` / ``function.arguments``).
+    A nested ``function`` may itself be a dict or an SDK object, so it gets
+    the same treatment. Anything unrecognized degrades to an empty dict
+    rather than raising — over-compression of a malformed tool call is far
+    cheaper than crashing the whole agent run.
+    """
+    if isinstance(tc, dict):
+        return tc
+
+    # Attribute-style provider object (e.g. OpenAI ChoiceDeltaToolCall).
+    if tc is None:
+        return {}
+
+    func = getattr(tc, "function", None)
+    if isinstance(func, dict):
+        func_dict = func
+    elif func is not None:
+        func_dict = {
+            "name": getattr(func, "name", None),
+            "arguments": getattr(func, "arguments", ""),
+        }
+    else:
+        func_dict = {}
+
+    return {
+        "id": getattr(tc, "id", None),
+        "type": getattr(tc, "type", "function"),
+        "function": func_dict,
+    }
 
 
 def _canonical_call_key(name: str, arguments: Any) -> str:
@@ -296,7 +347,8 @@ def parse_message_to_blocks(
     # Handle tool calls (assistant messages with tool_calls)
     tool_calls = message.get("tool_calls")
     if tool_calls:
-        for tc in tool_calls:
+        for raw_tc in tool_calls:
+            tc = _coerce_tool_call_to_dict(raw_tc)
             func = tc.get("function", {})
             tc_text = f"{func.get('name', 'unknown')}({func.get('arguments', '')})"
 
@@ -336,6 +388,7 @@ def parse_message_to_blocks(
 def parse_messages(
     messages: list[dict[str, Any]],
     tokenizer: Tokenizer,
+    compressed_messages: list[dict[str, Any]] | None = None,
 ) -> tuple[list[Block], dict[str, int], WasteSignals]:
     """
     Parse all messages into blocks with analysis.
@@ -343,6 +396,11 @@ def parse_messages(
     Args:
         messages: List of message dicts.
         tokenizer: Tokenizer instance for token counting.
+        compressed_messages: Optional post-transform copy of the same
+            messages. When provided (and the message count matches), reread
+            waste is additionally attributed: repeats whose first serve was
+            replaced by a CCR retrieval marker count into
+            ``reread_compressed_tokens`` (#899).
 
     Returns:
         Tuple of (blocks, block_breakdown, total_waste_signals)
@@ -374,6 +432,7 @@ def parse_messages(
     for block in all_blocks:
         if block.kind == "tool_result" and block.tokens_est >= REREAD_MIN_TOKENS:
             reread_groups.setdefault(block.content_hash, []).append(block)
+    attribute = compressed_messages is not None and len(compressed_messages) == len(messages)
     for group in reread_groups.values():
         # The message that first served the content is the original; only
         # copies appearing in *later* messages are re-reads. Duplicates
@@ -385,14 +444,34 @@ def parse_messages(
         # repeats advance the baseline without counting, so a long polling
         # chain never accumulates waste.
         prev_index = group[0].source_index
+        counted_tokens = 0
         for block in group:
             if block.source_index == prev_index:
                 continue
             is_polling = block.source_index - prev_index <= REREAD_ADJACENT_GAP
             prev_index = block.source_index
             if not is_polling:
-                total_waste.reread_tokens += block.tokens_est
+                counted_tokens += block.tokens_est
                 counted_results.add(id(block))
+        if not counted_tokens:
+            continue
+        total_waste.reread_tokens += counted_tokens
+        # Over-compression attribution (#899): if the transformed copy of the
+        # first serve carries a CCR retrieval marker and its original text is
+        # gone, the model never saw the full first serve — the repeats are
+        # attributable to compression. Lossless reshaping (no marker) is
+        # deliberately not attributed: the model saw all the data, so the
+        # re-read is agent behavior.
+        if attribute and compressed_messages is not None:
+            first = group[0]
+            transformed_blocks = parse_message_to_blocks(
+                compressed_messages[first.source_index], first.source_index, tokenizer
+            )
+            transformed_text = "\n".join(b.text for b in transformed_blocks)
+            if CCR_RETRIEVAL_MARKER_RE.search(transformed_text) and (
+                first.text not in transformed_text
+            ):
+                total_waste.reread_compressed_tokens += counted_tokens
 
     # Re-issued-call detection: the agent invoking the same tool with the
     # same arguments again is a re-fetch even when the result bytes differ
@@ -495,7 +574,8 @@ def find_tool_units(messages: list[dict[str, Any]]) -> list[tuple[int, list[int]
         # OpenAI format: tool_calls array
         tool_calls = msg.get("tool_calls")
         if tool_calls:
-            for tc in tool_calls:
+            for raw_tc in tool_calls:
+                tc = _coerce_tool_call_to_dict(raw_tc)
                 tc_id = tc.get("id")
                 if tc_id and tc_id in tool_response_map:
                     response_indices.append(tool_response_map[tc_id])

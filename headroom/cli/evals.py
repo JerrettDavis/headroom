@@ -10,14 +10,45 @@ import click
 from .main import main
 
 
+def _parse_categories(categories: str | None) -> list[int] | None:
+    """Parse a comma-separated ``--categories`` value into validated ints.
+
+    Raises ``click.BadParameter`` (clean usage error, exit 2) instead of
+    letting a non-numeric or out-of-range token surface as a raw traceback.
+    """
+    if not categories:
+        return None
+    parsed: list[int] = []
+    for token in categories.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            value = int(token)
+        except ValueError:
+            raise click.BadParameter(
+                f"{token!r} is not an integer; expected comma-separated values 1-5, e.g. 1,2,3",
+                param_hint="--categories",
+            ) from None
+        if not 1 <= value <= 5:
+            raise click.BadParameter(
+                f"{value} is out of range; categories must be 1-5",
+                param_hint="--categories",
+            )
+        parsed.append(value)
+    return parsed or None
+
+
 @main.group()
 def evals() -> None:
-    """Memory evaluation commands.
+    """Evaluation commands (memory, compression robustness, retention).
 
     \b
     Examples:
         headroom evals memory       Run LoCoMo memory evaluation
         headroom evals memory-v2    Run V2 evaluation with LLM-controlled tools
+        headroom evals adversarial  Compression-robustness adversarial grid
+        headroom evals probes       Retention probes over recorded sessions
     """
     pass
 
@@ -425,9 +456,7 @@ def _run_memory_eval(
     import asyncio
 
     # Build configuration
-    parsed_categories = None
-    if categories:
-        parsed_categories = [int(c) for c in categories.split(",")]
+    parsed_categories = _parse_categories(categories)
 
     memory_config = MemoryConfig()
 
@@ -599,9 +628,7 @@ def _run_memory_eval_v2(
     import asyncio
 
     # Build configuration
-    parsed_categories = None
-    if categories:
-        parsed_categories = [int(c) for c in categories.split(",")]
+    parsed_categories = _parse_categories(categories)
 
     eval_config = MemoryEvalConfigV2(
         n_conversations=n_conversations,
@@ -690,6 +717,35 @@ def probes(recordings_dir: Path, json_output: Path | None) -> None:
     from headroom.evals.session_probes import render_report, run_probes
 
     report = run_probes(recordings_dir)
+    click.echo(render_report(report))
+    if json_output:
+        json_output.parent.mkdir(parents=True, exist_ok=True)
+        json_output.write_text(json_module.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        click.echo(f"\nWrote JSON report: {json_output}")
+
+
+@evals.command("adversarial")
+@click.option(
+    "--json-output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Optional machine-readable JSON report output.",
+)
+def adversarial(json_output: Path | None) -> None:
+    """Measure compressor robustness against embedded adversarial payloads.
+
+    \b
+    Offline and deterministic - no LLM, no API key, no model download.
+    Splices injection payloads (instruction overrides, fake system tags,
+    spoofed CCR retrieval markers, ...) into realistic tool outputs at
+    head/middle/tail, compresses each through ContentRouter, and reports
+    per payload class whether payloads survive compression more often
+    than benign content or suppress compression of their carrier.
+    """
+    import json as json_module
+
+    from headroom.evals.adversarial_grid import render_report, run_adversarial_grid
+
+    report = run_adversarial_grid()
     click.echo(render_report(report))
     if json_output:
         json_output.parent.mkdir(parents=True, exist_ok=True)
