@@ -18,8 +18,9 @@ def test_telemetry_list_json_reports_defaults(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     surfaces = {item["surface"]: item for item in json.loads(result.output)}
-    assert surfaces["anonymous_beacon"]["status"] == "on"
-    assert surfaces["anonymous_beacon"]["leaves_host_by_default"] is True
+    assert surfaces["anonymous_beacon"]["status"] == "off"
+    assert surfaces["anonymous_beacon"]["leaves_host_by_default"] is False
+    assert surfaces["anonymous_beacon"]["export"] == "None; removed anonymous service beacon"
     assert surfaces["prometheus"]["status"] == "on"
     assert surfaces["prometheus"]["includes_prompt_content"] is False
     assert surfaces["savings_tracker"]["observe"].endswith("proxy_savings.json")
