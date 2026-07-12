@@ -2005,7 +2005,29 @@ def _request_is_loopback(request: Request) -> bool:
         host_header = request.headers.get("host")
     except AttributeError:
         host_header = None
-    return is_loopback_host(client_host) and is_loopback_host_header(host_header)
+
+    # The Host-header gate is the DNS-rebinding defence and always applies.
+    if not is_loopback_host_header(host_header):
+        return False
+
+    # Genuine loopback peer (native run, or curl inside the container).
+    if is_loopback_host(client_host):
+        return True
+
+    # Containerized dashboards: when Headroom runs in a bridge-network
+    # container, a browser on the host reaches it via the container's
+    # gateway, so ``request.client.host`` is the gateway IP, not 127.0.0.1
+    # — and the per-request logs / upstream URLs get stripped even though
+    # the operator is local. Treat a peer inside an operator-configured
+    # trusted-gateway CIDR as loopback-equivalent. Opt-in and empty by
+    # default (HEADROOM_PROXY_TRUSTED_GATEWAY_CIDRS), so this is a no-op
+    # unless the operator explicitly allow-lists their container gateway.
+    from headroom.proxy.forwarded_headers import (
+        load_trusted_gateway_cidrs,
+        peer_is_trusted_gateway,
+    )
+
+    return peer_is_trusted_gateway(client_host, load_trusted_gateway_cidrs())
 
 
 _is_known_websocket_callback_failure = is_known_websocket_callback_failure
