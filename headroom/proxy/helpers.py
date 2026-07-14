@@ -54,6 +54,9 @@ from headroom.proxy.body_forwarding import (
 from headroom.proxy.body_forwarding import (
     prepare_outbound_body_bytes as prepare_outbound_body_bytes,  # noqa: F401 - compatibility export
 )
+from headroom.proxy.body_forwarding import (
+    serialize_body_canonical as serialize_body_canonical,  # noqa: F401 - compatibility export
+)
 from headroom.proxy.ccr_golden_policy import (
     create_fresh_ccr_tool_definition,
     replay_golden_ccr_tool_definition,
