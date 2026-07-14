@@ -747,6 +747,83 @@ def _responses_input_to_waste_messages(instructions: Any, input_data: Any) -> li
     return messages
 
 
+def _responses_input_to_learner_messages(
+    instructions: Any,
+    input_data: Any,
+) -> list[dict[str, Any]]:
+    """Normalize Responses input for ``TrafficLearner``.
+
+    The learner already understands Anthropic-style ``tool_use`` / ``tool_result``
+    blocks. Converting at the provider boundary keeps that extraction logic shared
+    without teaching the learner about every OpenAI transport shape.
+    """
+    messages: list[dict[str, Any]] = []
+    if isinstance(instructions, str) and instructions:
+        messages.append({"role": "system", "content": instructions})
+    if isinstance(input_data, str):
+        if input_data:
+            messages.append({"role": "user", "content": input_data})
+        return messages
+    if not isinstance(input_data, list):
+        return messages
+
+    for item in input_data:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "function_call":
+            arguments = item.get("arguments", {})
+            if isinstance(arguments, str):
+                try:
+                    parsed_arguments = json.loads(arguments)
+                except (json.JSONDecodeError, TypeError):
+                    parsed_arguments = {}
+                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {}
+            if not isinstance(arguments, dict):
+                arguments = {}
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": item.get("call_id", ""),
+                            "name": item.get("name", "unknown"),
+                            "input": arguments,
+                        }
+                    ],
+                }
+            )
+            continue
+        if item_type in _RESPONSES_OUTPUT_ITEM_TYPES:
+            output = item.get("output", "")
+            output_text = _responses_part_text(output)
+            if not output_text and output not in (None, ""):
+                output_text = json.dumps(output, ensure_ascii=False, default=str)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": item.get("call_id", ""),
+                            "content": output_text,
+                            "is_error": bool(item.get("is_error"))
+                            or item.get("status") in {"failed", "error", "incomplete"},
+                        }
+                    ],
+                }
+            )
+            continue
+        text = _responses_part_text(item.get("content"))
+        if text:
+            role = item.get("role")
+            messages.append(
+                {"role": role if isinstance(role, str) and role else "user", "content": text}
+            )
+    return messages
+
+
 def _has_headroom_retrieve_tool_responses(tools: Any) -> bool:
     """Return True when the Responses API tool list includes CCR retrieve.
 
@@ -1197,6 +1274,42 @@ class OpenAIHandlerMixin:
             cache.move_to_end(key)
             while len(cache) > _OPENAI_RESPONSES_UNIT_CACHE_MAX_ENTRIES:
                 cache.popitem(last=False)
+
+    async def _observe_openai_responses_traffic(
+        self,
+        body: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Feed one Responses HTTP request into the live traffic learner."""
+        traffic_learner = getattr(self, "traffic_learner", None)
+        if traffic_learner is None:
+            return
+        try:
+            memory_handler = getattr(self, "memory_handler", None)
+            if (
+                traffic_learner._backend is None
+                and memory_handler
+                and memory_handler.initialized
+                and memory_handler.backend
+            ):
+                traffic_learner.set_backend(memory_handler.backend)
+
+            learner_messages = _responses_input_to_learner_messages(
+                body.get("instructions"),
+                body.get("input", ""),
+            )
+            tool_results = traffic_learner.extract_tool_results_from_messages(learner_messages)
+            for tool_result in tool_results[-5:]:
+                await traffic_learner.on_tool_result(
+                    tool_name=tool_result["tool_name"],
+                    tool_input=tool_result["input"],
+                    tool_output=tool_result["output"],
+                    is_error=tool_result["is_error"],
+                )
+            await traffic_learner.on_messages(learner_messages)
+        except Exception as exc:
+            logger.debug("[%s] Traffic learner (responses): %s", request_id, exc)
 
     @staticmethod
     def _headroom_bypass_enabled(headers: Any) -> bool:
@@ -3890,6 +4003,11 @@ class OpenAIHandlerMixin:
         headers.pop("content-encoding", None)
         tags = extract_tags(headers)
         client = classify_client(headers)
+
+        # Learn from the original client payload before memory context or
+        # compression mutates it. This mirrors the Anthropic ingestion path.
+        await self._observe_openai_responses_traffic(body, request_id=request_id)
+
         # PR-A5 (P5-49): strip internal x-headroom-* from upstream-bound
         # headers AFTER `_extract_tags` reads them. Memory user-id reads
         # `request.headers` below.
