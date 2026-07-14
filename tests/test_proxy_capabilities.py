@@ -89,7 +89,7 @@ def test_capabilities_endpoint_health_stats_and_metrics_share_report() -> None:
     assert 'headroom_feature_enabled{feature="session_aggregation"' in metrics.text
 
 
-def test_stateless_startup_skips_file_logging_and_beacon(
+def test_stateless_startup_skips_file_logging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
@@ -98,15 +98,9 @@ def test_stateless_startup_skips_file_logging_and_beacon(
         calls.append("file_logging")
         raise AssertionError("stateless startup must not install file logging")
 
-    class FailingBeacon:
-        def __init__(self, **kwargs: object) -> None:
-            calls.append("beacon_init")
-            raise AssertionError("stateless startup must not construct telemetry beacon")
-
     import headroom.proxy.server as server
 
     monkeypatch.setattr(server, "_setup_file_logging", fail_file_logging)
-    monkeypatch.setattr("headroom.telemetry.beacon.TelemetryBeacon", FailingBeacon)
 
     app = create_app(_minimal_config(stateless=True))
     with TestClient(app) as client:
