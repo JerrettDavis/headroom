@@ -31,6 +31,7 @@ from headroom.proxy.compression_decision import CompressionDecision
 from headroom.proxy.forwarded_headers import resolve_client_ip
 from headroom.proxy.handlers._debug_dump import _debug_dump_mode, _redact_debug_value
 from headroom.proxy.helpers import extract_tags
+from headroom.proxy.image_isolation import run_image_compression_isolated
 from headroom.proxy.memory_decision import MemoryDecision
 from headroom.proxy.memory_query import MemoryQuery
 from headroom.proxy.outcome import RequestOutcome
@@ -1156,19 +1157,18 @@ class AnthropicHandlerMixin:
                 try:
                     compressor = _get_image_compressor()
                     if compressor and compressor.has_images(messages):
-                        # Offload CPU-bound image compression onto the bounded
-                        # executor (same as text compression); inline blocked the loop.
-                        messages = await self._run_compression_in_executor(
-                            lambda: compressor.compress(messages, provider="anthropic"),
+                        messages, image_result = await run_image_compression_isolated(
+                            messages,
+                            provider="anthropic",
                             timeout=COMPRESSION_TIMEOUT_SECONDS,
                         )
-                        body_mutation_tracker.mark_mutated("image_compression")
-                        if compressor.last_result:
+                        if image_result is not None:
+                            body_mutation_tracker.mark_mutated("image_compression")
                             logger.info(
-                                f"Image compression: {compressor.last_result.technique.value} "
-                                f"({compressor.last_result.savings_percent:.0f}% saved, "
-                                f"{compressor.last_result.original_tokens} -> "
-                                f"{compressor.last_result.compressed_tokens} tokens)"
+                                f"Image compression: {image_result['technique']} "
+                                f"({image_result['savings_percent']:.0f}% saved, "
+                                f"{image_result['original_tokens']} -> "
+                                f"{image_result['compressed_tokens']} tokens)"
                             )
                 except Exception as e:
                     # Image compression is best-effort — fail open on timeout/error and
@@ -1385,6 +1385,7 @@ class AnthropicHandlerMixin:
                                             else "deferred:dropped"
                                         ]
                                         timing = {}
+                                        waste_signals = None
 
                                     result = _DeferredCompressionResult()
                             else:
@@ -1568,6 +1569,14 @@ class AnthropicHandlerMixin:
                     logger.warning(f"[{request_id}] Optimization failed: {type(e).__name__}: {e}")
                     # Flag compression failure for observability
                     _compression_failed = True
+                    # Split timeout from other errors: a timeout means the
+                    # compression budget was too tight, not a code bug.
+                    reason = (
+                        "timeout"
+                        if isinstance(e, (asyncio.TimeoutError, TimeoutError))
+                        else "error"
+                    )
+                    self.metrics.record_compression_failed(reason)
 
             # Cache-safety (ALL modes): forward the previously-cached (compressed)
             # prefix byte-identical. The freeze path can emit the agent's ORIGINAL
@@ -3649,6 +3658,12 @@ class AnthropicHandlerMixin:
                 logger.warning(
                     f"[{request_id}] Optimization failed for batch request '{custom_id}': {e}"
                 )
+                # Same fail-open accounting as the single-message path: a
+                # timeout means the budget was too tight, not a code bug.
+                reason = (
+                    "timeout" if isinstance(e, (asyncio.TimeoutError, TimeoutError)) else "error"
+                )
+                self.metrics.record_compression_failed(reason)
                 # Pass through unchanged on failure
                 compressed_requests.append(batch_req)
                 total_optimized_tokens += original_tokens
