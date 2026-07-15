@@ -258,8 +258,10 @@ class TestAnthropicHandlerReportsL1Transform:
     ``x-headroom-transforms`` response header -- not just the helper's
     ``modified`` flag."""
 
-    def test_l1_label_reaches_response_header(self) -> None:
+    def test_l1_label_reaches_response_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from types import SimpleNamespace
+
+        monkeypatch.setenv("HEADROOM_TOOL_SCHEMA_COMPACTION", "1")
 
         with _make_proxy_client() as client:
             proxy = client.app.state.proxy
