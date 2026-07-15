@@ -275,6 +275,74 @@ def test_responses_tool_schema_compaction_requires_explicit_opt_in(
     assert "examples" not in tool["parameters"]["properties"]["path"]
 
 
+def _tool_search_payload() -> dict[str, Any]:
+    tools = [
+        {"type": "function", "name": name, "parameters": {"type": "object"}}
+        for name in ("bash", "read", "write", "edit", "grep", "glob")
+    ]
+    tools += [
+        {"type": "function", "name": f"slack_{idx}", "parameters": {"type": "object"}}
+        for idx in range(10)
+    ]
+    return {
+        "model": "gpt-5.5",
+        "tools": tools,
+        "input": [{"type": "message", "role": "user", "content": "hello"}],
+    }
+
+
+def test_responses_tool_search_deferral_is_off_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("HEADROOM_OPENAI_TOOL_SEARCH", raising=False)
+    monkeypatch.delenv("HEADROOM_OPENAI_TOOL_SEARCH_MODELS", raising=False)
+    monkeypatch.delenv("HEADROOM_TOOL_SCHEMA_COMPACTION", raising=False)
+    router = ContentRouter(ContentRouterConfig())
+    handler = _HandlerHarness(router)
+
+    updated, _modified, _saved, transforms, _reason, _before, _after, _attempted = (
+        handler._compress_openai_responses_payload(
+            _tool_search_payload(),
+            model="gpt-5.5",
+            request_id="hr_tool_search_default_off",
+        )
+    )
+
+    assert "openai:responses:tool_search_deferral" not in transforms
+    assert not any(tool.get("type") == "tool_search" for tool in updated["tools"])
+    assert not any(tool.get("defer_loading") for tool in updated["tools"])
+
+
+def test_responses_tool_search_deferral_requires_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEADROOM_OPENAI_TOOL_SEARCH", "1")
+    monkeypatch.delenv("HEADROOM_TOOL_SCHEMA_COMPACTION", raising=False)
+    router = ContentRouter(ContentRouterConfig())
+    handler = _HandlerHarness(router)
+
+    updated, _modified, _saved, transforms, _reason, _before, _after, _attempted = (
+        handler._compress_openai_responses_payload(
+            _tool_search_payload(),
+            model="gpt-5.5",
+            request_id="hr_tool_search_opt_in",
+        )
+    )
+
+    assert "openai:responses:tool_search_deferral" in transforms
+    assert updated["tools"][0] == {"type": "tool_search"}
+    assert (
+        next(tool for tool in updated["tools"] if tool.get("name") == "slack_0").get(
+            "defer_loading"
+        )
+        is True
+    )
+    assert (
+        next(tool for tool in updated["tools"] if tool.get("name") == "bash").get("defer_loading")
+        is None
+    )
+
+
 class _StubTokenizer:
     def count_text(self, text: str) -> int:
         return len(text.split())
