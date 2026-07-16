@@ -1727,6 +1727,11 @@ class OpenAIHandlerMixin:
     OPENAI_RESPONSES_ROUTER_MIN_BYTES = 512
     OPENAI_RESPONSES_OUTPUT_TYPES = _RESPONSES_OUTPUT_ITEM_TYPES
 
+    @staticmethod
+    def _openai_responses_batch_compression_enabled() -> bool:
+        value = os.environ.get("HEADROOM_OPENAI_RESPONSES_BATCH_COMPRESSION", "")
+        return value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
     def _openai_responses_unit_cache(self) -> tuple[Any, OrderedDict[str, Any]]:
         with _OPENAI_RESPONSES_UNIT_CACHE_INIT_LOCK:
             lock = getattr(self, "_openai_responses_unit_cache_lock", None)
@@ -2475,10 +2480,14 @@ class OpenAIHandlerMixin:
                 )
             else:
                 large_unit_indexes.append(unit_idx)
-        small_batches, small_batch_skipped = build_compression_batches(
-            small_batch_entries,
-            min_batch_bytes=self.OPENAI_RESPONSES_ROUTER_MIN_BYTES,
-        )
+        if self._openai_responses_batch_compression_enabled():
+            small_batches, small_batch_skipped = build_compression_batches(
+                small_batch_entries,
+                min_batch_bytes=self.OPENAI_RESPONSES_ROUTER_MIN_BYTES,
+            )
+        else:
+            small_batches = []
+            small_batch_skipped = small_batch_entries
         cache_misses: list[tuple[int, str, RoutedCompressionUnit]] = []
         cache_miss_followers: dict[str, list[int]] = {}
         for unit_idx in large_unit_indexes:
