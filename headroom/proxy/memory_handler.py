@@ -187,8 +187,7 @@ class MemoryHandler:
     - Native tool: Anthropic's memory_20250818 built-in tool (experimental)
     """
 
-    # Cosine similarity thresholds for dedup
-    DEDUP_AUTO_THRESHOLD = 0.92  # Auto-supersede (same fact, different wording)
+    # Cosine similarity threshold for dedup hints
     DEDUP_HINT_THRESHOLD = 0.75  # Suggest merge to LLM (related, possibly duplicate)
 
     def __init__(self, config: MemoryConfig, agent_type: str = "unknown") -> None:
@@ -549,7 +548,7 @@ class MemoryHandler:
         # Check which tools are already present
         existing_names: set[str] = set()
         for tool in tools:
-            name = tool.get("name") or tool.get("function", {}).get("name")
+            name = tool.get("name") or (tool.get("function") or {}).get("name")
             if name:
                 existing_names.add(name)
 
@@ -794,6 +793,7 @@ class MemoryHandler:
             # Both branches below render the same `i. [id] content` shape
             # so the format is stable regardless of whether a ranker is
             # in play.
+            selected_memory_ids: list[str] = []
             if ranker is not None:
                 from headroom.proxy.memory_ranker import MemoryCandidate
 
@@ -812,6 +812,8 @@ class MemoryHandler:
                 memory_lines = []
                 for i, candidate in enumerate(ranked, 1):
                     memory_id = candidate.id or "?"
+                    if candidate.id:
+                        selected_memory_ids.append(candidate.id)
                     memory_lines.append(f"{i}. [{memory_id}] {candidate.content}")
                     if candidate.related_entities:
                         entities_str = ", ".join(candidate.related_entities[:3])
@@ -837,6 +839,8 @@ class MemoryHandler:
                 memory_lines = []
                 for i, result in enumerate(filtered_results, 1):
                     memory_id = getattr(result.memory, "id", None) or "?"
+                    if memory_id != "?":
+                        selected_memory_ids.append(memory_id)
                     memory_lines.append(f"{i}. [{memory_id}] {result.memory.content}")
                     if hasattr(result, "related_entities") and result.related_entities:
                         entities_str = ", ".join(result.related_entities[:3])
@@ -881,6 +885,25 @@ your responses, not to drive new actions."""
         # per request. The budget bounds the output without touching
         # the input query (which stays full-fidelity per MemoryQuery).
         context = effective_budget.apply_to_text(context)
+
+        # Track only memories that survived ranking, entry limits, and the
+        # final text budget. Backends without access tracking keep working,
+        # and an audit write failure must never block the upstream request.
+        accessed_memory_ids = list(
+            dict.fromkeys(
+                memory_id for memory_id in selected_memory_ids if f"[{memory_id}]" in context
+            )
+        )
+        record_access = getattr(backend, "record_access", None)
+        if accessed_memory_ids and callable(record_access):
+            try:
+                await record_access(accessed_memory_ids)
+            except Exception as e:
+                logger.debug(
+                    "Memory: Failed to record passive retrieval access for %d memories: %s",
+                    len(accessed_memory_ids),
+                    e,
+                )
 
         logger.info(
             "event=memory_inject user=%s scope=%s count=%d chars=%d budget_tokens=%d",
@@ -1077,7 +1100,7 @@ your responses, not to drive new actions."""
         provider: str = "anthropic",
         request_context: RequestContext | None = None,
     ) -> str:
-        """Execute memory_save tool with provenance, dedup hints, and async background dedup."""
+        """Execute memory_save tool with provenance and dedup hints."""
         content = input_data.get("content", "")
         if not content:
             return json.dumps({"status": "error", "error": "content is required"})
@@ -1119,7 +1142,8 @@ your responses, not to drive new actions."""
             metadata=provenance_metadata,
         )
 
-        # Search for similar existing memories (for hints + async dedup)
+        # Search for similar existing memories so the caller can decide whether
+        # to merge them through the explicit memory_update path.
         similar_memories = []
         try:
             results = await backend.search_memories(
@@ -1156,12 +1180,6 @@ your responses, not to drive new actions."""
                 f"or ignore if these are distinct facts."
             )
 
-        # Async background dedup: auto-supersede obvious duplicates
-        if similar_memories:
-            asyncio.create_task(
-                self._background_dedup(memory.id, similar_memories, effective_user_id, backend)
-            )
-
         logger.info(
             "event=memory_save user=%s scope=%s agent=%s provider=%s similar=%d",
             effective_user_id,
@@ -1172,51 +1190,6 @@ your responses, not to drive new actions."""
         )
 
         return json.dumps(result)
-
-    async def _background_dedup(
-        self,
-        new_memory_id: str,
-        similar_results: list[Any],
-        user_id: str,
-        backend: Any | None = None,
-    ) -> None:
-        """Auto-supersede obvious duplicates in background (fire-and-forget).
-
-        If an existing memory has >0.92 cosine similarity to the new one,
-        mark the older one as superseded. This runs asynchronously and
-        never blocks the tool response.
-
-        ``backend`` defaults to the legacy ``self._backend`` so existing
-        non-routed callers keep working; routed callers pass the same
-        per-project backend they wrote to so dedup never crosses
-        workspaces.
-        """
-        target = backend if backend is not None else self._backend
-        if target is None:
-            return
-        try:
-            for result in similar_results:
-                if result.score < self.DEDUP_AUTO_THRESHOLD:
-                    continue
-                if result.memory.id == new_memory_id:
-                    continue
-
-                old = result.memory
-                # Skip if already superseded
-                if old.metadata.get("superseded_by"):
-                    continue
-
-                # Mark old memory as superseded by deleting it
-                # (update_memory creates a new version — for dedup we just remove the duplicate)
-                if hasattr(target, "delete_memory"):
-                    await target.delete_memory(old.id)
-                    logger.info(
-                        f"Memory dedup: removed '{old.content[:50]}' "
-                        f"(superseded by {new_memory_id}, {result.score:.2f} cosine, "
-                        f"agent={old.metadata.get('source_agent', '?')})"
-                    )
-        except Exception as e:
-            logger.warning(f"Memory background dedup failed: {e}")
 
     async def _execute_search(
         self,

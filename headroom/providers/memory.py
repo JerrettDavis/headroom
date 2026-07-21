@@ -100,8 +100,8 @@ def memory_tool_name(tool_call: dict[str, Any], provider: str) -> str:
     if provider == "anthropic":
         return str(tool_call.get("name", ""))
     if provider == "openai":
-        return str(tool_call.get("name") or tool_call.get("function", {}).get("name", ""))
-    return str(tool_call.get("name", "") or tool_call.get("function", {}).get("name", ""))
+        return str(tool_call.get("name") or (tool_call.get("function") or {}).get("name", ""))
+    return str(tool_call.get("name", "") or (tool_call.get("function") or {}).get("name", ""))
 
 
 def memory_tool_id(tool_call: dict[str, Any], provider: str) -> str:
@@ -117,11 +117,13 @@ def memory_tool_input(tool_call: dict[str, Any], provider: str) -> dict[str, Any
         result = tool_call.get("input", {})
         return dict(result) if isinstance(result, dict) else {}
 
-    args_str = tool_call.get("arguments") or tool_call.get("function", {}).get("arguments") or "{}"
+    args_str = (
+        tool_call.get("arguments") or (tool_call.get("function") or {}).get("arguments") or "{}"
+    )
     try:
         parsed = json.loads(args_str)
         return dict(parsed) if isinstance(parsed, dict) else {}
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         return {}
 
 
