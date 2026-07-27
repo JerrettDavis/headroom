@@ -172,6 +172,44 @@ def test_install_apply_starts_service_supervisor(monkeypatch) -> None:
     assert calls == ["save", "start_service", "apply", "save"]
 
 
+def test_install_apply_announces_windows_service_fallback(monkeypatch) -> None:
+    runner = CliRunner()
+    calls: list[str] = []
+
+    class Manifest:
+        profile = "default"
+        preset = "persistent-task"
+        runtime_kind = "python"
+        supervisor_kind = "task"
+        scope = "user"
+        health_url = "http://127.0.0.1:8787/readyz"
+        mutations: list[object] = []
+        targets: list[str] = []
+        artifacts: list[object] = []
+
+    monkeypatch.setattr("headroom.cli.install._is_windows", lambda: True)
+    monkeypatch.setattr("headroom.cli.install.build_manifest", lambda **_: Manifest())
+    monkeypatch.setattr("headroom.cli.install.load_manifest", lambda profile: None)
+    monkeypatch.setattr("headroom.cli.install.install_supervisor", lambda deployment: [])
+    monkeypatch.setattr("headroom.cli.install.save_manifest", lambda deployment: None)
+    monkeypatch.setattr("headroom.cli.install.apply_mutations", lambda deployment: [])
+    monkeypatch.setattr("headroom.cli.install.probe_ready", lambda url: False)
+    monkeypatch.setattr("headroom.cli.install.runtime_status", lambda manifest: "stopped")
+    monkeypatch.setattr(
+        "headroom.cli.install.start_detached_agent", lambda profile: calls.append("start_agent")
+    )
+    monkeypatch.setattr(
+        "headroom.cli.install.wait_ready", lambda deployment, timeout_seconds=45: True
+    )
+
+    result = runner.invoke(main, ["install", "apply", "--preset", "persistent-service"])
+
+    assert result.exit_code == 0, result.output
+    assert "Falling back to persistent-task with Task Scheduler" in result.output
+    assert "sc.exe" not in result.output
+    assert calls == ["start_agent"]
+
+
 def test_install_apply_forwards_no_http2_to_build_manifest(monkeypatch) -> None:
     runner = CliRunner()
     captured: dict[str, object] = {}

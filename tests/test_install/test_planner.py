@@ -75,6 +75,30 @@ def test_build_manifest_python_runtime_keeps_explicit_memory_db_path() -> None:
     assert "--memory-db-path" in manifest.proxy_args
 
 
+def test_build_manifest_falls_back_from_windows_service_to_task(monkeypatch) -> None:
+    monkeypatch.setattr("headroom.install.planner.sys.platform", "win32")
+
+    manifest = build_manifest(
+        profile="default",
+        preset=InstallPreset.PERSISTENT_SERVICE.value,
+        runtime_kind="python",
+        scope="user",
+        provider_mode="manual",
+        targets=["claude"],
+        port=8787,
+        backend="anthropic",
+        anyllm_provider=None,
+        region=None,
+        proxy_mode="token",
+        memory_enabled=False,
+        telemetry_enabled=False,
+        image="ghcr.io/headroomlabs-ai/headroom:latest",
+    )
+
+    assert manifest.preset == InstallPreset.PERSISTENT_TASK.value
+    assert manifest.supervisor_kind == "task"
+
+
 def test_build_manifest_uses_provider_slice_env_builders_for_all_supported_targets() -> None:
     manifest = build_manifest(
         profile="default",

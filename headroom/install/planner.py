@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from collections.abc import Iterable
 
 import click
@@ -142,9 +143,19 @@ def build_manifest(
 
     normalized_profile = validate_profile_name(profile)
 
-    if preset == InstallPreset.PERSISTENT_SERVICE.value:
+    # A Windows service must implement the Service Control Manager protocol.
+    # The Python runner is an ordinary console process, so registering it with
+    # ``sc.exe create`` always fails at start with SCM error 1053.  Task
+    # Scheduler can run the same runner safely and already provides startup
+    # plus periodic health recovery, so make it the effective preset on
+    # Windows instead of creating a service that can never start (#2552).
+    effective_preset = preset
+    if sys.platform.startswith("win") and preset == InstallPreset.PERSISTENT_SERVICE.value:
+        effective_preset = InstallPreset.PERSISTENT_TASK.value
+
+    if effective_preset == InstallPreset.PERSISTENT_SERVICE.value:
         supervisor_kind = SupervisorKind.SERVICE.value
-    elif preset == InstallPreset.PERSISTENT_TASK.value:
+    elif effective_preset == InstallPreset.PERSISTENT_TASK.value:
         supervisor_kind = SupervisorKind.TASK.value
     else:
         supervisor_kind = SupervisorKind.NONE.value
@@ -234,7 +245,7 @@ def build_manifest(
     container_name = f"headroom-{normalized_profile}"
     return DeploymentManifest(
         profile=normalized_profile,
-        preset=preset,
+        preset=effective_preset,
         runtime_kind=runtime_kind,
         supervisor_kind=supervisor_kind,
         scope=scope,
