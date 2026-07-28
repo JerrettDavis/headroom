@@ -565,8 +565,17 @@ class StreamingMixin:
         }
         events.append(f"event: message_start\ndata: {json.dumps(msg_start)}\n\n".encode())
 
-        # Content blocks
-        for idx, block in enumerate(response.get("content", [])):
+        # Content blocks. `content` is provider/reconstruction-controlled, so a
+        # present-but-null value or a non-list would crash `enumerate`, and a
+        # non-dict element would crash `block.get(...)`. Guard both, matching the
+        # sibling `_record_ccr_feedback_from_response` below. This is reached from
+        # a call site (anthropic.py buffered CCR path) that only catches
+        # ValueError, so an unguarded TypeError/AttributeError would 500 the
+        # streamed request.
+        content = response.get("content")
+        for idx, block in enumerate(content if isinstance(content, list) else []):
+            if not isinstance(block, dict):
+                continue
             # content_block_start
             if block.get("type") == "text":
                 block_start = {
@@ -680,10 +689,13 @@ class StreamingMixin:
             msg_delta_payload["stop_reason"] = response["stop_reason"]
         if "stop_details" in response:
             msg_delta_payload["stop_details"] = response["stop_details"]
+        usage = response.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
         msg_delta = {
             "type": "message_delta",
             "delta": msg_delta_payload,
-            "usage": {"output_tokens": response.get("usage", {}).get("output_tokens", 0)},
+            "usage": {"output_tokens": usage.get("output_tokens", 0)},
         }
         events.append(f"event: message_delta\ndata: {json.dumps(msg_delta)}\n\n".encode())
 
