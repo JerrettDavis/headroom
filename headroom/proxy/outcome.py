@@ -30,6 +30,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from headroom.proxy.tool_schema_savings_policy import (
+    headline_tokens_saved,
+    tool_schema_saved_from_tags,
+)
+
 logger = logging.getLogger("headroom.proxy")
 
 
@@ -314,8 +319,11 @@ class RequestOutcome:
 async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
     """Single funnel for per-request bookkeeping. The contract.
 
-    Owns the four downstream effects in canonical order:
+    Owns the downstream effects in canonical order:
 
+      0. ``telemetry.session.record_outcome(...)`` — anonymous session beacon
+         (opt-in, no-op unless ``HEADROOM_TELEMETRY`` is on). Runs ahead of the
+         5xx guard below so session error rates see upstream failures.
       1. ``handler.metrics.record_request(...)`` — Prometheus / SavingsTracker
       2. ``handler.cost_tracker.record_tokens(...)`` — cost dashboard
          (skipped when cost_tracker is None, i.e. ``--no-cost``)
@@ -324,8 +332,8 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
       4. structured PERF log line — consumed by ``headroom perf``
 
     A failure outcome (``status_code >= 500``, e.g. a 529 surfaced after retry
-    exhaustion) short-circuits before these four effects: it records a failed
-    request and returns, so an upstream failure cannot feed the success stats.
+    exhaustion) short-circuits before effects 1-4: it records a failed request
+    and returns, so an upstream failure cannot feed the success stats.
 
     Takes the handler as a free argument rather than ``self`` so this
     function is callable from:
@@ -343,6 +351,7 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
     from headroom.proxy.cost import _summarize_transforms
     from headroom.proxy.models import RequestLog
     from headroom.proxy.project_context import get_current_project
+    from headroom.telemetry.session import record_outcome
 
     # GitHub Copilot: requests routed to the Copilot API travel on the OpenAI or
     # Anthropic wire, so the handlers stamp the wire provider. Relabel to
@@ -356,6 +365,21 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
         import dataclasses
 
         outcome = dataclasses.replace(outcome, provider="copilot")
+
+    # 0. Anonymous session beacon. Opt-in and a no-op unless HEADROOM_TELEMETRY
+    #    is explicitly on, in which case it folds this outcome into an in-memory
+    #    per-session aggregate and POSTs one content-free event when the session
+    #    goes idle (off-thread — see telemetry.session.post_session_event).
+    #
+    #    Placed before the 5xx short-circuit, for the same reason the Copilot
+    #    relabel above is: a session's failure count has to see upstream
+    #    failures, and per-session error rate is exactly the signal that shows a
+    #    provider going flaky for real users. Everything below this point is
+    #    success-only bookkeeping.
+    #
+    #    Synchronous but allocation-light, and swallows its own exceptions — the
+    #    beacon must never add latency to, or take down, the request path.
+    record_outcome(outcome)
 
     # Upstream failure (>= 500, e.g. a 529 Overloaded surfaced after retry
     # exhaustion) must not feed the savings/cost/log success stats; that would
@@ -391,10 +415,7 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
     # Tool-schema savings (deferral + turn-hook tool shrink) live in per-request
     # tags and never move tok_before/after; aggregate them into Metrics so the
     # session summary / cost summary / all-layers total can surface the layer.
-    _otags = outcome.tags or {}
-    tool_search_saved = int(_otags.get("tool_search_deferred_tokens", 0) or 0) + int(
-        _otags.get("turn_hook_tools_saved_tokens", 0) or 0
-    )
+    tool_search_saved = tool_schema_saved_from_tags(outcome.tags or {})
 
     # 1. Prometheus / SavingsTracker.
     await handler.metrics.record_request(
@@ -479,21 +500,20 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
     #    line unchanged, and gives ``headroom perf --client X``
     #    parsers a clean key to filter on.
     client_part = f" client={outcome.client}" if outcome.client else ""
-    # Tool-schema savings are tracked separately from message compression: tool
-    # deferral (defer_loading) and turn-hook tool shrink don't move tok_before/after
-    # (those count messages only), so a tool-heavy turn shows tok_saved=0 while
-    # genuinely saving thousands of tool-schema tokens. Surface it as its own field
-    # so `headroom perf` / log readers see the whole picture.
-    _tags = outcome.tags or {}
-    tool_saved = int(_tags.get("tool_search_deferred_tokens", 0) or 0) + int(
-        _tags.get("turn_hook_tools_saved_tokens", 0) or 0
-    )
+    # Tool-schema DEFERRAL savings can't move tok_before/after (those count messages
+    # only), so a tool-heavy turn shows tok_saved=0 while genuinely saving thousands of
+    # tool-definition tokens. `tool_saved` carries that component and `total_saved` is
+    # the sum every user-facing surface reports — see tool_schema_savings_policy for why
+    # compaction is already inside tok_saved and must not be added twice.
+    tool_saved = tool_schema_saved_from_tags(outcome.tags or {})
+    total_saved = headline_tokens_saved(outcome.tokens_saved, outcome.tags or {})
     logger.info(
         f"[{outcome.request_id}] PERF "
         f"model={outcome.model} msgs={outcome.num_messages} "
         f"tok_before={outcome.original_tokens} tok_after={outcome.optimized_tokens} "
         f"tok_saved={outcome.tokens_saved} "
         f"tool_saved={tool_saved} "
+        f"total_saved={total_saved} "
         f"cache_read={outcome.cache_read_tokens} cache_write={outcome.cache_write_tokens} "
         f"cache_hit_pct={outcome.cache_hit_pct} "
         f"opt_ms={outcome.overhead_ms:.0f} "

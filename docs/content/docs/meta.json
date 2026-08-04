@@ -37,6 +37,7 @@
     "litellm",
     "claude-code-vertex",
     "claude-code-azure-foundry",
+    "vscode-copilot",
     "opencode",
     "grok-build",
     "mcp",
