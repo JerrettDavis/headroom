@@ -321,7 +321,11 @@ class HeadroomOtelMetrics:
         """
 
         if self._meter_provider is None:
+            if version is None:
+                return metrics.get_meter(name)
             return metrics.get_meter(name, version)
+        if version is None:
+            return self._meter_provider.get_meter(name)
         return self._meter_provider.get_meter(name, version)
 
     @staticmethod
