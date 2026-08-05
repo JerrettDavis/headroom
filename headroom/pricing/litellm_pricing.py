@@ -212,6 +212,28 @@ def get_model_pricing(model: str) -> LiteLLMModelPricing | None:
     )
 
 
+def pricing_per_1m(model: str) -> tuple[float, float] | None:
+    """``(input, output)`` USD per 1M tokens from LiteLLM, or ``None``.
+
+    The tuple shape providers already use for their own tables, so a provider can
+    prefer this over a hand-maintained copy with a single call. ``None`` means
+    "LiteLLM can't answer" — either it isn't installed (the dependency is gated
+    ``python_version < '3.14'``) or it doesn't know the model — which is the
+    provider's cue to fall back.
+
+    A found-but-zero price is returned as ``0.0`` rather than treated as missing:
+    some models genuinely are free, and ``savings_ledger`` already made this call
+    (see its note on "a legitimate 0.0 for genuinely free (0-priced) models").
+    """
+    pricing = get_model_pricing(model)
+    if pricing is None:
+        return None
+    # LiteLLM stores cost per token, so the x1e6 conversion leaves float noise
+    # ($0.4/1M arrives as 0.39999999999999997). Round at this boundary: 6 places
+    # is finer than any published rate and keeps the value printable.
+    return (round(pricing.input_cost_per_1m, 6), round(pricing.output_cost_per_1m, 6))
+
+
 def estimate_cost(
     model: str,
     input_tokens: int = 0,

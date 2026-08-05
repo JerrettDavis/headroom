@@ -164,6 +164,14 @@ def get_encoding_for_model(model: str) -> str:
     Returns:
         Encoding name (e.g., 'o200k_base', 'cl100k_base').
     """
+    # Case-insensitive: TokenizerRegistry lowercases only its *cache key*, then
+    # constructs the counter from the caller's original string. An uppercase
+    # deployment name ("GPT-4o", routine on Azure) therefore arrived here
+    # verbatim, matched no prefix, and silently took DEFAULT_ENCODING -- so the
+    # encoding a model got depended on the casing of whichever request warmed
+    # the cache first, and flipped across restarts.
+    model = model.lower()
+
     # Direct lookup
     if model in MODEL_TO_ENCODING:
         return MODEL_TO_ENCODING[model]
@@ -180,6 +188,9 @@ def get_encoding_for_model(model: str) -> str:
         # which they would otherwise match and be mis-encoded as cl100k_base.
         ("gpt-4.1", "o200k_base"),
         ("gpt-4.5", "o200k_base"),
+        # gpt-5 uses o200k_base. Without this it fell through to the
+        # cl100k_base default, over-counting CJK by ~33%.
+        ("gpt-5", "o200k_base"),
         ("gpt-4-turbo", "cl100k_base"),
         ("gpt-4", "cl100k_base"),
         ("gpt-3.5", "cl100k_base"),
