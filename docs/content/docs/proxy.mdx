@@ -291,7 +291,7 @@ Rewrite the upstream model per request — for example, send small, tool-free ca
 | `--telemetry` / `HEADROOM_TELEMETRY` | off | **Local-only** usage stats for your own `/stats`, `/metrics`, and dashboard. Nothing leaves the machine. |
 | `--log-file` / `HEADROOM_LOG_FILE` | none | JSONL request/response log. |
 | `--log-messages` | `false` | Include full message bodies in the log (may contain sensitive data). |
-| `HEADROOM_OTEL_METRICS_ENABLED` | `false` | Export OpenTelemetry metrics (`HEADROOM_OTEL_METRICS_ENDPOINT`, …). |
+| `HEADROOM_OTEL_METRICS_ENABLED` | `false` | Export OpenTelemetry metrics (`HEADROOM_OTEL_METRICS_ENDPOINT`, …). See [OTLP export](/docs/metrics#opentelemetry-otlp-export). |
 | `HEADROOM_LANGFUSE_ENABLED` | `false` | Emit Langfuse traces (`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`). |
 
 See [Metrics](/docs/metrics) for the Prometheus and Grafana setup.
