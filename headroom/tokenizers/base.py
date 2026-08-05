@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -359,3 +360,39 @@ class BaseTokenizer(ABC):
             NotImplementedError: If decoding is not supported.
         """
         raise NotImplementedError(f"{self.__class__.__name__} does not support decoding")
+
+
+class _DelegatingBlockCounter(BaseTokenizer):
+    """Adapter exposing :meth:`BaseTokenizer._count_content_parts` to non-subclasses.
+
+    The provider token counters in ``headroom/providers/`` are not
+    ``BaseTokenizer`` subclasses, and each grew its own shortened content-block
+    walker that handled only the shapes its provider was expected to send. The
+    result was that every one of them priced most modern blocks at ~0: measured
+    on a 6,800-char block, ``OpenAITokenCounter`` returned 8 tokens for
+    ``tool_result``/``thinking``/``document``/``mcp_tool_result`` and — its own
+    Responses shapes — ``output_text``/``refusal``; ``AnthropicTokenCounter``
+    returned 7 for ``thinking``/``document``, which are Anthropic's own.
+
+    Rather than add a fifth partial walker, this lets them borrow the audited one.
+    It is image-safe (base64 blobs get a pixel-based estimate instead of being
+    serialized and priced as text) and bounds oversized blobs, which a naive
+    ``count_text(str(block))`` catch-all does not.
+    """
+
+    __slots__ = ("_count_text_fn",)
+
+    def __init__(self, count_text_fn: Callable[[str], int]) -> None:
+        self._count_text_fn = count_text_fn
+
+    def count_text(self, text: str) -> int:
+        return self._count_text_fn(text)
+
+
+def count_content_blocks(parts: list[Any], count_text_fn: Callable[[str], int]) -> int:
+    """Count a multi-part content list using *count_text_fn* for text.
+
+    Shared entry point for provider counters. See
+    :class:`_DelegatingBlockCounter` for why this exists.
+    """
+    return _DelegatingBlockCounter(count_text_fn)._count_content_parts(parts)

@@ -328,13 +328,36 @@ class _Session:
                 # Provider prompt cache participation. Headroom freezes prefixes
                 # to protect this, so it is the other side of eligible_pct.
                 "cache_read_pct": _pct(self.cache_read_tokens, self.original_tokens),
-                # What fraction of wall-clock did Headroom itself add?
+                # Headroom's share of REQUEST time: sum(overhead) / sum(latency),
+                # i.e. a latency-weighted average across turns.
+                #
+                # NOT a fraction of wall-clock, which is what this comment used to
+                # claim. Both terms are sums over turns, and turns run
+                # concurrently (parallel tool calls, subagents, several clients on
+                # one proxy), so each sum can exceed the session's elapsed time —
+                # observed at 1.84x on a 1393-turn session. Dividing one
+                # over-counted sum by another still yields a meaningful per-request
+                # share, but it says nothing about how much longer the session took.
+                # For that, compare `overhead_ms_per_turn` against
+                # `session.duration_s / turns`.
                 "overhead_pct": _pct(self.overhead_ms, self.latency_ms),
             },
             "compression": {
                 "transforms": dict(self.transforms),
                 "overhead_ms_total": round(self.overhead_ms, 1),
+                # Sum of per-request durations, NOT elapsed time: concurrent turns
+                # make this exceed `session.duration_s`. Kept under the original
+                # name for schema-v1 consumers; read the per-turn values below for
+                # anything comparable across sessions.
                 "latency_ms_total": round(self.latency_ms, 1),
+                # Unambiguous under concurrency: a mean per request, independent of
+                # how many were in flight. This is the pair to reason about.
+                "overhead_ms_per_turn": round(self.overhead_ms / self.turns, 1)
+                if self.turns
+                else 0.0,
+                "latency_ms_per_turn": round(self.latency_ms / self.turns, 1)
+                if self.turns
+                else 0.0,
                 "passthrough_turns": self.passthrough_turns,
                 # Served from Headroom's own response cache — the provider was
                 # never called at all. 100% saving on those turns.
@@ -459,7 +482,12 @@ def _fold(sess: _Session, outcome: Any, now: float, source: str = "proxy") -> No
     sess.sources[source] = sess.sources.get(source, 0) + 1
     sess.original_tokens += int(get("original_tokens") or 0)
     sess.attempted_tokens += int(get("attempted_input_tokens") or 0)
-    sess.input_tokens += int(get("optimized_tokens") or 0)
+    # Billed/volume figure, so prefer the provider's own count and fall back to
+    # the local one. It sits beside output/cache_read/cache_write/uncached, which
+    # are all provider-reported, so making it local would put one local number in
+    # a dict of provider numbers — and `tokens.input` is what a reader sums the
+    # cache buckets against.
+    sess.input_tokens += int(get("provider_input_tokens") or 0) or int(get("optimized_tokens") or 0)
     sess.output_tokens += int(get("output_tokens") or 0)
     sess.tokens_saved += int(get("tokens_saved") or 0)
     sess.cache_read_tokens += int(get("cache_read_tokens") or 0)

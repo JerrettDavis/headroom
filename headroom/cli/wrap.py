@@ -4,6 +4,7 @@ Usage:
     headroom wrap claude                    # Start proxy + claude
     headroom wrap copilot -- --model ...    # Start proxy + launch GitHub Copilot CLI
     headroom wrap vscode                    # Transparently proxy VS Code Copilot
+    headroom wrap vscode-claude             # Transparently proxy VS Code Claude Code
     headroom wrap codex                     # Start proxy + OpenAI Codex CLI
     headroom wrap aider                     # Start proxy + aider
     headroom wrap openclaude                # Start proxy + OpenClaude
@@ -73,11 +74,15 @@ from headroom.providers.claude import (
     REMOTE_CONTROL_BASE_URL_ENV,
     TOOL_SEARCH_DEFAULT,
     TOOL_SEARCH_ENV,
+    claude_user_settings_path,
+    configure_vscode_claude_settings,
     detect_claude_code_version,
     remote_control_applies_to_auth,
     remote_control_gate_active,
     remote_control_gate_message,
     remote_control_sibling_gate_note,
+    remove_vscode_claude_settings,
+    vscode_claude_proxy_url,
 )
 from headroom.providers.claude import (
     proxy_base_url as _claude_proxy_base_url,
@@ -2726,6 +2731,12 @@ def _run_proxy_only_watcher(
 
     signal.signal(signal.SIGINT, _signal_shutdown)
     signal.signal(signal.SIGTERM, _signal_shutdown)
+    # Windows exposes Ctrl+Break as SIGBREAK rather than SIGINT. Test runners,
+    # IDE terminals, and process supervisors commonly use Ctrl+Break to target
+    # a newly created process group, so route it through the same graceful
+    # cleanup path as an interactive Ctrl+C.
+    if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _signal_shutdown)
 
     try:
         _print_wrap_banner(agent_label)
@@ -3935,15 +3946,28 @@ def _make_cleanup(proxy_proc_holder: list, port: int | list[int] = 8787) -> Any:
         p = port[0] if isinstance(port, list) else port
         _unregister_proxy_client(p)
         proc = proxy_proc_holder[0] if proxy_proc_holder else None
-        if proc and proc.poll() is None:
+        if proc:
             if _other_clients_exist():
                 # Other clients still using the proxy — leave it running.
                 return
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            # On Windows the proxy launcher can exit while its detached
+            # serving child remains alive (the native runtime uses a child
+            # process).  The detachment is intentional so an ungraceful
+            # terminal close cannot disrupt other wrappers, but a graceful
+            # Ctrl+C from the last wrapper must still stop the listener.
+            if sys.platform == "win32" and _check_proxy(p):
+                stop_status = _stop_local_proxy_for_unwrap(p)
+                if stop_status not in {"stopped", "not_running"}:
+                    click.echo(
+                        f"  Warning: proxy on port {p} remained running "
+                        f"after shutdown ({stop_status})."
+                    )
 
     return cleanup
 
@@ -4250,6 +4274,7 @@ def wrap(ctx: click.Context) -> None:
         headroom wrap codex               # OpenAI Codex CLI
         headroom wrap copilot -- --model claude-sonnet-4-20250514
         headroom wrap vscode             # VS Code Copilot (preserves model picker)
+        headroom wrap vscode-claude      # VS Code Claude Code extension
         headroom wrap aider               # Aider
         headroom wrap openclaude          # OpenClaude
         headroom wrap vibe                # Mistral Vibe
@@ -5211,6 +5236,86 @@ def unwrap_vscode_copilot(settings_file: Path | None) -> None:
         click.echo(f"Removed Headroom Copilot proxy settings from {target_settings}")
     else:
         click.echo(f"No Headroom Copilot proxy settings found in {target_settings}")
+
+
+# =============================================================================
+# Claude Code for VS Code
+# =============================================================================
+
+
+@wrap.command("vscode-claude")
+@click.option("--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port")
+@click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
+@click.option(
+    "--settings-file",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Override Claude Code user settings.json path",
+)
+@click.option(
+    "--configure/--no-configure",
+    default=True,
+    help="Safely add/update Claude Code's proxy environment settings",
+)
+def vscode_claude(
+    port: int,
+    memory: bool,
+    settings_file: Path | None,
+    configure: bool,
+) -> None:
+    """Route VS Code's official Claude Code extension through Headroom.
+
+    Run this from your project, reload VS Code after first setup, and keep this
+    command running while using Claude Code. Authentication and model selection
+    remain unchanged. Run `headroom unwrap vscode-claude` to restore settings.
+    """
+    target_settings = settings_file or claude_user_settings_path()
+
+    def _print_setup(actual_port: int) -> None:
+        proxy_url = vscode_claude_proxy_url(actual_port, _project_name_from_cwd())
+        if configure:
+            action = configure_vscode_claude_settings(target_settings, proxy_url)
+            click.echo(f"  VS Code Claude Code proxy settings {action}: {target_settings}")
+            click.echo("  Next: Reload VS Code, then use the Claude Code panel.")
+            click.echo("  Keep this command running. Press Ctrl+C to stop the proxy.")
+            click.echo("  Authentication and the selected Claude model are preserved.")
+            click.echo("  Undo later with: headroom unwrap vscode-claude")
+            click.echo("  Guide: https://headroom-docs.vercel.app/docs/vscode-claude-code")
+            return
+        click.echo(f"  Add these values under 'env' in {target_settings}:")
+        click.echo(f'  "ANTHROPIC_BASE_URL": "{proxy_url}",')
+        click.echo(f'  "{_TOOL_SEARCH_ENV}": "{_TOOL_SEARCH_DEFAULT}"')
+
+    _run_proxy_only_watcher(
+        agent_label="VS CODE CLAUDE",
+        port=port,
+        no_proxy=False,
+        learn=False,
+        memory=memory,
+        agent_type="claude",
+        print_setup_lines=_print_setup,
+    )
+
+
+@unwrap.command("vscode-claude")
+@click.option(
+    "--settings-file",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Override Claude Code user settings.json path",
+)
+def unwrap_vscode_claude(settings_file: Path | None) -> None:
+    """Restore settings saved by `headroom wrap vscode-claude`.
+
+    Reload the VS Code window afterward. If setup used --settings-file, pass the
+    same path here.
+    """
+    target_settings = settings_file or claude_user_settings_path()
+    if remove_vscode_claude_settings(target_settings):
+        click.echo(f"Restored Claude Code settings in {target_settings}")
+        click.echo("Reload the VS Code window to apply the restored settings.")
+    else:
+        click.echo(f"No Headroom VS Code Claude settings found for {target_settings}")
 
 
 # =============================================================================

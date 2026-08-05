@@ -809,6 +809,7 @@ class CostTracker:
         cache_write_1h_tokens: int = 0,
         uncached_tokens: int = 0,
         output_tokens: int = 0,
+        cache_inferred: bool = False,
     ):
         """Record token counts per model and accumulate request cost for budget enforcement.
 
@@ -820,6 +821,12 @@ class CostTracker:
             cache_write_tokens: Cache write tokens from API response usage.
             uncached_tokens: Non-cached input tokens from API response usage.
             output_tokens: Output tokens from API response usage.
+            cache_inferred: True when ``cache_write_tokens`` was DERIVED from the
+                uncached portion rather than reported by the provider (OpenAI
+                exposes no write counter). Such a value is the same tokens as
+                ``uncached_tokens``, so it is excluded from the billed prompt
+                total and from the write premium. Defaults False, which preserves
+                behaviour for providers that report disjoint buckets.
         """
         # Post-guard invariant (all providers): Headroom never forwards a request
         # larger than the original (handlers revert any inflation before sending),
@@ -864,8 +871,27 @@ class CostTracker:
         # record is stamped ``estimated`` and warned about once per model (#2713).
         # The fallback behaviour itself is unchanged — the estimate is now
         # labelled rather than indistinguishable from provider-reported usage.
+        # ``litellm.cost_per_token`` wants the TOTAL prompt in ``prompt_tokens``:
+        # measured, it charges
+        #     (prompt - cache_read - cache_creation) * input_rate
+        #   + cache_read * read_rate
+        #   + cache_creation * write_rate
+        # Passing only the uncached slice therefore drives the input term
+        # NEGATIVE once anything was cached, and ``estimate_cost`` returns None on
+        # a non-positive total — so no CostEntry was appended and ``check_budget()``
+        # saw $0. Every cache-warm request, i.e. the normal case in an agent
+        # session, was booking zero spend and the budget could never trip.
+        # Measured before this fix, 100k prompt with 80k cached:
+        #   gpt-5 $-0.065, gpt-4o-mini $-0.003, claude-sonnet-4-5 $-0.156.
+        #
+        # An INFERRED cache-write (OpenAI exposes no write counter, so the
+        # uncached portion is used as a write proxy) is the SAME tokens as
+        # ``uncached_tokens``. Adding it to the total would double-count the
+        # prompt, and charging it at the write premium would invent a cost OpenAI
+        # does not have — so it is excluded from both.
+        effective_cache_write = 0 if cache_inferred else cache_write_tokens
         basis = COST_BASIS_MEASURED
-        input_tokens = uncached_tokens
+        input_tokens = uncached_tokens + cache_read_tokens + effective_cache_write
         if not (uncached_tokens or cache_read_tokens or cache_write_tokens):
             input_tokens = tokens_sent
             basis = COST_BASIS_ESTIMATED
@@ -875,7 +901,7 @@ class CostTracker:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_read_tokens=cache_read_tokens,
-            cache_write_tokens=cache_write_tokens,
+            cache_write_tokens=effective_cache_write,
         )
         if cost is not None:
             self._costs.append(CostEntry(datetime.now(), cost, basis))
