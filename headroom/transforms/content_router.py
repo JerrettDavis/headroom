@@ -57,6 +57,7 @@ from ..config import (
     RelevanceScorerConfig,
     TransformResult,
     is_tool_excluded,
+    unwrap_tool_call_name,
 )
 from ..parser import CCR_RETRIEVAL_MARKER_RE
 from ..tokenizer import Tokenizer
@@ -4399,6 +4400,10 @@ class ContentRouter(Transform):
                     tc_id = tc.get("id", "")
                     fn = tc.get("function", {})
                     name = fn.get("name", "")
+                    if name:
+                        # Hermes deferred tools arrive wrapped as `tool_call`
+                        # with the real name inside the arguments payload.
+                        name = unwrap_tool_call_name(name, fn.get("arguments"))
                     if tc_id and name:
                         mapping[tc_id] = name
                         args = _tool_call_args_text(fn.get("arguments"))
@@ -4415,6 +4420,10 @@ class ContentRouter(Transform):
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tc_id = block.get("id", "")
                         name = block.get("name", "")
+                        if name:
+                            # Hermes deferred tools arrive wrapped as `tool_call`
+                            # with the real name inside the input payload.
+                            name = unwrap_tool_call_name(name, block.get("input"))
                         if tc_id and name:
                             mapping[tc_id] = name
                             args = _tool_call_args_text(block.get("input"))
