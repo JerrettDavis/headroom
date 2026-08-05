@@ -37,6 +37,7 @@ OPENHANDS_PORT = 28895
 OPENCODE_PORT = 28896
 CLAUDE_PORT = 28897
 VSCODE_PORT = 28898
+VSCODE_CLAUDE_PORT = 28899
 MOCK_UPSTREAM_PORT = 19001
 
 
@@ -171,6 +172,20 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                         "completion_tokens": 5,
                         "total_tokens": 17,
                     },
+                },
+            )
+            return
+        if self.path == "/v1/messages":
+            self._write_json(
+                200,
+                {
+                    "id": "msg_e2e",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": payload.get("model", "claude-sonnet-4-6"),
+                    "content": [{"type": "text", "text": "mock Claude response"}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 12, "output_tokens": 4},
                 },
             )
             return
@@ -804,6 +819,67 @@ def verify_vscode_wrap(base_env: dict[str, str], project_dir: Path) -> None:
     )
 
 
+def verify_vscode_claude_wrap(base_env: dict[str, str], project_dir: Path) -> None:
+    """Exercise Claude Code's settings, proxy request, and restore lifecycle."""
+    port = VSCODE_CLAUDE_PORT
+    settings_path = Path(base_env["HOME"]) / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    original = {"env": {"KEEP": "yes"}, "permissions": {"allow": ["Read"]}}
+    settings_path.write_text(json.dumps(original), encoding="utf-8")
+
+    env = base_env.copy()
+    env["ANTHROPIC_TARGET_API_URL"] = f"http://127.0.0.1:{MOCK_UPSTREAM_PORT}"
+    proc = subprocess.Popen(
+        ["headroom", "wrap", "vscode-claude", "--port", str(port)],
+        env=env,
+        cwd=str(project_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        output = wait_for_output(proc, "Press Ctrl+C to stop the proxy.", timeout=30)
+        project_prefix = f"/p/{quote(project_dir.name, safe='')}"
+        configured = json.loads(settings_path.read_text(encoding="utf-8"))
+        proxy_url = configured["env"]["ANTHROPIC_BASE_URL"]
+        assert_true(
+            proxy_url == f"http://127.0.0.1:{port}{project_prefix}",
+            "VS Code Claude wrap should configure the project-scoped Anthropic URL",
+        )
+        assert_true(
+            configured["env"]["ENABLE_TOOL_SEARCH"] == "true",
+            "VS Code Claude wrap should retain Claude Code tool deferral",
+        )
+        assert_true(configured["env"]["KEEP"] == "yes", "Existing Claude env must remain")
+        assert_true(str(settings_path) in output, "Wrap output should identify Claude settings")
+
+        response = httpx.post(
+            f"{proxy_url}/v1/messages",
+            headers={"x-api-key": "synthetic-anthropic-key", "anthropic-version": "2023-06-01"},
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "Reply briefly"}],
+            },
+            timeout=30,
+        )
+        assert_true(response.status_code == 200, "Claude request should traverse Headroom")
+        assert_true(
+            response.json()["content"][0]["text"] == "mock Claude response",
+            "Claude response should return through Headroom",
+        )
+    finally:
+        stop_process(proc)
+
+    run(["headroom", "unwrap", "vscode-claude"], env=env, cwd=project_dir, timeout=60)
+    assert_true(
+        json.loads(settings_path.read_text(encoding="utf-8")) == original,
+        "VS Code Claude unwrap should restore existing Claude settings",
+    )
+
+
 def verify_cline_wrap(base_env: dict[str, str], project_dir: Path) -> None:
     """Smoke test: `wrap cline --prepare-only` exits clean.
 
@@ -986,6 +1062,7 @@ def main() -> None:
             verify_aider_wrap(base_env, project_dir, log_dir)
             verify_cursor_wrap(base_env, project_dir)
             verify_vscode_wrap(base_env, project_dir)
+            verify_vscode_claude_wrap(base_env, project_dir)
             verify_cline_wrap(base_env, project_dir)
             verify_continue_wrap(base_env, project_dir)
             verify_goose_wrap(base_env, project_dir)

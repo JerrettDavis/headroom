@@ -24,6 +24,7 @@ import warnings
 from typing import Any, cast
 
 from headroom import paths as _paths
+from headroom.tokenizers.base import count_content_blocks
 
 from .base import Provider, TokenCounter
 
@@ -395,15 +396,16 @@ class AnthropicTokenCounter(TokenCounter):
         if isinstance(content, str):
             tokens += self.count_text(content)
         elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        tokens += self.count_text(block.get("text", ""))
-                    elif block.get("type") == "tool_use":
-                        tokens += self.count_text(block.get("name", ""))
-                        tokens += self.count_text(str(block.get("input", {})))
-                    elif block.get("type") == "tool_result":
-                        tokens += self.count_text(str(block.get("content", "")))
+            # Delegate to the audited shared walker instead of a partial
+            # per-provider one. Each provider counter had grown its own
+            # shortened branch list, so every modern block priced at ~0:
+            # measured on a 6,800-char block this returned 8 tokens for
+            # tool_result, thinking, document, mcp_tool_result — and for
+            # output_text / refusal, which are OpenAI's OWN Responses shapes.
+            # The shared walker is also image-safe: a 200KB base64 image gets
+            # a pixel-based 1600, not the ~50K phantom text tokens a naive
+            # str(block) catch-all would produce.
+            tokens += count_content_blocks(content, self.count_text)
 
         # OpenAI format tool calls
         if "tool_calls" in message:
