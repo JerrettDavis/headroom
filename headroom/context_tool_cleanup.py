@@ -16,14 +16,19 @@ remove what earlier versions installed.
 Everything here is idempotent, best-effort and deliberately conservative:
 
 * only files Headroom installed (or caused a context tool to install) are
-  deleted — an MCP entry's ``command``, a hook entry's ``command``, or a hook
-  script's body counts as Headroom's only when it names a path inside
-  :func:`paths.bin_dir`, compared on normalized forms
-  (:func:`_references_managed_bin`): the text is split on whitespace into
-  path-shaped tokens, each is lexically normalized, and a token counts only
-  on exact equality with the managed directory or a path separator right
-  after it — a sibling like ``bin-backup`` and a ``bin/../evil`` traversal
-  never match;
+  deleted — an MCP entry's ``command`` or a hook script's body counts as
+  Headroom's only when it names a path inside :func:`paths.bin_dir`,
+  compared on normalized forms (:func:`_references_managed_bin`): the text is
+  split on whitespace into path-shaped tokens, each is lexically normalized,
+  and a token counts only on exact equality with the managed directory or a
+  path separator right after it — a sibling like ``bin-backup`` and a
+  ``bin/../evil`` traversal never match;
+* a hook entry (:func:`_references_context_tool`) passes a marker prefilter
+  first, then counts as Headroom's either because its own ``command`` names
+  the managed directory directly, or — the common case, since a hook command
+  usually names a script rather than the binary — because it names one of the
+  ``_HOOK_SCRIPTS`` files the classification map already marked ``True``: it
+  inherits that script's verdict rather than being checked again;
 * ``.rtk-hook.sha256`` is never read for its own provenance (it holds a hex
   digest, not a path) and instead inherits ``rtk-rewrite.sh``'s
   classification; a ``<name>.lean-ctx.bak`` backup inherits ``<name>``'s
