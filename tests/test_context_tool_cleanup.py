@@ -490,16 +490,26 @@ def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
     ``~/.claude/hooks`` — not merely share a basename with one. A user's own
     ``~/mytools/lean-ctx-rewrite.sh`` must never inherit the classification of
     Headroom's ``~/.claude/hooks/lean-ctx-rewrite.sh`` just because the
-    filename matches — but a wrapper invocation (``bash <script>``) or a
-    quoted command naming the *managed* script by full path must still be
-    recognised, or the entry survives while step 2 deletes the very script
-    it names (the same class of stale, silently-no-op hook the rtk case
-    documents as an accepted limitation, not one to introduce here).
+    filename matches — but a wrapper invocation (``bash <script>``), a quoted
+    command, or a redundant ``./`` segment naming the *managed* script by
+    absolute path must still be recognised, or the entry survives while step
+    2 deletes the very script it names (the same class of stale, silently
+    no-op hook the rtk case documents as an accepted limitation, not one to
+    introduce here).
+
+    A *relative* command (``.claude/hooks/lean-ctx-rewrite.sh``) must survive
+    even though it shares wording with the managed script's home-relative
+    form: a relative hook command is resolved by the harness against the
+    project's cwd, never against home, so it names a project-local script
+    this purge never inspects — treating it as a home-relative reference
+    would delete a different file than the one the guard just proved nothing
+    about.
     """
     bin_dir = paths.bin_dir()
+    hooks_dir = home / ".claude" / "hooks"
     # The managed script that gives "lean-ctx-rewrite.sh" a True verdict.
     managed_script = _write(
-        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        hooks_dir / "lean-ctx-rewrite.sh",
         f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
     )
     # The user's own script: same basename, different directory, own binary.
@@ -507,6 +517,7 @@ def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
         home / "mytools" / "lean-ctx-rewrite.sh",
         '#!/bin/sh\nexec /usr/bin/lean-ctx "$@"\n',
     )
+    relative_command = ".claude/hooks/lean-ctx-rewrite.sh"
     settings = _write(
         home / ".claude" / "settings.json",
         json.dumps(
@@ -515,6 +526,8 @@ def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
                     "PreToolUse": [
                         {"hooks": [{"command": f"bash {managed_script}"}]},
                         {"hooks": [{"command": f'"{managed_script}"'}]},
+                        {"hooks": [{"command": f"{hooks_dir}/./lean-ctx-rewrite.sh"}]},
+                        {"hooks": [{"command": relative_command}]},
                         {"hooks": [{"command": str(user_script)}]},
                     ]
                 }
@@ -529,7 +542,7 @@ def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
     commands = [
         item["command"] for entry in payload["hooks"]["PreToolUse"] for item in entry["hooks"]
     ]
-    assert commands == [str(user_script)]
+    assert commands == [relative_command, str(user_script)]
 
 
 def test_reports_an_unreadable_hook_script_instead_of_guessing(home):

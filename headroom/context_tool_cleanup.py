@@ -35,12 +35,15 @@ Everything here is idempotent, best-effort and deliberately conservative:
   ``_HOOK_SCRIPTS`` files under ``~/.claude/hooks`` the classification map
   already marked ``True`` (:func:`_names_a_managed_script`): it inherits that
   script's verdict rather than being checked again. The path match tolerates
-  a wrapper (``bash <script>``), quoting, a redundant ``./``, and a form
-  written relative to home — but not an unexpanded ``$HOME``-style variable,
-  which is simply not recognised (unprovable, so kept). The map is built
-  from ``~/.claude/hooks`` only, so a Cursor ``hooks.json`` entry naming a
-  script under ``~/.cursor`` can never inherit a verdict this way — it is
-  still caught if its ``command`` names the managed bin directory directly;
+  a wrapper (``bash <script>``), quoting, and a redundant ``./`` segment, but
+  matches the script's absolute path only — never a relative form, since a
+  relative hook command resolves against the harness's project cwd, not
+  against home, and this module has no business touching a project-local
+  script; nor an unexpanded ``$HOME``-style variable. Both are simply not
+  recognised (unprovable, so kept). The map is built from ``~/.claude/hooks``
+  only, so a Cursor ``hooks.json`` entry naming a script under ``~/.cursor``
+  can never inherit a verdict this way — it is still caught if its
+  ``command`` names the managed bin directory directly;
 * ``.rtk-hook.sha256`` is never read for its own provenance (it holds a hex
   digest, not a path) and instead inherits ``rtk-rewrite.sh``'s
   classification; a ``<name>.lean-ctx.bak`` backup inherits ``<name>``'s
@@ -239,6 +242,11 @@ def _opencode_home(home: Path) -> Path:
 # joiners) and `()` (subshells) all end a path the same way whitespace does.
 _PATH_BOUNDARY_CHARS = frozenset("\"'=:;,()|")
 
+# Splits a command into path-shaped tokens on whitespace plus the same
+# boundary punctuation above — used by _names_a_managed_script, which (unlike
+# _references_managed_bin's needle-anchored scan) tokenizes the whole command.
+_PATH_TOKEN_SPLIT = re.compile(r"[\s" + re.escape("".join(_PATH_BOUNDARY_CHARS)) + r"]+")
+
 
 def _references_managed_bin(text: str) -> bool:
     """Whether ``text`` names a path inside Headroom's managed bin directory.
@@ -348,10 +356,10 @@ def _references_context_tool(
 
     A command-marker hit alone is not enough — a user could author a script
     with a matching name. It must also either name the managed bin directory
-    directly, or name — by full path, not basename, so a same-named script
-    of the user's own in a different directory is never caught — a hook
-    script in ``hooks_dir`` the classification map marks ``True`` (see
-    :func:`_classify_hook_scripts`).
+    directly, or name — as a path resolving to that exact file, not merely
+    sharing its basename, so a same-named script of the user's own in a
+    different directory is never caught — a hook script in ``hooks_dir`` the
+    classification map marks ``True`` (see :func:`_names_a_managed_script`).
     """
     if not isinstance(entry, dict):
         return False
@@ -366,42 +374,37 @@ def _references_context_tool(
 def _names_a_managed_script(
     command: str, hooks_dir: Path, hook_classification: dict[str, bool | None]
 ) -> bool:
-    """Whether ``command`` names, by path, a hook script the map marks ``True``.
+    """Whether ``command`` names, by absolute path, a hook script the map marks ``True``.
 
     A real command is rarely the bare script path: ``bash <script>`` wraps
-    it, a shell often quotes it, and it may be written relative to home or
-    with a redundant ``./`` segment. ``command`` is split into path-shaped
-    tokens on the same boundary punctuation :data:`_PATH_BOUNDARY_CHARS` (and
-    whitespace) mark as *not* part of a path, each token is lexically
-    normalized, and compared against both the script's absolute form and its
-    form relative to :func:`Path.home`. A same-named script of the user's own
-    in a different directory still matches neither and is kept.
-    # ponytail: token split, not the boundary-scan
-    # :func:`_names_managed_dir` uses — a hooks dir path containing a literal
-    # space (an edge case, not one of this finding's inputs) would be missed;
-    # upgrade to a needle-anchored scan like that one if it ever matters.
-    ``$VAR``-style unexpanded references (e.g. ``$HOME/...``) are not
-    resolved and are simply not recognised — unprovable, so kept, per the
-    guard's own rule.
+    it, a shell often quotes it, and it may carry a redundant ``./`` segment.
+    ``command`` is split into path-shaped tokens on the same boundary
+    punctuation :data:`_PATH_BOUNDARY_CHARS` (and whitespace) mark as *not*
+    part of a path, each token is lexically normalized, and compared against
+    the script's absolute path only.
+
+    Deliberately not resolved against ``~``/:func:`Path.home` or against the
+    process's working directory: a *relative* hook command in
+    ``~/.claude/settings.json`` is resolved by the harness against the
+    project's cwd, not against home — this module never writes or inspects a
+    project-relative path, so treating one as if it named a home-relative
+    script would delete a project-local hook this purge has no business
+    touching. A relative token, and a ``$VAR``-style unexpanded reference
+    (e.g. ``$HOME/...``), are both simply not recognised — unprovable, so
+    kept, per the guard's own rule.
     """
-    home = Path.home()
     tokens = {
         token
         for haystack in (command, os.path.expanduser(command))
-        for token in re.split(r"[\s\"'=:;,()|]+", haystack)
+        for token in _PATH_TOKEN_SPLIT.split(haystack)
         if token
     }
     normalized_tokens = {
         posixpath.normpath(os.path.normcase(token).replace("\\", "/")) for token in tokens
     }
     for name, verdict in hook_classification.items():
-        script = hooks_dir / name
-        script_forms = {os.path.normcase(str(script)).replace("\\", "/")}
-        try:
-            script_forms.add(os.path.normcase(script.relative_to(home).as_posix()))
-        except ValueError:
-            pass
-        if normalized_tokens & script_forms:
+        script_form = os.path.normcase(str(hooks_dir / name)).replace("\\", "/")
+        if script_form in normalized_tokens:
             return verdict is True
     return False
 
