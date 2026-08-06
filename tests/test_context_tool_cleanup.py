@@ -118,15 +118,17 @@ def test_removes_binaries_hook_scripts_and_backups(home):
     assert not managed_rtk_script.exists()
     assert not managed_rtk_digest.exists()
 
-    # A user-owned rtk-rewrite.sh, and its digest, are not Headroom's to
-    # delete — the digest follows the script it authenticates.
-    user_rtk_script = _write(hooks_dir / "rtk-rewrite.sh", '#!/bin/sh\nexec /usr/bin/rtk "$@"\n')
-    user_rtk_digest = _write(hooks_dir / ".rtk-hook.sha256", "cafef00d\n")
+
+def test_leaves_a_users_own_rtk_digest_alone(home):
+    """The digest is a hex hash, so it can only follow the script it authenticates."""
+    hooks_dir = home / ".claude" / "hooks"
+    script = _write(hooks_dir / "rtk-rewrite.sh", '#!/bin/sh\nexec /usr/bin/rtk "$@"\n')
+    digest = _write(hooks_dir / ".rtk-hook.sha256", "cafef00d\n")
 
     context_tool_cleanup.purge_context_tool_artifacts()
 
-    assert user_rtk_script.exists()
-    assert user_rtk_digest.exists()
+    assert script.exists()
+    assert digest.exists()
 
 
 def test_leaves_a_users_own_binary_on_path_alone(home):

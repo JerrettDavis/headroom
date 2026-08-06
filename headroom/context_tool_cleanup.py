@@ -66,19 +66,12 @@ Everything here is idempotent, best-effort and deliberately conservative:
     the tool that ran was the user's own, and the config it wrote looks
     exactly like config the user wrote by hand. That leftover survives the
     purge — it still points at a binary that exists, so nothing dangles;
-  * since #1698, ``rtk init``'s hook is deliberately left byte-for-byte as
-    written — a bare ``rtk``, resolved through the ``~/.local/bin/rtk``
-    symlink — so it never mentions :func:`paths.bin_dir` and cannot be told
-    apart from a hook a user wrote by hand running their own ``rtk``.
-    ``rtk-rewrite.sh``, its ``.rtk-hook.sha256`` and its ``settings.json``
-    entry therefore now survive on *every* machine that ever ran Headroom's
-    ``rtk init``, canonical or not — while step 3 still removes the
-    ``~/.local/bin/rtk`` symlink and the managed binary it pointed at. The
-    surviving hook execs a ``rtk`` that no longer resolves and silently
-    no-ops (#487, #1698). Inferring provenance from the now-removed symlink
-    was considered and rejected: that would still be a guess, and the
-    guard's rule is that unprovable means keep, not "keep unless a further
-    guess says otherwise";
+  * since #1698 ``rtk init``'s hook execs a bare ``rtk`` and never mentions
+    :func:`paths.bin_dir`, so it reads exactly like a hook a user wrote by
+    hand. ``rtk-rewrite.sh``, its ``.rtk-hook.sha256`` and its
+    ``settings.json`` entry therefore survive on every machine, while step 3
+    still removes the managed binary — leaving a hook that silently no-ops
+    (#487, #1698);
 * the marker-fenced guidance block is the one step with no provenance check
   to make — ``<!-- headroom:rtk-instructions -->`` is Headroom's own fence,
   and no third party writes it.
@@ -248,6 +241,11 @@ _PATH_BOUNDARY_CHARS = frozenset("\"'=:;,()|")
 _PATH_TOKEN_SPLIT = re.compile(r"[\s" + re.escape("".join(_PATH_BOUNDARY_CHARS)) + r"]+")
 
 
+def _norm_path_text(value: str) -> str:
+    """Case-fold ``value`` and give it one separator, so paths compare as text."""
+    return os.path.normcase(value).replace("\\", "/")
+
+
 def _references_managed_bin(text: str) -> bool:
     """Whether ``text`` names a path inside Headroom's managed bin directory.
 
@@ -276,19 +274,16 @@ def _references_managed_bin(text: str) -> bool:
     except OSError:
         return False
 
-    def _norm(value: str) -> str:
-        return os.path.normcase(value).replace("\\", "/")
-
-    needles = {_norm(str(bin_dir)), _norm(str(resolved_bin_dir))}
+    needles = {_norm_path_text(str(bin_dir)), _norm_path_text(str(resolved_bin_dir))}
     home = Path.home()
     for base in (bin_dir, resolved_bin_dir):
         try:
-            needles.add(_norm(f"~/{base.relative_to(home).as_posix()}"))
+            needles.add(_norm_path_text(f"~/{base.relative_to(home).as_posix()}"))
         except ValueError:
             pass
 
     for haystack in (text, os.path.expanduser(text)):
-        normalized_haystack = _norm(haystack)
+        normalized_haystack = _norm_path_text(haystack)
         if any(_names_managed_dir(normalized_haystack, needle) for needle in needles):
             return True
     return False
@@ -399,12 +394,9 @@ def _names_a_managed_script(
         for token in _PATH_TOKEN_SPLIT.split(haystack)
         if token
     }
-    normalized_tokens = {
-        posixpath.normpath(os.path.normcase(token).replace("\\", "/")) for token in tokens
-    }
+    normalized_tokens = {posixpath.normpath(_norm_path_text(token)) for token in tokens}
     for name, verdict in hook_classification.items():
-        script_form = os.path.normcase(str(hooks_dir / name)).replace("\\", "/")
-        if script_form in normalized_tokens:
+        if _norm_path_text(str(hooks_dir / name)) in normalized_tokens:
             return verdict is True
     return False
 
