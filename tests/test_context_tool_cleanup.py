@@ -192,6 +192,13 @@ def test_skips_malformed_json_instead_of_clobbering_it(home):
 
 
 def test_is_idempotent(home):
+    """Re-running the purge body reports nothing new.
+
+    Normally the completion stamp stops a second run, but a workspace the
+    stamp cannot be written to falls back to running every time — so the body
+    itself has to stay idempotent. Removing the stamp between runs is what
+    that machine does.
+    """
     bin_dir = paths.bin_dir()
     _write(bin_dir / "rtk", "binary")
     script = _write(
@@ -203,12 +210,37 @@ def test_is_idempotent(home):
     )
 
     assert context_tool_cleanup.purge_context_tool_artifacts()
+    (bin_dir.parent / ".context-tools-purged").unlink()
     # Steady state after the first run: nothing left to report.
     assert context_tool_cleanup.purge_context_tool_artifacts() == []
 
 
 def test_no_op_on_a_clean_machine(home):
     assert context_tool_cleanup.purge_context_tool_artifacts() == []
+
+
+def test_a_completed_purge_never_runs_again(home):
+    """The purge is a one-time migration, not a per-launch audit of the user's config.
+
+    A tool installed after the migration is not a leftover, so a later run must
+    leave it alone without even looking — this is what stops `headroom wrap`
+    from re-litigating the user's config on every launch, forever.
+    """
+    bin_dir = paths.bin_dir()
+
+    assert context_tool_cleanup.purge_context_tool_artifacts() == []
+    assert (bin_dir.parent / ".context-tools-purged").exists()
+
+    # Artifacts that would otherwise be removed, installed after the migration.
+    binary = _write(bin_dir / "lean-ctx", "binary")
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
+    )
+
+    assert context_tool_cleanup.purge_context_tool_artifacts() == []
+    assert binary.exists()
+    assert script.exists()
 
 
 def test_purge_reports_on_stderr_so_json_stdout_stays_parseable(home):

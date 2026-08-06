@@ -78,6 +78,13 @@ Everything here is idempotent, best-effort and deliberately conservative:
 * the marker-fenced guidance block is the one step with no provenance check
   to make — ``<!-- headroom:rtk-instructions -->`` is Headroom's own fence,
   and no third party writes it.
+
+Removing the retired integration is a one-time migration, so the first
+completed run stamps ``.context-tools-purged`` beside the managed bin
+directory and every later run returns immediately. Without it this would keep
+rewriting the user's own config files on every ``wrap`` invocation forever,
+and a user who installs one of these tools *after* the migration would have
+Headroom auditing their files at each launch for a leftover that cannot exist.
 """
 
 from __future__ import annotations
@@ -144,6 +151,10 @@ def purge_context_tool_artifacts() -> list[str]:
     empty list means there was nothing to do, which is the steady state after
     the first run.
     """
+    marker = _purge_marker()
+    if marker is not None and marker.exists():
+        return []
+
     home = Path.home()
     project = Path.cwd()
     report: list[str] = []
@@ -193,7 +204,26 @@ def purge_context_tool_artifacts() -> list[str]:
         report += _purge_fenced_block(hint_file)
     report += _purge_continue_system_messages(project / ".continue" / "config.json")
 
+    if marker is not None:
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+        except OSError:
+            pass  # Unwritable workspace: the purge simply runs again next time.
+
     return report
+
+
+def _purge_marker() -> Path | None:
+    """Path of the "already migrated" stamp, or ``None`` if it cannot be located.
+
+    Derived from :func:`paths.bin_dir` rather than ``workspace_dir`` so the
+    stamp always lands beside the binaries this module governs.
+    """
+    try:
+        return paths.bin_dir().parent / ".context-tools-purged"
+    except OSError:
+        return None
 
 
 def _instruction_files(home: Path, project: Path) -> list[Path]:
