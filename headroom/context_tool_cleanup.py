@@ -66,12 +66,15 @@ Everything here is idempotent, best-effort and deliberately conservative:
     the tool that ran was the user's own, and the config it wrote looks
     exactly like config the user wrote by hand. That leftover survives the
     purge — it still points at a binary that exists, so nothing dangles;
-  * since #1698 ``rtk init``'s hook execs a bare ``rtk`` and never mentions
+  * an rtk hook written *after* #1698 execs a bare ``rtk`` and never mentions
     :func:`paths.bin_dir`, so it reads exactly like a hook a user wrote by
-    hand. ``rtk-rewrite.sh``, its ``.rtk-hook.sha256`` and its
-    ``settings.json`` entry therefore survive on every machine, while step 3
-    still removes the managed binary — leaving a hook that silently no-ops
-    (#487, #1698);
+    hand, and ``rtk-rewrite.sh``, its ``.rtk-hook.sha256`` and its
+    ``settings.json`` entry all survive while step 3 removes the managed
+    binary — leaving a hook that silently no-ops (#487, #1698). Earlier
+    hooks are decidable: Headroom patched the absolute managed path into
+    them (``_patch_rtk_hook_absolute_path``, removed by #1698), so the
+    window this misses is rtk setups run between #1698 and the tools'
+    removal in #2677;
 * the marker-fenced guidance block is the one step with no provenance check
   to make — ``<!-- headroom:rtk-instructions -->`` is Headroom's own fence,
   and no third party writes it.
