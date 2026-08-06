@@ -11,6 +11,8 @@ else.
 from __future__ import annotations
 
 import json
+import os
+import sys
 
 import pytest
 
@@ -37,6 +39,19 @@ def _write(path, content):
 
 
 def test_removes_hooks_for_both_tools_but_keeps_user_hooks(home):
+    bin_dir = paths.bin_dir()
+    hooks_dir = home / ".claude" / "hooks"
+    # Managed: a script whose body execs the Headroom-installed binary.
+    managed_script = _write(
+        hooks_dir / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
+    )
+    # User-owned: same marker-matching filename, but the body execs the
+    # user's own install — no path inside bin_dir anywhere.
+    user_script = _write(
+        hooks_dir / "lean-ctx-redirect.sh",
+        '#!/bin/sh\nexec /usr/bin/lean-ctx "$@"\n',
+    )
     settings = _write(
         home / ".claude" / "settings.json",
         json.dumps(
@@ -44,12 +59,16 @@ def test_removes_hooks_for_both_tools_but_keeps_user_hooks(home):
                 "permissions": {"allow": ["Bash"]},
                 "hooks": {
                     "PreToolUse": [
+                        {"hooks": [{"type": "command", "command": str(managed_script)}]},
                         {
                             "hooks": [
-                                {"type": "command", "command": "~/.claude/hooks/rtk-rewrite.sh"}
+                                {
+                                    "type": "command",
+                                    "command": f"{bin_dir / 'lean-ctx'} hook rewrite",
+                                }
                             ]
                         },
-                        {"hooks": [{"type": "command", "command": "lean-ctx hook rewrite"}]},
+                        {"hooks": [{"type": "command", "command": str(user_script)}]},
                         {"hooks": [{"type": "command", "command": "my-own-linter --check"}]},
                     ],
                     "SessionStart": [{"hooks": [{"type": "command", "command": "echo hi"}]}],
@@ -64,7 +83,7 @@ def test_removes_hooks_for_both_tools_but_keeps_user_hooks(home):
     commands = [
         item["command"] for entry in payload["hooks"]["PreToolUse"] for item in entry["hooks"]
     ]
-    assert commands == ["my-own-linter --check"]
+    assert commands == [str(user_script), "my-own-linter --check"]
     # Unrelated events and unrelated top-level keys survive untouched.
     assert payload["hooks"]["SessionStart"][0]["hooks"][0]["command"] == "echo hi"
     assert payload["permissions"] == {"allow": ["Bash"]}
@@ -72,11 +91,21 @@ def test_removes_hooks_for_both_tools_but_keeps_user_hooks(home):
 
 
 def test_removes_binaries_hook_scripts_and_backups(home):
-    bin_dir = home / ".headroom" / "bin"
+    bin_dir = paths.bin_dir()
+    hooks_dir = home / ".claude" / "hooks"
     rtk = _write(bin_dir / "rtk", "binary")
     lean = _write(bin_dir / "lean-ctx", "binary")
-    script = _write(home / ".claude" / "hooks" / "lean-ctx-rewrite.sh", "#!/bin/sh\n")
-    backup = _write(home / ".claude" / "hooks" / "lean-ctx-rewrite.sh.lean-ctx.bak", "#!/bin/sh\n")
+    script = _write(
+        hooks_dir / "lean-ctx-rewrite.sh", f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n'
+    )
+    backup = _write(
+        hooks_dir / "lean-ctx-rewrite.sh.lean-ctx.bak",
+        f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
+    )
+    managed_rtk_script = _write(
+        hooks_dir / "rtk-rewrite.sh", f'#!/bin/sh\nexec {bin_dir / "rtk"} "$@"\n'
+    )
+    managed_rtk_digest = _write(hooks_dir / ".rtk-hook.sha256", "deadbeef\n")
 
     context_tool_cleanup.purge_context_tool_artifacts()
 
@@ -84,6 +113,20 @@ def test_removes_binaries_hook_scripts_and_backups(home):
     assert not lean.exists()
     assert not script.exists()
     assert not backup.exists()
+    # .rtk-hook.sha256 follows rtk-rewrite.sh's classification: both managed,
+    # both removed.
+    assert not managed_rtk_script.exists()
+    assert not managed_rtk_digest.exists()
+
+    # A user-owned rtk-rewrite.sh, and its digest, are not Headroom's to
+    # delete — the digest follows the script it authenticates.
+    user_rtk_script = _write(hooks_dir / "rtk-rewrite.sh", '#!/bin/sh\nexec /usr/bin/rtk "$@"\n')
+    user_rtk_digest = _write(hooks_dir / ".rtk-hook.sha256", "cafef00d\n")
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert user_rtk_script.exists()
+    assert user_rtk_digest.exists()
 
 
 def test_leaves_a_users_own_binary_on_path_alone(home):
@@ -100,13 +143,14 @@ def test_leaves_a_users_own_binary_on_path_alone(home):
 
 
 def test_removes_mcp_entry_and_preserves_siblings(home):
+    bin_dir = paths.bin_dir()
     config = _write(
         home / ".claude.json",
         json.dumps(
             {
                 "projects": {"/some/path": {"history": []}},
                 "mcpServers": {
-                    "lean-ctx": {"command": "lean-ctx", "args": ["mcp"]},
+                    "lean-ctx": {"command": str(bin_dir / "lean-ctx"), "args": ["mcp"]},
                     "headroom": {"command": "headroom", "args": ["mcp"]},
                 },
             }
@@ -146,10 +190,14 @@ def test_skips_malformed_json_instead_of_clobbering_it(home):
 
 
 def test_is_idempotent(home):
-    _write(home / ".headroom" / "bin" / "rtk", "binary")
+    bin_dir = paths.bin_dir()
+    _write(bin_dir / "rtk", "binary")
+    script = _write(
+        home / ".claude" / "hooks" / "rtk-rewrite.sh", f'#!/bin/sh\nexec {bin_dir / "rtk"} "$@"\n'
+    )
     _write(
         home / ".claude" / "settings.json",
-        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "rtk rewrite"}]}]}}),
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
     )
 
     assert context_tool_cleanup.purge_context_tool_artifacts()
@@ -216,3 +264,148 @@ def test_selfheal_does_not_purge(home, monkeypatch):
     CliRunner().invoke(main, ["wrap", "selfheal", "--marker", "headroom-wrap-selfheal"])
 
     assert binary.exists(), "selfheal performed filesystem cleanup"
+
+
+def test_leaves_a_users_own_mcp_entry_alone(home):
+    config = _write(
+        home / ".claude.json",
+        json.dumps({"mcpServers": {"lean-ctx": {"command": "lean-ctx", "args": ["mcp"]}}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    payload = json.loads(config.read_text())
+    assert payload["mcpServers"] == {"lean-ctx": {"command": "lean-ctx", "args": ["mcp"]}}
+
+
+def test_leaves_a_users_own_hook_script_and_hook_entry_alone(home):
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        '#!/bin/sh\nexec /usr/bin/lean-ctx "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert script.exists()
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
+
+
+def test_removes_the_managed_hook_script_and_its_hook_entry(home):
+    bin_dir = paths.bin_dir()
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert not script.exists()
+    payload = json.loads(settings.read_text())
+    assert "hooks" not in payload
+
+
+def test_removes_a_hook_entry_pointing_at_the_managed_binary_directly(home):
+    bin_dir = paths.bin_dir()
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"{bin_dir / 'lean-ctx'} hook rewrite",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        ),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    payload = json.loads(settings.read_text())
+    assert "hooks" not in payload
+
+
+def test_matches_a_managed_path_written_in_tilde_form(home):
+    """The dangling-hook regression test: bin_dir is <tmp>/.headroom/bin, and the
+    script references it in unexpanded tilde form — the guard must normalize
+    both sides before comparing, or it wrongly treats this as unprovable and
+    leaves a hook pointing at a script Headroom itself no longer manages.
+    """
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        '#!/bin/sh\nexec ~/.headroom/bin/lean-ctx "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert not script.exists()
+    payload = json.loads(settings.read_text())
+    assert "hooks" not in payload
+
+
+def test_reports_an_unreadable_hook_script_instead_of_guessing(home):
+    if sys.platform.startswith("win") or os.geteuid() == 0:
+        pytest.skip("chmod 0o000 does not deny access on Windows or when running as root")
+
+    bin_dir = paths.bin_dir()
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+    script.chmod(0o000)
+
+    try:
+        report = context_tool_cleanup.purge_context_tool_artifacts()
+    finally:
+        if script.exists():
+            script.chmod(0o644)
+
+    # Unprovable, so kept — not deleted on a guess — but named in the report.
+    assert script.exists()
+    assert any(str(script) in line for line in report)
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
+
+
+def test_leaves_an_mcp_entry_without_a_command_alone(home):
+    config = _write(
+        home / ".claude.json",
+        json.dumps(
+            {
+                "mcpServers": {
+                    "lean-ctx": {"args": ["mcp"]},
+                    "rtk": "not-a-dict",
+                    "lean_ctx": {"command": ["lean-ctx", "mcp"]},
+                }
+            }
+        ),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    payload = json.loads(config.read_text())
+    assert set(payload["mcpServers"]) == {"lean-ctx", "rtk", "lean_ctx"}
