@@ -29,15 +29,18 @@ Everything here is idempotent, best-effort and deliberately conservative:
 * a hook entry (:func:`_references_context_tool`) passes a marker prefilter
   first, then counts as Headroom's either because its own ``command`` names
   the managed directory directly, or — the common case, since a hook command
-  usually names a script rather than the binary — because its ``command`` is,
-  by full path (not basename — a same-named script of the user's own
+  usually names a script rather than the binary — because its ``command``
+  names, by path (not basename — a same-named script of the user's own
   elsewhere must never inherit another script's verdict), one of the
   ``_HOOK_SCRIPTS`` files under ``~/.claude/hooks`` the classification map
-  already marked ``True``: it inherits that script's verdict rather than
-  being checked again. The map is built from ``~/.claude/hooks`` only, so a
-  Cursor ``hooks.json`` entry naming a script under ``~/.cursor`` can never
-  inherit a verdict this way — it is still caught if its ``command`` names
-  the managed bin directory directly;
+  already marked ``True`` (:func:`_names_a_managed_script`): it inherits that
+  script's verdict rather than being checked again. The path match tolerates
+  a wrapper (``bash <script>``), quoting, a redundant ``./``, and a form
+  written relative to home — but not an unexpanded ``$HOME``-style variable,
+  which is simply not recognised (unprovable, so kept). The map is built
+  from ``~/.claude/hooks`` only, so a Cursor ``hooks.json`` entry naming a
+  script under ``~/.cursor`` can never inherit a verdict this way — it is
+  still caught if its ``command`` names the managed bin directory directly;
 * ``.rtk-hook.sha256`` is never read for its own provenance (it holds a hex
   digest, not a path) and instead inherits ``rtk-rewrite.sh``'s
   classification; a ``<name>.lean-ctx.bak`` backup inherits ``<name>``'s
@@ -83,6 +86,7 @@ from __future__ import annotations
 import json
 import os
 import posixpath
+import re
 from pathlib import Path
 from typing import Any
 
@@ -356,9 +360,48 @@ def _references_context_tool(
         return False
     if _references_managed_bin(command):
         return True
-    command_path = os.path.normcase(os.path.expanduser(command))
+    return _names_a_managed_script(command, hooks_dir, hook_classification)
+
+
+def _names_a_managed_script(
+    command: str, hooks_dir: Path, hook_classification: dict[str, bool | None]
+) -> bool:
+    """Whether ``command`` names, by path, a hook script the map marks ``True``.
+
+    A real command is rarely the bare script path: ``bash <script>`` wraps
+    it, a shell often quotes it, and it may be written relative to home or
+    with a redundant ``./`` segment. ``command`` is split into path-shaped
+    tokens on the same boundary punctuation :data:`_PATH_BOUNDARY_CHARS` (and
+    whitespace) mark as *not* part of a path, each token is lexically
+    normalized, and compared against both the script's absolute form and its
+    form relative to :func:`Path.home`. A same-named script of the user's own
+    in a different directory still matches neither and is kept.
+    # ponytail: token split, not the boundary-scan
+    # :func:`_names_managed_dir` uses — a hooks dir path containing a literal
+    # space (an edge case, not one of this finding's inputs) would be missed;
+    # upgrade to a needle-anchored scan like that one if it ever matters.
+    ``$VAR``-style unexpanded references (e.g. ``$HOME/...``) are not
+    resolved and are simply not recognised — unprovable, so kept, per the
+    guard's own rule.
+    """
+    home = Path.home()
+    tokens = {
+        token
+        for haystack in (command, os.path.expanduser(command))
+        for token in re.split(r"[\s\"'=:;,()|]+", haystack)
+        if token
+    }
+    normalized_tokens = {
+        posixpath.normpath(os.path.normcase(token).replace("\\", "/")) for token in tokens
+    }
     for name, verdict in hook_classification.items():
-        if command_path == os.path.normcase(str(hooks_dir / name)):
+        script = hooks_dir / name
+        script_forms = {os.path.normcase(str(script)).replace("\\", "/")}
+        try:
+            script_forms.add(os.path.normcase(script.relative_to(home).as_posix()))
+        except ValueError:
+            pass
+        if normalized_tokens & script_forms:
             return verdict is True
     return False
 

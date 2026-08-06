@@ -490,11 +490,15 @@ def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
     ``~/.claude/hooks`` — not merely share a basename with one. A user's own
     ``~/mytools/lean-ctx-rewrite.sh`` must never inherit the classification of
     Headroom's ``~/.claude/hooks/lean-ctx-rewrite.sh`` just because the
-    filename matches.
+    filename matches — but a wrapper invocation (``bash <script>``) or a
+    quoted command naming the *managed* script by full path must still be
+    recognised, or the entry survives while step 2 deletes the very script
+    it names (the same class of stale, silently-no-op hook the rtk case
+    documents as an accepted limitation, not one to introduce here).
     """
     bin_dir = paths.bin_dir()
     # The managed script that gives "lean-ctx-rewrite.sh" a True verdict.
-    _write(
+    managed_script = _write(
         home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
         f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
     )
@@ -505,14 +509,27 @@ def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
     )
     settings = _write(
         home / ".claude" / "settings.json",
-        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(user_script)}]}]}}),
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"hooks": [{"command": f"bash {managed_script}"}]},
+                        {"hooks": [{"command": f'"{managed_script}"'}]},
+                        {"hooks": [{"command": str(user_script)}]},
+                    ]
+                }
+            }
+        ),
     )
 
     context_tool_cleanup.purge_context_tool_artifacts()
 
     assert user_script.exists()
     payload = json.loads(settings.read_text())
-    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(user_script)
+    commands = [
+        item["command"] for entry in payload["hooks"]["PreToolUse"] for item in entry["hooks"]
+    ]
+    assert commands == [str(user_script)]
 
 
 def test_reports_an_unreadable_hook_script_instead_of_guessing(home):
