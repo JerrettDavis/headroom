@@ -16,14 +16,37 @@ remove what earlier versions installed.
 Everything here is idempotent, best-effort and deliberately conservative:
 
 * only files Headroom installed (or caused a context tool to install) are
-  deleted;
+  deleted — an MCP entry's ``command``, a hook entry's ``command``, or a hook
+  script's body counts as Headroom's only when it names a path inside
+  :func:`paths.bin_dir`, compared on normalized forms
+  (:func:`_references_managed_bin`): the text is split on whitespace into
+  path-shaped tokens, each is lexically normalized, and a token counts only
+  on exact equality with the managed directory or a path separator right
+  after it — a sibling like ``bin-backup`` and a ``bin/../evil`` traversal
+  never match;
+* ``.rtk-hook.sha256`` is never read for its own provenance (it holds a hex
+  digest, not a path) and instead inherits ``rtk-rewrite.sh``'s
+  classification; a ``<name>.lean-ctx.bak`` backup inherits ``<name>``'s
+  (:func:`_classify_hook_scripts`);
+* a hook script that exists but cannot be read is classified unknown —
+  deleted by nothing, and named in the report so the user can remove it by
+  hand;
 * ``~/.local/bin/{rtk,lean-ctx}`` is unlinked only when it is a symlink into
   Headroom's own bin directory — a user's own build is never touched;
 * a JSON config that does not parse is reported and **skipped**, never
   overwritten (a hand-edited typo must not cost the user their settings);
 * the tools' own backups of *config* files (``~/.claude.json.lean-ctx.bak`` and
   friends) are left in place — they hold the user's real settings history. Only
-  backups of the hook scripts being deleted are cleaned up.
+  backups of the hook scripts proven to be Headroom's are cleaned up;
+* one case cannot be decided at all, and is accepted as a limit rather than
+  fixed: ``get_lean_ctx_path`` used to check ``PATH`` before Headroom's own
+  bin directory, so on a machine that already had ``lean-ctx`` on ``PATH``,
+  the tool that ran was the user's own, and the config it wrote looks exactly
+  like config the user wrote by hand. That leftover survives the purge — it
+  still points at a binary that exists, so nothing dangles;
+* the marker-fenced guidance block is the one step with no provenance check
+  to make — ``<!-- headroom:rtk-instructions -->`` is Headroom's own fence,
+  and no third party writes it.
 """
 
 from __future__ import annotations
