@@ -605,6 +605,23 @@ def test_reports_an_unreadable_hook_script_instead_of_guessing(home):
     assert any(str(script) in line for line in report)
     payload = json.loads(settings.read_text())
     assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
+    # A run that could not decide is not the completed migration: leaving the
+    # stamp off is what gets this script looked at again once it is readable.
+    assert not (paths.bin_dir().parent / ".context-tools-purged").exists()
+
+
+def test_an_unparseable_config_defers_the_migration_stamp(home):
+    """A config the user must fix by hand still holds a leftover.
+
+    Stamping the migration complete here would retire the only reminder they
+    get, and the entry would never be cleaned once the typo is fixed.
+    """
+    _write(home / ".claude" / "settings.json", "{not json")
+
+    report = context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert any(line.startswith("skipped ") for line in report)
+    assert not (paths.bin_dir().parent / ".context-tools-purged").exists()
 
 
 def test_leaves_an_mcp_entry_without_a_command_alone(home):

@@ -10,40 +10,25 @@ Deleting the code is not enough: everything above is *durable state on the
 user's disk*. Left alone, the Claude hooks keep rewriting every Bash command
 through binaries Headroom no longer manages, and the injected guidance keeps
 telling agents to use tools that may not resolve. So ``headroom wrap`` /
-``headroom unwrap`` call :func:`purge_context_tool_artifacts` once per run to
-remove what earlier versions installed.
+``headroom unwrap`` call :func:`purge_context_tool_artifacts` on every run to
+remove what earlier versions installed — though the removal itself happens
+once per machine, not once per launch (see the stamp below).
 
 Everything here is idempotent, best-effort and deliberately conservative:
 
 * only files Headroom installed (or caused a context tool to install) are
-  deleted — an MCP entry's ``command`` or a hook script's body counts as
-  Headroom's only when it names a path inside :func:`paths.bin_dir`,
-  compared on normalized forms (:func:`_references_managed_bin`): the raw
-  text is scanned for the managed directory (never pre-split on whitespace,
-  so a path containing a space — e.g. a ``$HOME`` with one — cannot be
-  severed), and a hit counts only at a real path boundary — end-of-string, a
-  non-path character (quote, ``=``, ``:``, ``;``, ``,``, ``(``, ``)``, ``|``,
-  or whitespace), or a ``/`` whose lexically-normalized (``.``/``..``
-  collapsed) continuation still starts with the managed directory. A sibling
-  like ``bin-backup`` and a ``bin/../evil`` traversal never match;
-* a hook entry (:func:`_references_context_tool`) passes a marker prefilter
-  first, then counts as Headroom's either because its own ``command`` names
-  the managed directory directly, or — the common case, since a hook command
-  usually names a script rather than the binary — because its ``command``
-  names, by path (not basename — a same-named script of the user's own
-  elsewhere must never inherit another script's verdict), one of the
-  ``_HOOK_SCRIPTS`` files under ``~/.claude/hooks`` the classification map
-  already marked ``True`` (:func:`_names_a_managed_script`): it inherits that
-  script's verdict rather than being checked again. The path match tolerates
-  a wrapper (``bash <script>``), quoting, and a redundant ``./`` segment, but
-  matches the script's absolute path only — never a relative form, since a
-  relative hook command resolves against the harness's project cwd, not
-  against home, and this module has no business touching a project-local
-  script; nor an unexpanded ``$HOME``-style variable. Both are simply not
-  recognised (unprovable, so kept). The map is built from ``~/.claude/hooks``
-  only, so a Cursor ``hooks.json`` entry naming a script under ``~/.cursor``
-  can never inherit a verdict this way — it is still caught if its
-  ``command`` names the managed bin directory directly;
+  deleted. An MCP entry's ``command`` or a hook script's body counts as
+  Headroom's only when it names a path inside :func:`paths.bin_dir`
+  (:func:`_references_managed_bin` — which is where the matching rules and
+  the reasons behind them live);
+* a hook entry is Headroom's when it names such a path directly, or — the
+  common case, since a hook command names a script rather than the binary —
+  when it names one of the ``~/.claude/hooks`` scripts already classified as
+  Headroom's, whose verdict it inherits
+  (:func:`_references_context_tool`, :func:`_names_a_managed_script`). A
+  Cursor ``hooks.json`` entry naming a script under ``~/.cursor`` cannot
+  inherit a verdict this way, since the map covers ``~/.claude/hooks`` only;
+  it is still caught when its ``command`` names the managed directory;
 * ``.rtk-hook.sha256`` is never read for its own provenance (it holds a hex
   digest, not a path) and instead inherits ``rtk-rewrite.sh``'s
   classification; a ``<name>.lean-ctx.bak`` backup inherits ``<name>``'s
@@ -142,6 +127,13 @@ _RTK_SCRIPT_NAME = "rtk-rewrite.sh"
 # did, but it is matched too so a stale hand-added entry is cleaned up as well.
 _MCP_SERVER_NAMES = ("lean-ctx", "lean_ctx", "rtk")
 
+# Report-line prefixes meaning "this one is not settled" — a config that would
+# not parse, a script that would not read, a file that would not unlink. Such a
+# run leaves a leftover behind, so it must not be stamped as the completed
+# migration. Emitted by _purge_hook_config, _purge_mcp_entries,
+# _purge_fenced_block, _purge_continue_system_messages and _remove_files.
+_DEFERRED_PREFIXES = ("skipped ", "could not remove ")
+
 
 def purge_context_tool_artifacts() -> list[str]:
     """Remove every rtk / lean-ctx artifact an earlier Headroom version installed.
@@ -152,7 +144,7 @@ def purge_context_tool_artifacts() -> list[str]:
     the first run.
     """
     marker = _purge_marker()
-    if marker is not None and marker.exists():
+    if marker.exists():
         return []
 
     home = Path.home()
@@ -204,7 +196,11 @@ def purge_context_tool_artifacts() -> list[str]:
         report += _purge_fenced_block(hint_file)
     report += _purge_continue_system_messages(project / ".continue" / "config.json")
 
-    if marker is not None:
+    # Only a run that settled everything is the completed migration. One that
+    # could not read a script or parse a config left a leftover behind, and the
+    # user needs both the reminder on the next launch and the cleanup once the
+    # permissions or the typo are fixed.
+    if not any(line.startswith(_DEFERRED_PREFIXES) for line in report):
         try:
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
@@ -214,16 +210,13 @@ def purge_context_tool_artifacts() -> list[str]:
     return report
 
 
-def _purge_marker() -> Path | None:
-    """Path of the "already migrated" stamp, or ``None`` if it cannot be located.
+def _purge_marker() -> Path:
+    """Path of the "already migrated" stamp.
 
-    Derived from :func:`paths.bin_dir` rather than ``workspace_dir`` so the
-    stamp always lands beside the binaries this module governs.
+    Derived from :func:`paths.bin_dir` rather than ``workspace_dir`` so it
+    cannot escape a temporary tree through ``HEADROOM_WORKSPACE_DIR``.
     """
-    try:
-        return paths.bin_dir().parent / ".context-tools-purged"
-    except OSError:
-        return None
+    return paths.bin_dir().parent / ".context-tools-purged"
 
 
 def _instruction_files(home: Path, project: Path) -> list[Path]:
@@ -428,10 +421,10 @@ def _names_a_managed_script(
         if token
     }
     normalized_tokens = {posixpath.normpath(_norm_path_text(token)) for token in tokens}
-    for name, verdict in hook_classification.items():
-        if _norm_path_text(str(hooks_dir / name)) in normalized_tokens:
-            return verdict is True
-    return False
+    return any(
+        verdict is True and _norm_path_text(str(hooks_dir / name)) in normalized_tokens
+        for name, verdict in hook_classification.items()
+    )
 
 
 def _prune_hooks(
