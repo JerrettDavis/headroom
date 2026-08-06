@@ -363,6 +363,74 @@ def test_matches_a_managed_path_written_in_tilde_form(home):
     assert "hooks" not in payload
 
 
+def test_leaves_a_hook_script_in_a_sibling_bin_named_directory_alone(home):
+    """A directory that merely starts with the bin dir's name is not the bin dir.
+
+    ``<workspace>/.headroom/binaries`` shares a prefix with
+    ``<workspace>/.headroom/bin`` but is a different, user-owned directory —
+    a naive substring match (no directory-boundary check) would treat the
+    shared prefix as a reference to the managed bin dir and wrongly delete
+    this script.
+    """
+    bin_dir = paths.bin_dir()
+    sibling = bin_dir.parent / "binaries"
+    own_binary = _write(sibling / "lean-ctx", "my own build")
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {own_binary} "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert script.exists()
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
+
+
+def test_leaves_an_mcp_entry_in_a_sibling_bin_named_directory_alone(home):
+    """Same sibling-directory hazard as above, for the MCP-entry command check."""
+    bin_dir = paths.bin_dir()
+    sibling_command = str(bin_dir.parent / "bin-backup" / "lean-ctx")
+    config = _write(
+        home / ".claude.json",
+        json.dumps({"mcpServers": {"lean-ctx": {"command": sibling_command, "args": ["mcp"]}}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    payload = json.loads(config.read_text())
+    assert payload["mcpServers"] == {"lean-ctx": {"command": sibling_command, "args": ["mcp"]}}
+
+
+def test_leaves_a_parent_traversal_path_through_the_bin_dir_alone(home):
+    """``bin/../evil`` contains the managed prefix as literal text but does not
+    resolve inside it — the guard must collapse ``..`` before comparing, or a
+    crafted (or coincidental) traversal path would be treated as Headroom's.
+    """
+    bin_dir = paths.bin_dir()
+    evil_binary = _write(bin_dir.parent / "evil" / "lean-ctx", "not ours")
+    traversal_command = f"{bin_dir}/../evil/lean-ctx"
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {traversal_command} "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert script.exists()
+    assert evil_binary.exists()
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
+
+
 def test_reports_an_unreadable_hook_script_instead_of_guessing(home):
     if sys.platform.startswith("win") or os.geteuid() == 0:
         pytest.skip("chmod 0o000 does not deny access on Windows or when running as root")

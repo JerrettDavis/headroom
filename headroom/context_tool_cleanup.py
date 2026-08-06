@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 from pathlib import Path
 from typing import Any
 
@@ -167,12 +168,17 @@ def _opencode_home(home: Path) -> Path:
 def _references_managed_bin(text: str) -> bool:
     """Whether ``text`` names a path inside Headroom's managed bin directory.
 
-    A hook command or script body is free text we don't control, so this is a
-    substring match over normalized forms of both sides: the unresolved and
-    resolved bin directory, its ``~``-relative form (home-relative, since a
-    script may reference it unexpanded), case-folded, with both path
-    separators — matched against the text as given and as ``expanduser``'d.
-    # ponytail: substring match over normalized forms, not a shell parse —
+    A hook command or script body is free text we don't control, so ``text``
+    is split on whitespace into path-shaped tokens and each is checked
+    against normalized forms of the managed directory: the unresolved and
+    resolved bin directory, and its ``~``-relative form (home-relative, since
+    a script may reference it unexpanded) — case-folded, with both path
+    separators, matched against the text as given and as ``expanduser``'d.
+    Each token is lexically normalized (``..``/``.`` collapsed) before the
+    comparison, and a match requires a path separator (or exact equality)
+    right after the managed prefix — a sibling directory like ``bin-backup``
+    or ``binfoo``, or a ``bin/../evil`` traversal, must never match.
+    # ponytail: whitespace-token + boundary match, not a shell parse —
     # upgrade to shlex if a command ever embeds a managed path it does not
     # execute.
     """
@@ -193,8 +199,20 @@ def _references_managed_bin(text: str) -> bool:
         except ValueError:
             pass
 
-    haystacks = {_norm(text), _norm(os.path.expanduser(text))}
-    return any(needle in haystack for needle in needles for haystack in haystacks)
+    def _under_managed_dir(token: str) -> bool:
+        # Collapse `.`/`..` lexically before comparing so a traversal like
+        # `bin/../evil` cannot borrow the managed prefix, and require a
+        # separator (or exact equality) after the prefix so a sibling like
+        # `bin-backup` or `binfoo` cannot match on a bare substring.
+        normalized = posixpath.normpath(_norm(token))
+        return any(
+            normalized == needle or normalized.startswith(needle + "/") for needle in needles
+        )
+
+    for haystack in (text, os.path.expanduser(text)):
+        if any(_under_managed_dir(token) for token in haystack.split()):
+            return True
+    return False
 
 
 def _classify_hook_scripts(hooks_dir: Path) -> dict[str, bool | None]:
