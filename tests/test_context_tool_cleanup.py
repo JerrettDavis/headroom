@@ -431,6 +431,90 @@ def test_leaves_a_parent_traversal_path_through_the_bin_dir_alone(home):
     assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
 
 
+def test_removes_a_hook_script_whose_body_names_the_managed_dir_only_via_quoting_or_delimiters(
+    home,
+):
+    """Real shell scripts quote paths and join them with `=`/`:`/`()`, not bare
+    whitespace. The guard must not miss the managed directory just because it
+    sits inside a quoted string, a `VAR=` assignment, a `PATH=...:` join, or a
+    subshell — a naive whitespace-token split would sever every one of these
+    (and the quote/paren characters would still be glued onto the token).
+    """
+    bin_dir = paths.bin_dir()
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        "#!/bin/sh\n"
+        f'exec "{bin_dir}/lean-ctx" "$@"\n'
+        f"# or: exec '{bin_dir}/lean-ctx'\n"
+        f'export PATH="{bin_dir}:$PATH"\n'
+        f"BIN={bin_dir}/lean-ctx\n"
+        f"({bin_dir}/lean-ctx)\n",
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert not script.exists()
+    payload = json.loads(settings.read_text())
+    assert "hooks" not in payload
+
+
+def test_matches_a_managed_path_when_home_contains_a_space(home, monkeypatch):
+    """A ``$HOME`` with a space is real, and yields a bin dir with a literal
+    space inside it. Splitting a script's body on whitespace before searching
+    would sever the path at that space and miss it entirely.
+    """
+    bin_dir = home / "space here" / ".headroom" / "bin"
+    monkeypatch.setattr(paths, "bin_dir", lambda: bin_dir)
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {bin_dir}/lean-ctx "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert not script.exists()
+    payload = json.loads(settings.read_text())
+    assert "hooks" not in payload
+
+
+def test_leaves_a_same_named_hook_script_in_a_different_directory_alone(home):
+    """A hook entry's command must name the exact managed script in
+    ``~/.claude/hooks`` — not merely share a basename with one. A user's own
+    ``~/mytools/lean-ctx-rewrite.sh`` must never inherit the classification of
+    Headroom's ``~/.claude/hooks/lean-ctx-rewrite.sh`` just because the
+    filename matches.
+    """
+    bin_dir = paths.bin_dir()
+    # The managed script that gives "lean-ctx-rewrite.sh" a True verdict.
+    _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {bin_dir / "lean-ctx"} "$@"\n',
+    )
+    # The user's own script: same basename, different directory, own binary.
+    user_script = _write(
+        home / "mytools" / "lean-ctx-rewrite.sh",
+        '#!/bin/sh\nexec /usr/bin/lean-ctx "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(user_script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert user_script.exists()
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(user_script)
+
+
 def test_reports_an_unreadable_hook_script_instead_of_guessing(home):
     if sys.platform.startswith("win") or os.geteuid() == 0:
         pytest.skip("chmod 0o000 does not deny access on Windows or when running as root")

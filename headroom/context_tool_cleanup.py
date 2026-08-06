@@ -18,17 +18,26 @@ Everything here is idempotent, best-effort and deliberately conservative:
 * only files Headroom installed (or caused a context tool to install) are
   deleted — an MCP entry's ``command`` or a hook script's body counts as
   Headroom's only when it names a path inside :func:`paths.bin_dir`,
-  compared on normalized forms (:func:`_references_managed_bin`): the text is
-  split on whitespace into path-shaped tokens, each is lexically normalized,
-  and a token counts only on exact equality with the managed directory or a
-  path separator right after it — a sibling like ``bin-backup`` and a
-  ``bin/../evil`` traversal never match;
+  compared on normalized forms (:func:`_references_managed_bin`): the raw
+  text is scanned for the managed directory (never pre-split on whitespace,
+  so a path containing a space — e.g. a ``$HOME`` with one — cannot be
+  severed), and a hit counts only at a real path boundary — end-of-string, a
+  non-path character (quote, ``=``, ``:``, ``;``, ``,``, ``(``, ``)``, ``|``,
+  or whitespace), or a ``/`` whose lexically-normalized (``.``/``..``
+  collapsed) continuation still starts with the managed directory. A sibling
+  like ``bin-backup`` and a ``bin/../evil`` traversal never match;
 * a hook entry (:func:`_references_context_tool`) passes a marker prefilter
   first, then counts as Headroom's either because its own ``command`` names
   the managed directory directly, or — the common case, since a hook command
-  usually names a script rather than the binary — because it names one of the
-  ``_HOOK_SCRIPTS`` files the classification map already marked ``True``: it
-  inherits that script's verdict rather than being checked again;
+  usually names a script rather than the binary — because its ``command`` is,
+  by full path (not basename — a same-named script of the user's own
+  elsewhere must never inherit another script's verdict), one of the
+  ``_HOOK_SCRIPTS`` files under ``~/.claude/hooks`` the classification map
+  already marked ``True``: it inherits that script's verdict rather than
+  being checked again. The map is built from ``~/.claude/hooks`` only, so a
+  Cursor ``hooks.json`` entry naming a script under ``~/.cursor`` can never
+  inherit a verdict this way — it is still caught if its ``command`` names
+  the managed bin directory directly;
 * ``.rtk-hook.sha256`` is never read for its own provenance (it holds a hex
   digest, not a path) and instead inherits ``rtk-rewrite.sh``'s
   classification; a ``<name>.lean-ctx.bak`` backup inherits ``<name>``'s
@@ -43,12 +52,27 @@ Everything here is idempotent, best-effort and deliberately conservative:
 * the tools' own backups of *config* files (``~/.claude.json.lean-ctx.bak`` and
   friends) are left in place — they hold the user's real settings history. Only
   backups of the hook scripts proven to be Headroom's are cleaned up;
-* one case cannot be decided at all, and is accepted as a limit rather than
-  fixed: ``get_lean_ctx_path`` used to check ``PATH`` before Headroom's own
-  bin directory, so on a machine that already had ``lean-ctx`` on ``PATH``,
-  the tool that ran was the user's own, and the config it wrote looks exactly
-  like config the user wrote by hand. That leftover survives the purge — it
-  still points at a binary that exists, so nothing dangles;
+* two cases cannot be decided at all, and are accepted as limits rather than
+  fixed:
+
+  * ``get_lean_ctx_path`` used to check ``PATH`` before Headroom's own bin
+    directory, so on a machine that already had ``lean-ctx`` on ``PATH``,
+    the tool that ran was the user's own, and the config it wrote looks
+    exactly like config the user wrote by hand. That leftover survives the
+    purge — it still points at a binary that exists, so nothing dangles;
+  * since #1698, ``rtk init``'s hook is deliberately left byte-for-byte as
+    written — a bare ``rtk``, resolved through the ``~/.local/bin/rtk``
+    symlink — so it never mentions :func:`paths.bin_dir` and cannot be told
+    apart from a hook a user wrote by hand running their own ``rtk``.
+    ``rtk-rewrite.sh``, its ``.rtk-hook.sha256`` and its ``settings.json``
+    entry therefore now survive on *every* machine that ever ran Headroom's
+    ``rtk init``, canonical or not — while step 3 still removes the
+    ``~/.local/bin/rtk`` symlink and the managed binary it pointed at. The
+    surviving hook execs a ``rtk`` that no longer resolves and silently
+    no-ops (#487, #1698). Inferring provenance from the now-removed symlink
+    was considered and rejected: that would still be a guess, and the
+    guard's rule is that unprovable means keep, not "keep unless a further
+    guess says otherwise";
 * the marker-fenced guidance block is the one step with no provenance check
   to make — ``<!-- headroom:rtk-instructions -->`` is Headroom's own fence,
   and no third party writes it.
@@ -98,6 +122,11 @@ _HOOK_SCRIPTS = (
     "lean-ctx-redirect-native",
 )
 
+# rtk's integrity digest never names a path (see ``_classify_hook_scripts``)
+# and rtk-rewrite.sh is the script it authenticates.
+_RTK_DIGEST_NAME = ".rtk-hook.sha256"
+_RTK_SCRIPT_NAME = "rtk-rewrite.sh"
+
 # MCP server entries the tools registered, and the config files holding them.
 # lean-ctx registers itself as an MCP server during ``lean-ctx init``; rtk never
 # did, but it is matched too so a stale hand-added entry is cleaned up as well.
@@ -124,7 +153,7 @@ def purge_context_tool_artifacts() -> list[str]:
 
     # 1. Hook registrations (Claude Code's settings.json, Cursor's hooks.json).
     for config in (home / ".claude" / "settings.json", home / ".cursor" / "hooks.json"):
-        report += _purge_hook_config(config, hook_classification)
+        report += _purge_hook_config(config, hooks_dir, hook_classification)
 
     # 2. The generated hook scripts, their integrity digests and stale backups
     # — only the ones proven to reference Headroom's managed bin directory.
@@ -133,12 +162,19 @@ def purge_context_tool_artifacts() -> list[str]:
         *(hooks_dir / name for name in managed_names),
         *(hooks_dir / f"{name}.lean-ctx.bak" for name in managed_names),
     )
-    report += [
-        f"skipped {hooks_dir / name} (could not read to verify it was Headroom's)"
-        " — remove any stale hook script by hand"
-        for name in _HOOK_SCRIPTS
-        if hook_classification.get(name, False) is None
-    ]
+    for name in _HOOK_SCRIPTS:
+        if hook_classification.get(name, False) is not None:
+            continue
+        if name == _RTK_DIGEST_NAME:
+            report.append(
+                f"skipped {hooks_dir / name} (inherits {_RTK_SCRIPT_NAME}'s unreadable verdict)"
+                " — remove any stale hook script by hand"
+            )
+        else:
+            report.append(
+                f"skipped {hooks_dir / name} (could not read to verify it was Headroom's)"
+                " — remove any stale hook script by hand"
+            )
 
     # 3. The PATH symlinks, then the managed binaries they pointed at.
     for name in ("rtk", "lean-ctx"):
@@ -193,22 +229,34 @@ def _opencode_home(home: Path) -> Path:
 # --- hook registrations -------------------------------------------------------
 
 
+# Characters that can never be part of a path: a match ending right before
+# one of these (or at end-of-string) sits at a real word boundary. Quotes,
+# `=`/`:` (`export PATH="<dir>:$PATH"`, `BIN=<dir>/x`), `;`/`,`/`|` (command
+# joiners) and `()` (subshells) all end a path the same way whitespace does.
+_PATH_BOUNDARY_CHARS = frozenset("\"'=:;,()|")
+
+
 def _references_managed_bin(text: str) -> bool:
     """Whether ``text`` names a path inside Headroom's managed bin directory.
 
-    A hook command or script body is free text we don't control, so ``text``
-    is split on whitespace into path-shaped tokens and each is checked
-    against normalized forms of the managed directory: the unresolved and
-    resolved bin directory, and its ``~``-relative form (home-relative, since
-    a script may reference it unexpanded) — case-folded, with both path
-    separators, matched against the text as given and as ``expanduser``'d.
-    Each token is lexically normalized (``..``/``.`` collapsed) before the
-    comparison, and a match requires a path separator (or exact equality)
-    right after the managed prefix — a sibling directory like ``bin-backup``
-    or ``binfoo``, or a ``bin/../evil`` traversal, must never match.
-    # ponytail: whitespace-token + boundary match, not a shell parse —
-    # upgrade to shlex if a command ever embeds a managed path it does not
-    # execute.
+    A hook command or script body is free text we don't control, so this
+    scans ``text`` for raw occurrences of the managed directory — the
+    unresolved and resolved bin directory, and its ``~``-relative form
+    (home-relative, since a script may reference it unexpanded) — matched
+    against the text as given and as ``expanduser``'d, case-folded, with both
+    path separators. Deliberately *not* tokenized on whitespace first: a
+    quoted or ``$HOME``-derived path can itself contain a space, and slicing
+    the text into words before searching would sever it.
+
+    A hit is only a real reference at a path boundary: immediately followed
+    by end-of-string or a :data:`_PATH_BOUNDARY_CHARS` character (an exact
+    reference, e.g. a bare ``PATH=<dir>`` export), or by ``/`` — in which
+    case the run of characters up to the next boundary is lexically
+    normalized (``.``/``..`` collapsed) and re-compared, so neither a sibling
+    directory like ``bin-backup``/``binfoo`` nor a ``bin/../evil`` traversal
+    can borrow the managed prefix.
+    # ponytail: boundary-aware substring scan, not a shell parse — upgrade to
+    # shlex if a command ever embeds a managed path it does not execute.
     """
     try:
         bin_dir = paths.bin_dir()
@@ -227,20 +275,35 @@ def _references_managed_bin(text: str) -> bool:
         except ValueError:
             pass
 
-    def _under_managed_dir(token: str) -> bool:
-        # Collapse `.`/`..` lexically before comparing so a traversal like
-        # `bin/../evil` cannot borrow the managed prefix, and require a
-        # separator (or exact equality) after the prefix so a sibling like
-        # `bin-backup` or `binfoo` cannot match on a bare substring.
-        normalized = posixpath.normpath(_norm(token))
-        return any(
-            normalized == needle or normalized.startswith(needle + "/") for needle in needles
-        )
-
     for haystack in (text, os.path.expanduser(text)):
-        if any(_under_managed_dir(token) for token in haystack.split()):
+        normalized_haystack = _norm(haystack)
+        if any(_names_managed_dir(normalized_haystack, needle) for needle in needles):
             return True
     return False
+
+
+def _names_managed_dir(haystack: str, needle: str) -> bool:
+    """Whether a normalized ``haystack`` names ``needle`` at a path boundary."""
+    search_from = 0
+    while True:
+        index = haystack.find(needle, search_from)
+        if index < 0:
+            return False
+        end = index + len(needle)
+        search_from = index + 1  # keep scanning; occurrences may overlap
+        following = haystack[end : end + 1]
+        if not following or following.isspace() or following in _PATH_BOUNDARY_CHARS:
+            return True
+        if following != "/":
+            continue
+        tail_end = end
+        while tail_end < len(haystack) and not (
+            haystack[tail_end].isspace() or haystack[tail_end] in _PATH_BOUNDARY_CHARS
+        ):
+            tail_end += 1
+        candidate = posixpath.normpath(haystack[index:tail_end])
+        if candidate == needle or candidate.startswith(needle + "/"):
+            return True
 
 
 def _classify_hook_scripts(hooks_dir: Path) -> dict[str, bool | None]:
@@ -255,9 +318,8 @@ def _classify_hook_scripts(hooks_dir: Path) -> dict[str, bool | None]:
     so it is never read; it inherits ``rtk-rewrite.sh``'s classification.
     """
     classification: dict[str, bool | None] = {}
-    digest_name = ".rtk-hook.sha256"
     for name in _HOOK_SCRIPTS:
-        if name == digest_name:
+        if name == _RTK_DIGEST_NAME:
             continue
         path = hooks_dir / name
         if not path.is_file():
@@ -269,19 +331,23 @@ def _classify_hook_scripts(hooks_dir: Path) -> dict[str, bool | None]:
             continue
         classification[name] = _references_managed_bin(body)
 
-    if (hooks_dir / digest_name).is_file():
-        classification[digest_name] = classification.get("rtk-rewrite.sh", False)
+    if (hooks_dir / _RTK_DIGEST_NAME).is_file():
+        classification[_RTK_DIGEST_NAME] = classification.get(_RTK_SCRIPT_NAME, False)
 
     return classification
 
 
-def _references_context_tool(entry: Any, hook_classification: dict[str, bool | None]) -> bool:
+def _references_context_tool(
+    entry: Any, hooks_dir: Path, hook_classification: dict[str, bool | None]
+) -> bool:
     """Whether a hook entry is one a retired context tool registered.
 
     A command-marker hit alone is not enough — a user could author a script
     with a matching name. It must also either name the managed bin directory
-    directly, or point at a hook script the classification map marks
-    ``True`` (see :func:`_classify_hook_scripts`).
+    directly, or name — by full path, not basename, so a same-named script
+    of the user's own in a different directory is never caught — a hook
+    script in ``hooks_dir`` the classification map marks ``True`` (see
+    :func:`_classify_hook_scripts`).
     """
     if not isinstance(entry, dict):
         return False
@@ -290,10 +356,16 @@ def _references_context_tool(entry: Any, hook_classification: dict[str, bool | N
         return False
     if _references_managed_bin(command):
         return True
-    return hook_classification.get(Path(command).name) is True
+    command_path = os.path.normcase(os.path.expanduser(command))
+    for name, verdict in hook_classification.items():
+        if command_path == os.path.normcase(str(hooks_dir / name)):
+            return verdict is True
+    return False
 
 
-def _prune_hooks(hooks: Any, hook_classification: dict[str, bool | None]) -> tuple[Any, bool]:
+def _prune_hooks(
+    hooks: Any, hooks_dir: Path, hook_classification: dict[str, bool | None]
+) -> tuple[Any, bool]:
     """Drop retired-tool entries from a ``hooks`` mapping; return ``(pruned, changed)``.
 
     Handles both shapes Headroom's installers produced: Claude Code nests
@@ -314,7 +386,7 @@ def _prune_hooks(hooks: Any, hook_classification: dict[str, bool | None]) -> tup
         retained: list[Any] = []
         for entry in entries:
             # Cursor shape: the command sits on the entry itself.
-            if _references_context_tool(entry, hook_classification):
+            if _references_context_tool(entry, hooks_dir, hook_classification):
                 changed = True
                 continue
             # Claude shape: a matcher entry holding a list of hooks.
@@ -323,7 +395,7 @@ def _prune_hooks(hooks: Any, hook_classification: dict[str, bool | None]) -> tup
                 kept_inner = [
                     item
                     for item in inner
-                    if not _references_context_tool(item, hook_classification)
+                    if not _references_context_tool(item, hooks_dir, hook_classification)
                 ]
                 if len(kept_inner) != len(inner):
                     changed = True
@@ -344,7 +416,9 @@ def _prune_hooks(hooks: Any, hook_classification: dict[str, bool | None]) -> tup
     return pruned, changed
 
 
-def _purge_hook_config(path: Path, hook_classification: dict[str, bool | None]) -> list[str]:
+def _purge_hook_config(
+    path: Path, hooks_dir: Path, hook_classification: dict[str, bool | None]
+) -> list[str]:
     """Remove retired-tool hook registrations from a JSON hook config."""
     if not path.is_file():
         return []
@@ -355,7 +429,7 @@ def _purge_hook_config(path: Path, hook_classification: dict[str, bool | None]) 
     if not isinstance(payload, dict):
         return [f"skipped {path} (not a JSON object) — remove any stale hook by hand"]
 
-    hooks, changed = _prune_hooks(payload.get("hooks"), hook_classification)
+    hooks, changed = _prune_hooks(payload.get("hooks"), hooks_dir, hook_classification)
     if not changed:
         return []
     if hooks:
