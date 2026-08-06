@@ -87,16 +87,29 @@ def purge_context_tool_artifacts() -> list[str]:
     project = Path.cwd()
     report: list[str] = []
 
+    # Classify every hook script's provenance once, up front: both step 1 (is
+    # a settings.json entry pointing at *our* script?) and step 2 (is the
+    # script itself ours?) need the same answer, and each file is read once.
+    hooks_dir = home / ".claude" / "hooks"
+    hook_classification = _classify_hook_scripts(hooks_dir)
+
     # 1. Hook registrations (Claude Code's settings.json, Cursor's hooks.json).
     for config in (home / ".claude" / "settings.json", home / ".cursor" / "hooks.json"):
-        report += _purge_hook_config(config)
+        report += _purge_hook_config(config, hook_classification)
 
-    # 2. The generated hook scripts, their integrity digests and stale backups.
-    hooks_dir = home / ".claude" / "hooks"
+    # 2. The generated hook scripts, their integrity digests and stale backups
+    # — only the ones proven to reference Headroom's managed bin directory.
+    managed_names = [name for name in _HOOK_SCRIPTS if hook_classification.get(name)]
     report += _remove_files(
-        *(hooks_dir / name for name in _HOOK_SCRIPTS),
-        *(hooks_dir / f"{name}.lean-ctx.bak" for name in _HOOK_SCRIPTS),
+        *(hooks_dir / name for name in managed_names),
+        *(hooks_dir / f"{name}.lean-ctx.bak" for name in managed_names),
     )
+    report += [
+        f"skipped {hooks_dir / name} (could not read to verify it was Headroom's)"
+        " — remove any stale hook script by hand"
+        for name in _HOOK_SCRIPTS
+        if hook_classification.get(name, False) is None
+    ]
 
     # 3. The PATH symlinks, then the managed binaries they pointed at.
     for name in ("rtk", "lean-ctx"):
@@ -151,15 +164,90 @@ def _opencode_home(home: Path) -> Path:
 # --- hook registrations -------------------------------------------------------
 
 
-def _references_context_tool(entry: Any) -> bool:
-    """Whether a hook entry's command is one a retired context tool registered."""
+def _references_managed_bin(text: str) -> bool:
+    """Whether ``text`` names a path inside Headroom's managed bin directory.
+
+    A hook command or script body is free text we don't control, so this is a
+    substring match over normalized forms of both sides: the unresolved and
+    resolved bin directory, its ``~``-relative form (home-relative, since a
+    script may reference it unexpanded), case-folded, with both path
+    separators — matched against the text as given and as ``expanduser``'d.
+    # ponytail: substring match over normalized forms, not a shell parse —
+    # upgrade to shlex if a command ever embeds a managed path it does not
+    # execute.
+    """
+    try:
+        bin_dir = paths.bin_dir()
+        resolved_bin_dir = bin_dir.resolve()
+    except OSError:
+        return False
+
+    def _norm(value: str) -> str:
+        return os.path.normcase(value).replace("\\", "/")
+
+    needles = {_norm(str(bin_dir)), _norm(str(resolved_bin_dir))}
+    home = Path.home()
+    for base in (bin_dir, resolved_bin_dir):
+        try:
+            needles.add(_norm(f"~/{base.relative_to(home).as_posix()}"))
+        except ValueError:
+            pass
+
+    haystacks = {_norm(text), _norm(os.path.expanduser(text))}
+    return any(needle in haystack for needle in needles for haystack in haystacks)
+
+
+def _classify_hook_scripts(hooks_dir: Path) -> dict[str, bool | None]:
+    """Classify each existing ``_HOOK_SCRIPTS`` file by whether it is Headroom's.
+
+    ``True`` — the file exists and its body references the managed bin
+    directory. ``False`` — it exists and does not. ``None`` — it exists but
+    could not be read, so its provenance is unprovable. A basename with no
+    file on disk is simply absent from the map. Each file is read at most once.
+
+    ``.rtk-hook.sha256`` holds a hex digest that can never reference a path,
+    so it is never read; it inherits ``rtk-rewrite.sh``'s classification.
+    """
+    classification: dict[str, bool | None] = {}
+    digest_name = ".rtk-hook.sha256"
+    for name in _HOOK_SCRIPTS:
+        if name == digest_name:
+            continue
+        path = hooks_dir / name
+        if not path.is_file():
+            continue
+        try:
+            body = fsutil.read_text(path)
+        except OSError:
+            classification[name] = None
+            continue
+        classification[name] = _references_managed_bin(body)
+
+    if (hooks_dir / digest_name).is_file():
+        classification[digest_name] = classification.get("rtk-rewrite.sh", False)
+
+    return classification
+
+
+def _references_context_tool(entry: Any, hook_classification: dict[str, bool | None]) -> bool:
+    """Whether a hook entry is one a retired context tool registered.
+
+    A command-marker hit alone is not enough — a user could author a script
+    with a matching name. It must also either name the managed bin directory
+    directly, or point at a hook script the classification map marks
+    ``True`` (see :func:`_classify_hook_scripts`).
+    """
     if not isinstance(entry, dict):
         return False
-    command = str(entry.get("command", "")).lower()
-    return any(marker in command for marker in _HOOK_COMMAND_MARKERS)
+    command = str(entry.get("command", ""))
+    if not any(marker in command.lower() for marker in _HOOK_COMMAND_MARKERS):
+        return False
+    if _references_managed_bin(command):
+        return True
+    return hook_classification.get(Path(command).name) is True
 
 
-def _prune_hooks(hooks: Any) -> tuple[Any, bool]:
+def _prune_hooks(hooks: Any, hook_classification: dict[str, bool | None]) -> tuple[Any, bool]:
     """Drop retired-tool entries from a ``hooks`` mapping; return ``(pruned, changed)``.
 
     Handles both shapes Headroom's installers produced: Claude Code nests
@@ -180,13 +268,17 @@ def _prune_hooks(hooks: Any) -> tuple[Any, bool]:
         retained: list[Any] = []
         for entry in entries:
             # Cursor shape: the command sits on the entry itself.
-            if _references_context_tool(entry):
+            if _references_context_tool(entry, hook_classification):
                 changed = True
                 continue
             # Claude shape: a matcher entry holding a list of hooks.
             inner = entry.get("hooks") if isinstance(entry, dict) else None
             if isinstance(inner, list):
-                kept_inner = [item for item in inner if not _references_context_tool(item)]
+                kept_inner = [
+                    item
+                    for item in inner
+                    if not _references_context_tool(item, hook_classification)
+                ]
                 if len(kept_inner) != len(inner):
                     changed = True
                     if not kept_inner:
@@ -206,7 +298,7 @@ def _prune_hooks(hooks: Any) -> tuple[Any, bool]:
     return pruned, changed
 
 
-def _purge_hook_config(path: Path) -> list[str]:
+def _purge_hook_config(path: Path, hook_classification: dict[str, bool | None]) -> list[str]:
     """Remove retired-tool hook registrations from a JSON hook config."""
     if not path.is_file():
         return []
@@ -217,7 +309,7 @@ def _purge_hook_config(path: Path) -> list[str]:
     if not isinstance(payload, dict):
         return [f"skipped {path} (not a JSON object) — remove any stale hook by hand"]
 
-    hooks, changed = _prune_hooks(payload.get("hooks"))
+    hooks, changed = _prune_hooks(payload.get("hooks"), hook_classification)
     if not changed:
         return []
     if hooks:
@@ -236,8 +328,10 @@ def _purge_mcp_entries(path: Path, container_key: str) -> list[str]:
 
     ``lean-ctx init`` registers lean-ctx as an MCP server in the harness's own
     config — Claude Code keeps them under ``mcpServers``, OpenCode under ``mcp``.
-    Only the exactly-named entries are removed; every other server, and every
-    unrelated top-level key, is preserved byte-for-byte.
+    A name match alone is not enough — a user can register their own server
+    under the same name — so an entry is removed only when its ``command``
+    also names Headroom's managed bin directory. Every other server, and
+    every unrelated top-level key, is preserved byte-for-byte.
     """
     if not path.is_file():
         return []
@@ -251,7 +345,13 @@ def _purge_mcp_entries(path: Path, container_key: str) -> list[str]:
     servers = payload.get(container_key)
     if not isinstance(servers, dict):
         return []
-    removed = [name for name in _MCP_SERVER_NAMES if name in servers]
+    removed = [
+        name
+        for name in _MCP_SERVER_NAMES
+        if isinstance(servers.get(name), dict)
+        and isinstance(servers[name].get("command"), str)
+        and _references_managed_bin(servers[name]["command"])
+    ]
     if not removed:
         return []
     for name in removed:
