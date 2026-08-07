@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import math
 import os
 import platform
+import re
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +22,18 @@ from headroom import paths
 SESSION_SCHEMA_VERSION = 1
 DEFAULT_STALE_AFTER_SECONDS = 120
 logger = logging.getLogger(__name__)
+_SAFE_CLUSTER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_AGGREGATE_METRIC_KEYS = frozenset(
+    {
+        "requests",
+        "tokens_saved",
+        "input_tokens",
+        "output_tokens",
+        "failed_requests",
+        "cached_requests",
+        "rate_limited_requests",
+    }
+)
 
 
 def _utc_now() -> datetime:
@@ -62,6 +78,13 @@ class ClusterConfig:
     cluster_id: str
     cluster_dir: Path
 
+    def __post_init__(self) -> None:
+        if self.cluster_id in {".", ".."} or not _SAFE_CLUSTER_ID.fullmatch(self.cluster_id):
+            raise ValueError(
+                "HEADROOM_CLUSTER_ID must be a single path-safe component containing "
+                "only letters, numbers, dots, underscores, and hyphens"
+            )
+
     @classmethod
     def from_env(cls) -> ClusterConfig:
         return cls(
@@ -74,7 +97,6 @@ class ClusterConfig:
         return {
             "enabled": self.enabled,
             "cluster_id": self.cluster_id,
-            "cluster_dir": str(self.cluster_dir),
         }
 
 
@@ -128,6 +150,14 @@ class ActiveSessionRegistry:
 
     def heartbeat(self, metrics: dict[str, Any] | None = None) -> dict[str, Any]:
         now = _utc_now()
+        aggregate_metrics = {
+            key: value
+            for key, value in (metrics or {}).items()
+            if key in _AGGREGATE_METRIC_KEYS
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        }
         payload = {
             "schema_version": SESSION_SCHEMA_VERSION,
             "session_id": self.session_id,
@@ -137,7 +167,7 @@ class ActiveSessionRegistry:
             "started_at": _to_iso(self.started_at),
             "last_heartbeat_at": _to_iso(now),
             "cluster": self.cluster.snapshot(),
-            "metrics": metrics or {},
+            "metrics": aggregate_metrics,
         }
         try:
             _atomic_write_json(self.local_manifest_path, payload)
@@ -160,11 +190,41 @@ class ActiveSessionRegistry:
         self._last_payload = payload
         return payload
 
+    async def run_heartbeat_loop(
+        self,
+        metrics_provider: Callable[[], dict[str, Any]],
+        *,
+        interval_seconds: float | None = None,
+    ) -> None:
+        """Refresh this process manifest until the lifecycle task is cancelled."""
+
+        interval = interval_seconds or max(1.0, self.stale_after_seconds / 3)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                self.heartbeat(metrics_provider())
+            except Exception as exc:  # noqa: BLE001 - best-effort sidecar must stay alive
+                logger.warning("event=active_session_heartbeat_failed error=%s", exc)
+
     def close(self) -> None:
-        self.local_manifest_path.unlink(missing_ok=True)
+        try:
+            self.local_manifest_path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "event=active_session_manifest_cleanup_failed scope=local path=%s error=%s",
+                self.local_manifest_path,
+                exc,
+            )
         cluster_path = self.cluster_manifest_path
         if cluster_path is not None:
-            cluster_path.unlink(missing_ok=True)
+            try:
+                cluster_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning(
+                    "event=active_session_manifest_cleanup_failed scope=cluster path=%s error=%s",
+                    cluster_path,
+                    exc,
+                )
 
     def snapshot(self, metrics: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.heartbeat(metrics)

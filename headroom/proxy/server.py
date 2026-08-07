@@ -2040,7 +2040,6 @@ class HeadroomProxy(
             "failed_requests": m.requests_failed,
             "cached_requests": m.requests_cached,
             "rate_limited_requests": m.requests_rate_limited,
-            "savings_storage_path": m.savings_tracker.storage_path,
         }
 
     async def _next_request_id(self) -> str:
@@ -2569,6 +2568,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+        session_heartbeat_task: asyncio.Task[None] | None = None
         # Hotfix-A0: Rust core deployment smoke test. Refuse to accept
         # traffic if the Rust extension is missing unless the operator
         # explicitly opted out with HEADROOM_REQUIRE_RUST_CORE=false. See
@@ -2594,6 +2594,12 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 previous_handler = _install_loop_exception_handler()
                 # Startup
                 await proxy.startup()
+                session_heartbeat_task = asyncio.create_task(
+                    proxy.active_session_registry.run_heartbeat_loop(
+                        proxy._session_metrics_snapshot
+                    ),
+                    name="headroom-active-session-heartbeat",
+                )
                 if config.periodic_toin_stats_enabled:
                     asyncio.create_task(_log_toin_stats_periodically())
                 if proxy.usage_reporter:
@@ -2647,6 +2653,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
             if _cc_reconciler is not None:
                 await _timed(_cc_reconciler.stop(), label="cc_reconciler.stop", timeout=3.0)
+            if session_heartbeat_task is not None:
+                session_heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await session_heartbeat_task
             if _beacon_is_owner[0]:
                 _release_beacon_lock()
             if proxy.usage_reporter:
