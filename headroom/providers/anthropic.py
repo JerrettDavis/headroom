@@ -24,7 +24,11 @@ import warnings
 from typing import Any, cast
 
 from headroom import paths as _paths
-from headroom.tokenizers.base import count_content_blocks
+from headroom.tokenizers.base import (
+    TokenCountCache,
+    coerce_countable_text,
+    count_content_blocks,
+)
 
 from .base import Provider, TokenCounter
 
@@ -309,6 +313,7 @@ class AnthropicTokenCounter(TokenCounter):
         self.model = model
         self._client = client
         self._encoding: Any = None
+        self._count_cache = TokenCountCache()
         self._use_api = client is not None
 
         if not self._use_api and warn and not _FALLBACK_WARNING_SHOWN:
@@ -351,6 +356,14 @@ class AnthropicTokenCounter(TokenCounter):
         if not text:
             return 0
 
+        cached = self._count_cache.get(text)
+        if cached is not None:
+            return cached
+        count = self._count_text_uncached(text)
+        self._count_cache.put(text, count)
+        return count
+
+    def _count_text_uncached(self, text: str) -> int:
         if self._encoding:
             # tiktoken with ~1.1x multiplier for Claude
             try:
@@ -411,9 +424,9 @@ class AnthropicTokenCounter(TokenCounter):
         if "tool_calls" in message:
             for tool_call in message.get("tool_calls", []):
                 if isinstance(tool_call, dict):
-                    func = tool_call.get("function", {})
-                    tokens += self.count_text(func.get("name", ""))
-                    tokens += self.count_text(func.get("arguments", ""))
+                    func = tool_call.get("function") or {}
+                    tokens += self.count_text(coerce_countable_text(func.get("name")))
+                    tokens += self.count_text(coerce_countable_text(func.get("arguments")))
 
         return tokens
 

@@ -470,6 +470,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("headroom.proxy")
 
+
+class _SuppressCancelledErrorFilter(logging.Filter):
+    """Hide expected uvicorn CancelledError tracebacks during shutdown."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno == logging.ERROR and record.exc_info:
+            exc_type = record.exc_info[0]
+            if exc_type is not None and issubclass(exc_type, asyncio.CancelledError):
+                return False
+        return True
+
+
 LoopExceptionHandler = Callable[[asyncio.AbstractEventLoop, dict[str, Any]], object]
 
 
@@ -1626,6 +1638,26 @@ class HeadroomProxy(
                 for key, value in transform_status.items():
                     eager_status.setdefault(key, value)
                 transform_statuses.append(transform_status)
+
+        # LiteLLM's pricing tables. MEASURED 2.9-3.8s to import, and it was
+        # being imported lazily ON THE EVENT LOOP during the first request:
+        # emit_request_outcome -> record_request -> _estimate_compression_savings_usd
+        # calls it before its own `tokens_saved <= 0` early return, so even a
+        # request that saved nothing pays for it. Nothing about that is visible
+        # as a failure; it just makes one unlucky user wait ~3s.
+        #
+        # This function already runs under asyncio.to_thread, so importing here
+        # cannot delay the port bind.
+        try:
+            from .savings_tracker import _get_litellm_module
+
+            eager_status.setdefault(
+                "litellm", "ready" if _get_litellm_module() is not None else "not installed"
+            )
+        except Exception as exc:  # pricing is optional; never block startup on it
+            logger.debug("LiteLLM pre-load skipped: %s", exc)
+            eager_status.setdefault("litellm", "skipped")
+
         return eager_status, transform_statuses
 
     async def startup(self):
@@ -2565,21 +2597,39 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 loop.set_exception_handler(previous)
 
             app.state.ready = False
-            # Shutdown
+            logger.info("event=proxy_shutdown reason=signal pid=%d", os.getpid())
+
+            async def _timed(coro: Any, *, label: str, timeout: float) -> None:
+                try:
+                    await asyncio.wait_for(coro, timeout=timeout)
+                except Exception as exc:
+                    logger.warning(
+                        "event=shutdown_step_timeout_or_error label=%s timeout=%.1fs exc=%r",
+                        label,
+                        timeout,
+                        exc,
+                    )
+
             if _cc_reconciler is not None:
-                await _cc_reconciler.stop()
+                await _timed(_cc_reconciler.stop(), label="cc_reconciler.stop", timeout=3.0)
             if _beacon_is_owner[0]:
                 _release_beacon_lock()
             if proxy.usage_reporter:
-                await proxy.usage_reporter.stop()
+                await _timed(proxy.usage_reporter.stop(), label="usage_reporter.stop", timeout=3.0)
             if proxy.traffic_learner:
-                await proxy.traffic_learner.stop()
+                await _timed(
+                    proxy.traffic_learner.stop(), label="traffic_learner.stop", timeout=3.0
+                )
             if proxy._background_compression_enabled:
-                await proxy._background_compressor.stop()
+                await _timed(
+                    proxy._background_compressor.stop(),
+                    label="background_compressor.stop",
+                    timeout=3.0,
+                )
             proxy._background_compression_executor.shutdown(wait=False)
             if proxy.code_graph_watcher:
                 proxy.code_graph_watcher.stop()
-            await proxy.shutdown()
+            await _timed(proxy.shutdown(), label="proxy.shutdown", timeout=5.0)
             shutdown_headroom_tracing()
             shutdown_otel_metrics()
 
@@ -5080,6 +5130,12 @@ def run_server(
 ╚══════════════════════════════════════════════════════════════════════╝
 """)
 
+    uvicorn_error_logger = logging.getLogger("uvicorn.error")
+    if not any(
+        isinstance(item, _SuppressCancelledErrorFilter) for item in uvicorn_error_logger.filters
+    ):
+        uvicorn_error_logger.addFilter(_SuppressCancelledErrorFilter())
+
     app_target: Any
     uvicorn_kwargs: dict[str, Any] = {}
     if sys.platform == "win32":
@@ -5135,6 +5191,7 @@ def run_server(
         # default. Disabling proxy_headers here guarantees the guard sees the
         # real peer address regardless of env.
         proxy_headers=False,
+        timeout_graceful_shutdown=10,
         **uvicorn_kwargs,
     )
 

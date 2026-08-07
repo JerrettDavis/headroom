@@ -160,6 +160,13 @@ class LiteLLMModelPricing:
     max_output_tokens: int | None = None
     supports_vision: bool = False
     supports_function_calling: bool = False
+    # Prompt-cache traffic, where LiteLLM knows it. ``None`` means "not published
+    # for this model", which is distinct from 0.0 ("free"): the 1h write rate in
+    # particular is absent for most models, and a caller that needs it must either
+    # derive it (see :mod:`headroom.pricing.cache_ttl`) or report that it could not.
+    cache_read_per_1m: float | None = None
+    cache_write_5m_per_1m: float | None = None
+    cache_write_1h_per_1m: float | None = None
 
 
 def get_litellm_model_cost() -> dict[str, Any]:
@@ -209,7 +216,24 @@ def get_model_pricing(model: str) -> LiteLLMModelPricing | None:
         max_output_tokens=info.get("max_output_tokens"),
         supports_vision=info.get("supports_vision", False),
         supports_function_calling=info.get("supports_function_calling", False),
+        cache_read_per_1m=_per_1m(info.get("cache_read_input_token_cost")),
+        cache_write_5m_per_1m=_per_1m(info.get("cache_creation_input_token_cost")),
+        cache_write_1h_per_1m=_per_1m(info.get("cache_creation_input_token_cost_above_1hr")),
     )
+
+
+def _per_1m(cost_per_token: object) -> float | None:
+    """Scale a LiteLLM per-token cost to per-1M, preserving "not published".
+
+    ``None`` in, ``None`` out — the absence of a rate is information and must not
+    collapse into 0.0, which would read as free.
+    """
+    if not isinstance(cost_per_token, (int, float, str)):
+        return None
+    try:
+        return float(cost_per_token) * 1_000_000
+    except (TypeError, ValueError):
+        return None
 
 
 def pricing_per_1m(model: str) -> tuple[float, float] | None:
