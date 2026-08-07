@@ -2928,7 +2928,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             "uptime_seconds": _uptime_seconds(),
             "checks": checks,
             "runtime": _runtime_payload(),
-            "capabilities": capability_report.to_dict(),
+            "capabilities": capability_report.to_dict(include_workspace_dir=include_config),
             # Hotfix-A0: surface rust core load state so operators can alert
             # on `rust_core != "loaded"` (Finding #2).
             "rust_core": getattr(app.state, "rust_core_status", "missing"),
@@ -3342,8 +3342,13 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         return JSONResponse(status_code=200, content=payload)
 
     @app.get("/capabilities")
-    async def capabilities():
-        return JSONResponse(status_code=200, content=capability_report.to_dict())
+    async def capabilities(request: Request):
+        return JSONResponse(
+            status_code=200,
+            content=capability_report.to_dict(
+                include_workspace_dir=_request_is_loopback(request)
+            ),
+        )
 
     # Loopback-only debug introspection (Unit 5). A remote IP gets 404 —
     # debug endpoints are invisible to external scanners.
@@ -4282,6 +4287,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             # _build_stats_payload bakes these in; strip for network callers.
             payload.pop("recent_requests", None)
             payload.pop("request_logs", None)
+        payload["capabilities"] = capability_report.to_dict(
+            include_workspace_dir=include_sensitive
+        )
         return payload
 
     @app.get("/stats-lifetime")

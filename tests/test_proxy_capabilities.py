@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -83,10 +84,44 @@ def test_capabilities_endpoint_health_stats_and_metrics_share_report() -> None:
     capability_payload = capabilities.json()
     assert capability_payload["detached"] is True
     assert capability_payload["local_state"]["available"] is False
+    assert "workspace_dir" not in capability_payload["local_state"]
     assert health.json()["capabilities"] == capability_payload
     assert stats.json()["capabilities"] == capability_payload
     assert 'headroom_feature_enabled{feature="proxy_request_handling"' in metrics.text
     assert 'headroom_feature_enabled{feature="session_aggregation"' in metrics.text
+
+
+def test_loopback_capabilities_include_operator_workspace_path() -> None:
+    app = create_app(_minimal_config(stateless=True))
+
+    with TestClient(
+        app,
+        client=("127.0.0.1", 50000),
+        headers={"host": "127.0.0.1"},
+    ) as client:
+        capabilities = client.get("/capabilities").json()
+        health = client.get("/health").json()
+        stats = client.get("/stats").json()
+
+    expected = str(Path(os.environ["HEADROOM_WORKSPACE_DIR"]))
+    assert capabilities["local_state"]["workspace_dir"] == expected
+    assert health["capabilities"]["local_state"]["workspace_dir"] == expected
+    assert stats["capabilities"]["local_state"]["workspace_dir"] == expected
+
+
+def test_remote_health_never_exposes_workspace_path() -> None:
+    app = create_app(_minimal_config(stateless=True, host="0.0.0.0"))
+
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"host": "proxy.example.test"},
+    ) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert str(Path(os.environ["HEADROOM_WORKSPACE_DIR"])) not in response.text
+    assert "workspace_dir" not in response.json()["capabilities"]["local_state"]
 
 
 def test_stateless_startup_skips_file_logging(

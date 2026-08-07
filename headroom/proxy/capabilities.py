@@ -68,16 +68,18 @@ class CapabilityReport:
             feature for feature in self.features if feature.strict_required and feature.degraded
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_workspace_dir: bool = True) -> dict[str, Any]:
         violations = self.strict_violations
+        local_state: dict[str, Any] = {
+            "available": self.local_state_available,
+            "reason": self.local_state_reason,
+        }
+        if include_workspace_dir:
+            local_state["workspace_dir"] = self.workspace_dir
         return {
             "detached": self.detached,
             "profile": self.profile,
-            "local_state": {
-                "available": self.local_state_available,
-                "reason": self.local_state_reason,
-                "workspace_dir": self.workspace_dir,
-            },
+            "local_state": local_state,
             "features": [feature.to_dict() for feature in self.features],
             "strict_violations": [feature.to_dict() for feature in violations],
         }
