@@ -270,7 +270,7 @@ Defers large tool schemas so they don't sit in every request. See [MCP](/docs/mc
 
 | Env | Scope | Effect |
 |---|---|---|
-| `HEADROOM_TOOL_SEARCH` | proxy (server-side) | Defer MCP/system tool schemas behind a `search_tools` tool. The `coding` profile enables it. |
+| `HEADROOM_TOOL_SEARCH` | proxy (server-side) | Defer MCP/system tool schemas behind a `search_tools` tool. **On by default** for Anthropic requests carrying enough tools to be worth it; set `HEADROOM_TOOL_SEARCH=0` to opt out. |
 | `ENABLE_TOOL_SEARCH` | client (Claude Code) | Keep Claude Code's own deferred tool-loading active behind a custom base URL ([issue #746](https://github.com/headroomlabs-ai/headroom/issues/746)). Set automatically by `headroom wrap`. |
 
 ### Cost-aware model routing

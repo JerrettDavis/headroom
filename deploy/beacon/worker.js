@@ -28,9 +28,12 @@
  * deanonymise install_id, so it is never read.
  */
 
-// Mirrors the payload built by _Session.payload(). A key absent here is
-// dropped, not stored. Adding a metric means adding it here first — that
-// friction is the point.
+// Mostly mirrors the payload built by _Session.payload(); an extension may
+// also emit its own event carrying one of these top-level keys. A key absent
+// here is dropped, not stored. Adding a metric means adding it here first —
+// that friction is the point, and it is also the only privacy control that
+// works retroactively, so it must land BEFORE any client starts sending the
+// key or that traffic is silently discarded and unrecoverable.
 const ALLOWED_KEYS = [
   'schema_version',
   'session',
@@ -42,6 +45,14 @@ const ALLOWED_KEYS = [
   'providers',
   'models',
   'failures',
+  'failure_statuses',
+  // Model-routing summary. Emitted by a routing extension rather than by the
+  // proxy itself -- see proxy/route_advice.py for the decision seam. Same rule
+  // as everything above: counters and model ids, no free text. Allowlisted
+  // here so the corpus can answer what the proxy alone cannot -- a provider's
+  // real minimum cacheable prefix, how long a cache actually survives, and how
+  // far predicted cache hits are from the ones that happened.
+  'routing',
 ];
 
 // Resource attributes we keep. Same rule: allowlist, not denylist.
