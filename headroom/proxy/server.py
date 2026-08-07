@@ -3345,9 +3345,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     async def capabilities(request: Request):
         return JSONResponse(
             status_code=200,
-            content=capability_report.to_dict(
-                include_workspace_dir=_request_is_loopback(request)
-            ),
+            content=capability_report.to_dict(include_workspace_dir=_request_is_loopback(request)),
         )
 
     # Loopback-only debug introspection (Unit 5). A remote IP gets 404 —
@@ -4287,9 +4285,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             # _build_stats_payload bakes these in; strip for network callers.
             payload.pop("recent_requests", None)
             payload.pop("request_logs", None)
-        payload["capabilities"] = capability_report.to_dict(
-            include_workspace_dir=include_sensitive
-        )
+        payload["capabilities"] = capability_report.to_dict(include_workspace_dir=include_sensitive)
         return payload
 
     @app.get("/stats-lifetime")
