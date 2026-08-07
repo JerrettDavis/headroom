@@ -795,7 +795,7 @@ _RETIRED_CONTEXT_TOOL_MESSAGE = (
     "rewrote shell commands through a third-party binary Headroom no longer "
     "manages. Drop --context-tool / --no-context-tool and unset "
     f"{_RETIRED_CONTEXT_TOOL_ENV}; `headroom wrap` uninstalls what they left "
-    "behind on first run."
+    "behind automatically."
 )
 
 
@@ -855,8 +855,10 @@ def _report_context_tool_purge() -> None:
     default: the Claude ``PreToolUse`` hook, the vendored binaries and the
     injected hint-file guidance are all durable on disk. Running this once per
     ``wrap`` / ``unwrap`` invocation is what actually makes the tools go away.
-    Silent when there is nothing to do, which is the steady state after the first
-    run, and never fatal — a cleanup failure must not block launching the tool.
+    Silent when there is nothing to do — the common case once the machine-global
+    half is stamped done, though the project- and config-directory-scoped half
+    still runs every launch — and never fatal: a cleanup failure must not block
+    launching the tool.
 
     Reports on **stderr**: some subcommands (``wrap/unwrap openclaw
     --prepare-only``) emit machine-readable JSON on stdout as their entire

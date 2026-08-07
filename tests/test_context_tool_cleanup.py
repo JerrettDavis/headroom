@@ -220,11 +220,14 @@ def test_no_op_on_a_clean_machine(home):
 
 
 def test_a_completed_purge_never_runs_again(home):
-    """The purge is a one-time migration, not a per-launch audit of the user's config.
+    """Machine-global artifacts stay stamped-done: no per-launch re-audit.
 
-    A tool installed after the migration is not a leftover, so a later run must
-    leave it alone without even looking — this is what stops `headroom wrap`
-    from re-litigating the user's config on every launch, forever.
+    A tool installed under the *global* half (hooks, binaries) after the
+    migration is not a leftover, so a later run must leave it alone without
+    even looking — this is what stops `headroom wrap` from re-litigating
+    machine-global state on every launch, forever. Project- and config-
+    directory-scoped guidance is a different story: see
+    `test_a_completed_purge_still_cleans_a_different_project`.
     """
     bin_dir = paths.bin_dir()
 
@@ -241,6 +244,67 @@ def test_a_completed_purge_never_runs_again(home):
     assert context_tool_cleanup.purge_context_tool_artifacts() == []
     assert binary.exists()
     assert script.exists()
+
+
+def test_a_completed_purge_still_cleans_a_different_project(home, monkeypatch):
+    """The one-time stamp is machine-global; project guidance is not.
+
+    A completed run in project A must not leave project B's fenced guidance in
+    place forever — the stamp only ever covered a snapshot of ``Path.cwd()``.
+    """
+    assert context_tool_cleanup.purge_context_tool_artifacts() == []
+    assert (paths.bin_dir().parent / ".context-tools-purged").exists()
+
+    project_b = home / "project-b"
+    project_b.mkdir()
+    agents = _write(
+        project_b / "AGENTS.md",
+        "# Project B\n\n<!-- headroom:rtk-instructions -->\nAlways prefix with rtk.\n"
+        "<!-- /headroom:rtk-instructions -->\n",
+    )
+    monkeypatch.chdir(project_b)
+
+    report = context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert "rtk" not in agents.read_text()
+    assert any(str(agents) in line for line in report)
+
+
+def test_a_completed_purge_still_inspects_a_repointed_codex_home(home, monkeypatch):
+    """``CODEX_HOME`` can point somewhere new after the stamp; that target is not exempt."""
+    assert context_tool_cleanup.purge_context_tool_artifacts() == []
+    assert (paths.bin_dir().parent / ".context-tools-purged").exists()
+
+    new_codex_home = home / "elsewhere-codex"
+    new_codex_home.mkdir()
+    agents = _write(
+        new_codex_home / "AGENTS.md",
+        "<!-- headroom:rtk-instructions -->\nAlways prefix with rtk.\n"
+        "<!-- /headroom:rtk-instructions -->\n",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(new_codex_home))
+
+    report = context_tool_cleanup.purge_context_tool_artifacts()
+
+    # Nothing but the fence was in the file, so it is removed outright.
+    assert not agents.exists()
+    assert any(str(agents) in line for line in report)
+
+
+def test_a_scoped_deferral_does_not_withhold_the_global_stamp(home):
+    """A scoped step's leftover must not re-run the whole global half forever.
+
+    Only the invocation-scoped half is unprovable here (malformed Continue
+    config); the machine-global half has nothing to defer, so its stamp must
+    still be written — otherwise a permanently-broken ``.continue/config.json``
+    would force every hook/binary/MCP step to be re-walked on every launch.
+    """
+    _write(home / "project" / ".continue" / "config.json", "{not json")
+
+    report = context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert any(line.startswith("skipped ") for line in report)
+    assert (paths.bin_dir().parent / ".context-tools-purged").exists()
 
 
 def test_purge_reports_on_stderr_so_json_stdout_stays_parseable(home):

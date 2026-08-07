@@ -11,8 +11,12 @@ user's disk*. Left alone, the Claude hooks keep rewriting every Bash command
 through binaries Headroom no longer manages, and the injected guidance keeps
 telling agents to use tools that may not resolve. So ``headroom wrap`` /
 ``headroom unwrap`` call :func:`purge_context_tool_artifacts` on every run to
-remove what earlier versions installed — though the removal itself happens
-once per machine, not once per launch (see the stamp below).
+remove what earlier versions installed — machine-global artifacts (hooks,
+binaries, Claude Code's MCP registration) are removed once per workspace and
+then stamped done (see the stamp below), while project- and config-directory-
+scoped guidance (``CODEX_HOME`` / ``OPENCODE_HOME`` hint files, Continue's
+config) is inspected on every launch, since a later launch can sit in a
+different project or point at a different ``CODEX_HOME`` / ``OPENCODE_HOME``.
 
 Everything here is idempotent, best-effort and deliberately conservative:
 
@@ -64,12 +68,21 @@ Everything here is idempotent, best-effort and deliberately conservative:
   to make — ``<!-- headroom:rtk-instructions -->`` is Headroom's own fence,
   and no third party writes it.
 
-Removing the retired integration is a one-time migration, so the first
-completed run stamps ``.context-tools-purged`` beside the managed bin
-directory and every later run returns immediately. Without it this would keep
-rewriting the user's own config files on every ``wrap`` invocation forever,
-and a user who installs one of these tools *after* the migration would have
-Headroom auditing their files at each launch for a leftover that cannot exist.
+Removing the retired integration's machine-global footprint — hook
+registrations, hook scripts, PATH symlinks, managed binaries and Claude
+Code's own MCP registration — is a one-time migration: the first completed
+run of that half stamps ``.context-tools-purged`` beside the managed bin
+directory, and every later run skips that half outright. Without the stamp
+this would keep rewriting the same machine-wide files on every ``wrap``
+invocation forever, and a user who installs one of these tools *after* the
+migration would have Headroom auditing files at each launch for a leftover
+that cannot exist there.
+
+Project- and config-directory-scoped state is not covered by that stamp: a
+later invocation can sit in a different project, or point ``CODEX_HOME`` /
+``OPENCODE_HOME`` somewhere the stamped run never inspected, and whatever
+guidance an earlier Headroom left behind there is still worth removing — so
+those steps run on every invocation instead (:func:`_purge_invocation_scoped`).
 """
 
 from __future__ import annotations
@@ -139,74 +152,96 @@ def purge_context_tool_artifacts() -> list[str]:
     """Remove every rtk / lean-ctx artifact an earlier Headroom version installed.
 
     Returns human-readable descriptions of what was removed — plus a line for
-    any config that had to be skipped because the user must fix it by hand. An
-    empty list means there was nothing to do, which is the steady state after
-    the first run.
+    any config that had to be skipped because the user must fix it by hand.
+    Machine-global cleanup (hooks, binaries, Claude Code's MCP registration)
+    runs once and is then skipped via the stamp below; project- and config-
+    directory-scoped cleanup (hint files, ``CODEX_HOME`` / ``OPENCODE_HOME``,
+    Continue's config) runs on every call, so a later call in a different
+    project or a repointed ``CODEX_HOME`` / ``OPENCODE_HOME`` can still report
+    something even after the global half is long since stamped done.
     """
     marker = _purge_marker()
-    if marker.exists():
-        return []
-
     home = Path.home()
     project = Path.cwd()
     report: list[str] = []
 
-    # Classify every hook script's provenance once, up front: both step 1 (is
-    # a settings.json entry pointing at *our* script?) and step 2 (is the
-    # script itself ours?) need the same answer, and each file is read once.
-    hooks_dir = home / ".claude" / "hooks"
-    hook_classification = _classify_hook_scripts(hooks_dir)
+    if not marker.exists():
+        # Classify every hook script's provenance once, up front: both step 1
+        # (is a settings.json entry pointing at *our* script?) and step 2 (is
+        # the script itself ours?) need the same answer, and each file is
+        # read once.
+        hooks_dir = home / ".claude" / "hooks"
+        hook_classification = _classify_hook_scripts(hooks_dir)
 
-    # 1. Hook registrations (Claude Code's settings.json, Cursor's hooks.json).
-    for config in (home / ".claude" / "settings.json", home / ".cursor" / "hooks.json"):
-        report += _purge_hook_config(config, hooks_dir, hook_classification)
+        # 1. Hook registrations (Claude Code's settings.json, Cursor's hooks.json).
+        for config in (home / ".claude" / "settings.json", home / ".cursor" / "hooks.json"):
+            report += _purge_hook_config(config, hooks_dir, hook_classification)
 
-    # 2. The generated hook scripts, their integrity digests and stale backups
-    # — only the ones proven to reference Headroom's managed bin directory.
-    managed_names = [name for name in _HOOK_SCRIPTS if hook_classification.get(name)]
-    report += _remove_files(
-        *(hooks_dir / name for name in managed_names),
-        *(hooks_dir / f"{name}.lean-ctx.bak" for name in managed_names),
-    )
-    for name in _HOOK_SCRIPTS:
-        if hook_classification.get(name, False) is not None:
-            continue
-        if name == _RTK_DIGEST_NAME:
-            report.append(
-                f"skipped {hooks_dir / name} (inherits {_RTK_SCRIPT_NAME}'s unreadable verdict)"
-                " — remove any stale hook script by hand"
-            )
-        else:
-            report.append(
-                f"skipped {hooks_dir / name} (could not read to verify it was Headroom's)"
-                " — remove any stale hook script by hand"
-            )
+        # 2. The generated hook scripts, their integrity digests and stale
+        # backups — only the ones proven to reference Headroom's managed bin
+        # directory.
+        managed_names = [name for name in _HOOK_SCRIPTS if hook_classification.get(name)]
+        report += _remove_files(
+            *(hooks_dir / name for name in managed_names),
+            *(hooks_dir / f"{name}.lean-ctx.bak" for name in managed_names),
+        )
+        for name in _HOOK_SCRIPTS:
+            if hook_classification.get(name, False) is not None:
+                continue
+            if name == _RTK_DIGEST_NAME:
+                report.append(
+                    f"skipped {hooks_dir / name} (inherits {_RTK_SCRIPT_NAME}'s unreadable verdict)"
+                    " — remove any stale hook script by hand"
+                )
+            else:
+                report.append(
+                    f"skipped {hooks_dir / name} (could not read to verify it was Headroom's)"
+                    " — remove any stale hook script by hand"
+                )
 
-    # 3. The PATH symlinks, then the managed binaries they pointed at.
-    for name in ("rtk", "lean-ctx"):
-        report += _remove_managed_path_link(home / ".local" / "bin" / name)
-    report += _remove_files(*(paths.bin_dir() / name for name in _BINARY_NAMES))
+        # 3. The PATH symlinks, then the managed binaries they pointed at.
+        for name in ("rtk", "lean-ctx"):
+            report += _remove_managed_path_link(home / ".local" / "bin" / name)
+        report += _remove_files(*(paths.bin_dir() / name for name in _BINARY_NAMES))
 
-    # 4. MCP server registrations (lean-ctx registers itself during init).
-    report += _purge_mcp_entries(home / ".claude.json", "mcpServers")
+        # 4. Claude Code's own MCP server registration (lean-ctx registers
+        # itself during init). OpenCode's is invocation-scoped — see below.
+        report += _purge_mcp_entries(home / ".claude.json", "mcpServers")
+
+        # Only a global half that settled everything is the completed
+        # migration. One that could not read a script or parse a config left
+        # a leftover behind, and the user needs both the reminder on the next
+        # launch and the cleanup once the permissions or the typo are fixed.
+        # A deferral in the invocation-scoped half below must not withhold
+        # this stamp — that half re-runs every time regardless, so nothing is
+        # lost by stamping the global half done now.
+        if not any(line.startswith(_DEFERRED_PREFIXES) for line in report):
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch()
+            except OSError:
+                pass  # Unwritable workspace: the purge simply runs again next time.
+
+    report += _purge_invocation_scoped(home, project)
+    return report
+
+
+def _purge_invocation_scoped(home: Path, project: Path) -> list[str]:
+    """Steps the one-time stamp must never withhold.
+
+    ``OPENCODE_HOME``'s config, the hint files in ``project`` /
+    ``CODEX_HOME`` / ``OPENCODE_HOME``, and Continue's config are all a
+    function of *this* invocation's cwd and environment, not of the machine —
+    a later run can sit in a different project or point ``CODEX_HOME`` /
+    ``OPENCODE_HOME`` somewhere the global-half stamp never inspected. Each
+    step is cheap and side-effect-free when nothing matches, so re-running
+    them on every invocation costs a handful of reads in the steady state.
+    """
+    report: list[str] = []
     report += _purge_mcp_entries(_opencode_home(home) / "opencode.json", "mcp")
-
-    # 5. Marker-fenced guidance in every hint file the wrap harnesses wrote to.
     for hint_file in _instruction_files(home, project):
         report += _purge_fenced_block(hint_file)
     report += _purge_continue_system_messages(project / ".continue" / "config.json")
-
-    # Only a run that settled everything is the completed migration. One that
-    # could not read a script or parse a config left a leftover behind, and the
-    # user needs both the reminder on the next launch and the cleanup once the
-    # permissions or the typo are fixed.
-    if not any(line.startswith(_DEFERRED_PREFIXES) for line in report):
-        try:
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.touch()
-        except OSError:
-            pass  # Unwritable workspace: the purge simply runs again next time.
-
     return report
 
 
