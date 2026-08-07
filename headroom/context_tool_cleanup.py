@@ -284,8 +284,12 @@ def _references_managed_bin(text: str) -> bool:
     quoted or ``$HOME``-derived path can itself contain a space, and slicing
     the text into words before searching would sever it.
 
-    A hit is only a real reference at a path boundary: immediately followed
-    by end-of-string or a :data:`_PATH_BOUNDARY_CHARS` character (an exact
+    A hit is only a real reference at a path boundary on *both* ends. The
+    character immediately before the match, if any, must be whitespace or a
+    :data:`_PATH_BOUNDARY_CHARS` character, or the match is just the tail of
+    some longer, unrelated path segment (e.g. ``/prefix<bin_dir>/lean-ctx``)
+    and is rejected. The match must then be immediately followed by
+    end-of-string or a :data:`_PATH_BOUNDARY_CHARS` character (an exact
     reference, e.g. a bare ``PATH=<dir>`` export), or by ``/`` — in which
     case the run of characters up to the next boundary is lexically
     normalized (``.``/``..`` collapsed) and re-compared, so neither a sibling
@@ -316,7 +320,12 @@ def _references_managed_bin(text: str) -> bool:
 
 
 def _names_managed_dir(haystack: str, needle: str) -> bool:
-    """Whether a normalized ``haystack`` names ``needle`` at a path boundary."""
+    """Whether a normalized ``haystack`` names ``needle`` at a path boundary
+    on both ends: the character right before the match, if any, must be
+    whitespace or a :data:`_PATH_BOUNDARY_CHARS` character too, or a
+    user-owned path that merely has the managed directory as a substring
+    (e.g. ``/prefix<bin_dir>/lean-ctx``) would be misread as naming it.
+    """
     search_from = 0
     while True:
         index = haystack.find(needle, search_from)
@@ -324,6 +333,10 @@ def _names_managed_dir(haystack: str, needle: str) -> bool:
             return False
         end = index + len(needle)
         search_from = index + 1  # keep scanning; occurrences may overlap
+        if index > 0 and not (
+            haystack[index - 1].isspace() or haystack[index - 1] in _PATH_BOUNDARY_CHARS
+        ):
+            continue
         following = haystack[end : end + 1]
         if not following or following.isspace() or following in _PATH_BOUNDARY_CHARS:
             return True

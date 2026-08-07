@@ -465,6 +465,101 @@ def test_leaves_a_parent_traversal_path_through_the_bin_dir_alone(home):
     assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
 
 
+def test_leaves_a_hook_script_whose_body_has_the_bin_dir_as_a_path_segment_alone(home):
+    """``/prefix<bin_dir>/lean-ctx`` contains the managed prefix as literal text
+    but at a position with no boundary before it — the run of characters
+    immediately preceding the match is a filename character (``x``), not
+    whitespace or a :data:`_PATH_BOUNDARY_CHARS` character, so this names a
+    different, user-owned directory that only happens to end in the managed
+    path's tail. Only checking the trailing boundary (the pre-fix behavior)
+    would misclassify this as Headroom's and delete the user's script.
+    """
+    bin_dir = paths.bin_dir()
+    lookalike = f"/prefix{bin_dir}/lean-ctx"
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {lookalike} "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert script.exists()
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == str(script)
+
+
+def test_leaves_an_mcp_entry_whose_command_has_the_bin_dir_as_a_path_segment_alone(home):
+    """Same leading-boundary hazard as above, for the MCP-entry command check."""
+    bin_dir = paths.bin_dir()
+    lookalike_command = f"/prefix{bin_dir}/lean-ctx"
+    config = _write(
+        home / ".claude.json",
+        json.dumps({"mcpServers": {"lean-ctx": {"command": lookalike_command, "args": ["mcp"]}}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    payload = json.loads(config.read_text())
+    assert payload["mcpServers"] == {"lean-ctx": {"command": lookalike_command, "args": ["mcp"]}}
+
+
+def test_leaves_a_hook_entry_whose_command_has_the_bin_dir_as_a_path_segment_alone(home):
+    """Same hazard for a hook entry whose ``command`` names the managed
+    directory directly (no script indirection). The command still carries a
+    ``_HOOK_COMMAND_MARKERS`` token (``lean-ctx hook``) so it reaches the
+    provenance guard rather than being filtered out earlier.
+    """
+    bin_dir = paths.bin_dir()
+    lookalike_command = f"/prefix{bin_dir}/lean-ctx hook rewrite"
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [{"hooks": [{"type": "command", "command": lookalike_command}]}]
+                }
+            }
+        ),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    payload = json.loads(settings.read_text())
+    assert payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == lookalike_command
+
+
+def test_removes_a_hook_script_whose_body_has_a_lookalike_prefix_before_a_genuine_managed_path(
+    home,
+):
+    """A body can contain both a rejected lookalike occurrence and a later
+    genuine, boundary-correct occurrence of the managed path. Rejecting the
+    first must not short-circuit the scan (``continue``, not
+    ``return False``) or the genuine occurrence right after it would never
+    be seen.
+    """
+    bin_dir = paths.bin_dir()
+    lookalike = f"/prefix{bin_dir}/lean-ctx-fake"
+    genuine = str(bin_dir / "lean-ctx")
+    script = _write(
+        home / ".claude" / "hooks" / "lean-ctx-rewrite.sh",
+        f'#!/bin/sh\nexec {lookalike} --check\nexec {genuine} "$@"\n',
+    )
+    settings = _write(
+        home / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": str(script)}]}]}}),
+    )
+
+    context_tool_cleanup.purge_context_tool_artifacts()
+
+    assert not script.exists()
+    payload = json.loads(settings.read_text())
+    assert "hooks" not in payload
+
+
 def test_removes_a_hook_script_whose_body_names_the_managed_dir_only_via_quoting_or_delimiters(
     home,
 ):
