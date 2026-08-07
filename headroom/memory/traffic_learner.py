@@ -26,6 +26,7 @@ import os
 import re
 import sqlite3
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -450,6 +451,7 @@ class TrafficLearner:
         max_history: int = 20,
         dedup_window: int = 100,
         min_evidence: int = 5,
+        max_pending_patterns: int = 2048,
     ) -> None:
         """Initialize the traffic learner.
 
@@ -468,12 +470,19 @@ class TrafficLearner:
         self.agent_type = agent_type
         self._max_history = max_history
         self._min_evidence = min_evidence
+        self._max_pending_patterns = max_pending_patterns
 
         # Recent tool call history for error→recovery matching
         self._tool_history: list[dict[str, Any]] = []
 
-        # Pattern accumulator: hash → (pattern, count)
-        self._pattern_counts: dict[str, tuple[ExtractedPattern, int]] = {}
+        # Pattern accumulator: hash → (pattern, count). LRU-ordered and capped:
+        # a pattern that is seen once but never reaches ``min_evidence`` would
+        # otherwise linger here forever, so this dict grew unbounded over a
+        # long-lived proxy's traffic (the sibling ``_saved_hashes`` is trimmed
+        # to ``dedup_window`` for the same reason; this one was missed). Evicting
+        # the least-recently-corroborated pending pattern is safe: if it recurs
+        # it simply restarts accumulation.
+        self._pattern_counts: OrderedDict[str, tuple[ExtractedPattern, int]] = OrderedDict()
 
         # Dedup: hashes of patterns already saved to DB
         self._saved_hashes: set[str] = set()
@@ -1250,7 +1259,13 @@ class TrafficLearner:
             existing, count = self._pattern_counts[h]
             count += 1
             self._pattern_counts[h] = (existing, count)
+            # Mark as most-recently-corroborated so it survives LRU eviction.
+            self._pattern_counts.move_to_end(h)
         else:
+            # Bound the pending accumulator so one-off patterns can't grow it
+            # without limit; drop the least-recently-corroborated pending entry.
+            if len(self._pattern_counts) >= self._max_pending_patterns:
+                self._pattern_counts.popitem(last=False)
             self._pattern_counts[h] = (pattern, 1)
             return  # First sighting — wait for more evidence
 
