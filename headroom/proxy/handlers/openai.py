@@ -3702,8 +3702,15 @@ class OpenAIHandlerMixin:
         # translate it here — the proxy already owns the outbound body — and
         # those requests work unchanged. No-op when the caller already set
         # `max_completion_tokens`.
+        # Resolved without `body=` so nothing is rewritten yet -- we only need
+        # to know WHICH backend will serve this request, because a translating
+        # one owns the max_tokens spelling. Cached, so the dispatch-site call
+        # below is a dict lookup.
+        from headroom.proxy.route_advice import resolver_for
+
         _normalize_openai_max_tokens(
-            body, backend_owns_translation=self.anthropic_backend is not None
+            body,
+            backend_owns_translation=resolver_for(self).for_request(request) is not None,
         )
 
         # Output shaping (opt-in via HEADROOM_OUTPUT_SHAPER): verbosity steering
@@ -3763,8 +3770,12 @@ class OpenAIHandlerMixin:
                             f"{_shape_result.labels}"
                         )
 
-        # Route through LiteLLM/any-llm backend if configured
-        if self.anthropic_backend is not None:
+        # Route through LiteLLM/any-llm backend if configured -- or through a
+        # per-request one an extension asked for (see proxy/route_advice.py).
+        # No advice resolves to `self.anthropic_backend`, so this is the same
+        # condition it has always been.
+        request_backend = resolver_for(self).for_request(request, body=body)
+        if request_backend is not None:
             try:
                 if stream:
                     self.pipeline_extensions.emit(
@@ -3794,12 +3805,11 @@ class OpenAIHandlerMixin:
                         waste_signals=waste_signals_dict,
                         prefix_tracker=openai_prefix_tracker,
                         optimized_messages=optimized_messages,
+                        backend=request_backend,
                     )
                 else:
                     # Non-streaming: use send_openai_message() → JSON
-                    backend_response = await self.anthropic_backend.send_openai_message(
-                        body, headers
-                    )
+                    backend_response = await request_backend.send_openai_message(body, headers)
                     self.pipeline_extensions.emit(
                         PipelineStage.POST_SEND,
                         operation="proxy.request",
@@ -3858,7 +3868,7 @@ class OpenAIHandlerMixin:
                     ):
                         logger.info(
                             f"[{request_id}] CCR: Detected retrieval tool call "
-                            f"on backend path, handling via {self.anthropic_backend.name}"
+                            f"on backend path, handling via {request_backend.name}"
                         )
 
                         # Continuation closure — delegates transport to
@@ -3885,13 +3895,13 @@ class OpenAIHandlerMixin:
                                 )
                             }
 
-                            assert self.anthropic_backend is not None
+                            assert request_backend is not None
                             logger.info(
                                 f"[{request_id}] CCR: Issuing continuation via "
-                                f"{self.anthropic_backend.name} backend "
+                                f"{request_backend.name} backend "
                                 f"({len(msgs)} messages)"
                             )
-                            cont_resp = await self.anthropic_backend.send_openai_message(
+                            cont_resp = await request_backend.send_openai_message(
                                 continuation_body, continuation_headers
                             )
                             return cont_resp.body
@@ -4017,7 +4027,7 @@ class OpenAIHandlerMixin:
                     await self._record_request_outcome(
                         RequestOutcome(
                             request_id=request_id,
-                            provider=self.anthropic_backend.name,
+                            provider=request_backend.name,
                             model=model,
                             original_tokens=original_tokens,
                             # Local count, same tokenizer as original_tokens, so
@@ -4049,7 +4059,7 @@ class OpenAIHandlerMixin:
                     if tokens_saved > 0:
                         logger.info(
                             f"[{request_id}] {model}: {original_tokens:,} → {optimized_tokens:,} "
-                            f"(saved {tokens_saved:,} tokens) via {self.anthropic_backend.name}"
+                            f"(saved {tokens_saved:,} tokens) via {request_backend.name}"
                         )
 
                     return JSONResponse(

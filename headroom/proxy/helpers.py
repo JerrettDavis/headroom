@@ -2365,6 +2365,117 @@ def inject_tool_search_deferral(
 
 
 # ---------------------------------------------------------------------------
+# Tool-search history repair (issue #2805).
+#
+# Once the deferral above is active, Anthropic answers with ``server_tool_use``
+# (the search) + ``tool_search_tool_result`` (a list of ``tool_reference``
+# entries) blocks, and the client writes them into its transcript permanently.
+# Anthropic validates every ``tool_reference`` in the history against the
+# request's ``tools`` array and 400s with
+# ``Tool reference 'X' not found in available tools`` when one is missing.
+#
+# That is fine for a client's main loop — the proxy re-injects the same tools
+# array every turn — but Claude Code also replays the SAME transcript on
+# side-requests that carry a different, smaller tools array (the prompt-type
+# Stop hook evaluator, /compact, …). The proxy cannot predict those tool sets,
+# so instead we repair the history: when the outbound request cannot support
+# the tool-search blocks, drop them. Deterministic (same request → same output,
+# so the prefix still caches), stateless (no session bookkeeping), and
+# self-healing for transcripts already poisoned before the fix.
+# ---------------------------------------------------------------------------
+
+_TOOL_SEARCH_RESULT_TYPE = "tool_search_tool_result"
+
+
+def _tool_search_reference_names(content: Any) -> list[str]:
+    """Return the ``tool_reference`` names carried by a tool-search result block.
+
+    Server-side results nest them (``content.tool_references``); a client-side
+    tool-search implementation returns the bare list. Accept both.
+    """
+    entries = content.get("tool_references") if isinstance(content, dict) else content
+    if not isinstance(entries, list):
+        return []
+    names = []
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("type") == "tool_reference":
+            # Server-side blocks use ``tool_name``; be liberal about ``name``.
+            name = entry.get("tool_name") or entry.get("name")
+            if name:
+                names.append(str(name))
+    return names
+
+
+def strip_unsupported_tool_search_blocks(messages: Any, tools: Any) -> tuple[Any, int]:
+    """Drop tool-search blocks this request's ``tools`` array cannot support.
+
+    A block pair is unsupportable when the request carries no ``tool_search_tool_*``
+    tool, or when a ``tool_reference`` names a tool absent from ``tools`` — the two
+    shapes Anthropic rejects. Both the ``tool_search_tool_result`` and its paired
+    ``server_tool_use`` are removed (an orphan of either 400s on its own), and a
+    message left with no content blocks is dropped rather than sent empty.
+
+    Returns ``(messages, blocks_removed)``, and the ORIGINAL ``messages`` object
+    when nothing was removed — callers rely on identity to skip the write-back.
+    """
+    if not isinstance(messages, list):
+        return messages, 0
+
+    tool_list = tools if isinstance(tools, list) else []
+    available = {str(t["name"]) for t in tool_list if isinstance(t, dict) and t.get("name")}
+    has_search_tool = any(
+        isinstance(t, dict) and str(t.get("type", "")).startswith(_TOOL_SEARCH_TOOL_TYPE_PREFIX)
+        for t in tool_list
+    )
+
+    out: list[Any] = []
+    removed = 0
+    changed = False
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            out.append(message)
+            continue
+
+        drop_indexes: set[int] = set()
+        orphaned_ids: set[str] = set()
+        for index, block in enumerate(content):
+            if not isinstance(block, dict) or block.get("type") != _TOOL_SEARCH_RESULT_TYPE:
+                continue
+            names = _tool_search_reference_names(block.get("content"))
+            if has_search_tool and all(name in available for name in names):
+                continue
+            drop_indexes.add(index)
+            use_id = block.get("tool_use_id")
+            if use_id:
+                orphaned_ids.add(str(use_id))
+        # The search call itself precedes its result, so pair it up in a second
+        # pass. Only tool-search server calls are eligible — web_search and code
+        # execution use the same block type and must survive untouched.
+        for index, block in enumerate(content):
+            if not isinstance(block, dict) or block.get("type") != "server_tool_use":
+                continue
+            is_search_call = str(block.get("name", "")).startswith(_TOOL_SEARCH_TOOL_TYPE_PREFIX)
+            if str(block.get("id", "")) in orphaned_ids or (is_search_call and not has_search_tool):
+                drop_indexes.add(index)
+
+        if not drop_indexes:
+            out.append(message)
+            continue
+
+        changed = True
+        removed += len(drop_indexes)
+        kept = [block for index, block in enumerate(content) if index not in drop_indexes]
+        if not kept:
+            continue  # the whole turn was tool-search bookkeeping
+        repaired = dict(message)
+        repaired["content"] = kept
+        out.append(repaired)
+
+    return (out, removed) if changed else (messages, 0)
+
+
+# ---------------------------------------------------------------------------
 # Server-side Tool Search injection — OpenAI Responses API (gpt-5.4+).
 #
 # The OpenAI-side analogue of inject_tool_search_deferral above. OpenAI shipped

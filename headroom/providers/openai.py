@@ -16,7 +16,7 @@ from functools import lru_cache
 from typing import Any, cast
 
 from headroom import paths as _paths
-from headroom.tokenizers.base import count_content_blocks
+from headroom.tokenizers.base import coerce_countable_text, count_content_blocks
 
 from .base import Provider, TokenCounter
 
@@ -403,10 +403,10 @@ class OpenAITokenCounter:
         tool_calls = message.get("tool_calls")
         if tool_calls:
             for tc in tool_calls:
-                func = tc.get("function", {})
-                tokens += self.count_text(func.get("name", ""))
-                tokens += self.count_text(func.get("arguments", ""))
-                tokens += self.count_text(tc.get("id", ""))
+                func = tc.get("function") or {}
+                tokens += self.count_text(coerce_countable_text(func.get("name")))
+                tokens += self.count_text(coerce_countable_text(func.get("arguments")))
+                tokens += self.count_text(coerce_countable_text(tc.get("id")))
                 tokens += 10  # Structural overhead
 
         # Tool call ID for tool responses
