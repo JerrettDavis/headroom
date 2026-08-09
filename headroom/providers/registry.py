@@ -119,7 +119,7 @@ def resolve_api_overrides(
     environ: Mapping[str, str] | None = None,
 ) -> ProviderApiOverrides:
     """Resolve provider API URL overrides from CLI/config inputs and environment."""
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     return ProviderApiOverrides(
         anthropic=anthropic_api_url
         or env.get("ANTHROPIC_TARGET_API_URL")
@@ -142,7 +142,7 @@ def resolve_extra_headers(
     Accepts a JSON object string from CLI or env (CLI wins). Returns ``None`` if unset.
     Raises ``ValueError`` on invalid JSON or a non-string-keyed/valued object.
     """
-    env = environ or os.environ
+    env = os.environ if environ is None else environ
     raw = cli_value or env.get(env_var)
     if not raw:
         return None
