@@ -4331,9 +4331,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 local_summary = active_sessions.get("local_summary", {})
                 if isinstance(local_summary, dict):
                     local_summary = {
-                        key: value
-                        for key, value in local_summary.items()
-                        if key != "by_instance"
+                        key: value for key, value in local_summary.items() if key != "by_instance"
                     }
                 payload["active_sessions"] = {"local_summary": local_summary}
             cluster = payload.get("cluster")
@@ -4341,9 +4339,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 cluster_summary = cluster.get("summary", {})
                 if isinstance(cluster_summary, dict):
                     cluster_summary = {
-                        key: value
-                        for key, value in cluster_summary.items()
-                        if key != "by_instance"
+                        key: value for key, value in cluster_summary.items() if key != "by_instance"
                     }
                 payload["cluster"] = {
                     "enabled": bool(cluster.get("enabled", False)),
