@@ -290,7 +290,7 @@ def list_active_sessions(
 
 
 def aggregate_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
-    totals = {
+    totals: dict[str, int | float] = {
         "requests": 0,
         "tokens_saved": 0,
         "input_tokens": 0,
