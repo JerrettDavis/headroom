@@ -136,6 +136,16 @@ def compute_window_tokens(start_ts: float, end_ts: float) -> WindowTokens:
     unattributed = WindowTokens()
 
     for path in find_transcript_files():
+        # Skip transcripts that cannot contain entries inside the window.
+        # Transcripts are append-only and chronological, so a file whose mtime is
+        # older than the window start has no entry within [start_ts, end_ts).
+        # Without this guard every poll json.loads()es every line of every
+        # transcript under ~/.claude/projects.
+        try:
+            if path.stat().st_mtime < start_ts:
+                continue
+        except OSError:
+            continue
         for line in _read_transcript_lines(path):
             try:
                 entry: dict[str, Any] = json.loads(line)
