@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from headroom import paths
 from headroom.proxy.models import ProxyConfig
@@ -70,18 +72,29 @@ class CapabilityReport:
 
     def to_dict(self, *, include_workspace_dir: bool = True) -> dict[str, Any]:
         violations = self.strict_violations
+
+        def public_reason(reason: str) -> str:
+            if include_workspace_dir or not self.workspace_dir:
+                return reason
+            return reason.replace(self.workspace_dir, "<workspace>")
+
         local_state: dict[str, Any] = {
             "available": self.local_state_available,
-            "reason": self.local_state_reason,
+            "reason": public_reason(self.local_state_reason),
         }
         if include_workspace_dir:
             local_state["workspace_dir"] = self.workspace_dir
+        features = [feature.to_dict() for feature in self.features]
+        strict_violations = [feature.to_dict() for feature in violations]
+        if not include_workspace_dir:
+            for feature in (*features, *strict_violations):
+                feature["reason"] = public_reason(str(feature["reason"]))
         return {
             "detached": self.detached,
             "profile": self.profile,
             "local_state": local_state,
-            "features": [feature.to_dict() for feature in self.features],
-            "strict_violations": [feature.to_dict() for feature in violations],
+            "features": features,
+            "strict_violations": strict_violations,
         }
 
 
@@ -106,11 +119,16 @@ def _probe_local_state(config: ProxyConfig) -> tuple[bool, str]:
         return False, "HEADROOM_STATELESS/--stateless requested no filesystem writes"
 
     root = paths.workspace_dir()
-    probe_path = root / ".headroom-capability-probe"
     try:
         root.mkdir(parents=True, exist_ok=True)
-        probe_path.write_text("ok", encoding="utf-8")
-        probe_path.unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".headroom-capability-probe-",
+            dir=root,
+        ) as probe:
+            probe.write("ok")
+            probe.flush()
     except OSError as exc:
         return False, f"{type(exc).__name__}: {exc}"
     return True, "workspace state is writable"
@@ -124,6 +142,14 @@ def _is_remote_backend(value: str) -> bool:
     return value in _REMOTE_BACKENDS or value.startswith(("redis://", "http://", "https://"))
 
 
+def _backend_label(value: str) -> str:
+    """Return a capability-safe backend kind without URL credentials or topology."""
+
+    if "://" in value:
+        return urlsplit(value).scheme.lower() or "remote"
+    return value
+
+
 def build_capability_report(config: ProxyConfig) -> CapabilityReport:
     profile = normalize_detached_profile(config.detached_profile)
     local_state_available, local_state_reason = _probe_local_state(config)
@@ -131,6 +157,8 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
     workspace_dir = str(paths.workspace_dir())
     toin_backend = _backend_from_env("HEADROOM_TOIN_BACKEND", "filesystem")
     ccr_backend = _backend_from_env("HEADROOM_CCR_BACKEND", "memory")
+    toin_backend_label = _backend_label(toin_backend)
+    ccr_backend_label = _backend_label(ccr_backend)
 
     def local_optional(
         *,
@@ -221,8 +249,8 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
                 state="full",
                 enabled=True,
                 degradation_mode="remote-backed",
-                reason=f"remote TOIN backend configured: {toin_backend}",
-                backend=toin_backend,
+                reason=f"remote TOIN backend configured: {toin_backend_label}",
+                backend=toin_backend_label,
             )
         )
     else:
@@ -234,7 +262,7 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
                 full_reason="filesystem TOIN backend is available",
                 degraded_mode="disabled",
                 disabled_reason="TOIN backend disabled",
-                backend=toin_backend,
+                backend=toin_backend_label,
             )
         )
 
@@ -247,11 +275,11 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
             enabled=True,
             degradation_mode="remote-backed" if _is_remote_backend(ccr_backend) else "memory-only",
             reason=(
-                f"remote CCR backend configured: {ccr_backend}"
+                f"remote CCR backend configured: {ccr_backend_label}"
                 if _is_remote_backend(ccr_backend)
                 else "CCR store is process-local and will not survive restart"
             ),
-            backend=ccr_backend,
+            backend=ccr_backend_label,
         )
     )
 

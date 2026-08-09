@@ -124,6 +124,50 @@ def test_remote_health_never_exposes_workspace_path() -> None:
     assert "workspace_dir" not in response.json()["capabilities"]["local_state"]
 
 
+def test_remote_capabilities_redact_workspace_paths_in_reasons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = str(Path(os.environ["HEADROOM_WORKSPACE_DIR"]))
+    import headroom.proxy.capabilities as capabilities_module
+
+    monkeypatch.setattr(
+        capabilities_module,
+        "_probe_local_state",
+        lambda _config: (False, f"PermissionError: {workspace}/private-file"),
+    )
+    app = create_app(_minimal_config(host="0.0.0.0"))
+
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"host": "proxy.example.test"},
+    ) as client:
+        response = client.get("/capabilities")
+
+    assert workspace not in response.text
+    assert "<workspace>/private-file" in response.text
+
+
+def test_capabilities_do_not_expose_backend_url_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEADROOM_TOIN_BACKEND", "redis://user:toin-secret@cache.internal:6379/0")
+    monkeypatch.setenv("HEADROOM_CCR_BACKEND", "https://token:ccr-secret@ccr.internal/store")
+
+    payload = build_capability_report(_minimal_config(stateless=True)).to_dict(
+        include_workspace_dir=False
+    )
+    serialized = str(payload)
+    features = {item["feature"]: item for item in payload["features"]}
+
+    assert "toin-secret" not in serialized
+    assert "ccr-secret" not in serialized
+    assert "cache.internal" not in serialized
+    assert "ccr.internal" not in serialized
+    assert features["toin_tagging"]["backend"] == "redis"
+    assert features["ccr_retrieval"]["backend"] == "https"
+
+
 def test_stateless_startup_skips_file_logging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
