@@ -90,10 +90,42 @@ def test_manifest_keeps_only_numeric_aggregate_metrics(tmp_path: Path) -> None:
     assert "/Users/example" not in registry.local_manifest_path.read_text(encoding="utf-8")
 
 
+def test_disabled_persistence_never_writes_manifests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writes: list[Path] = []
+
+    def record_write(path: Path, payload: dict[str, object]) -> None:
+        writes.append(path)
+
+    monkeypatch.setattr(sr, "_atomic_write_json", record_write)
+    registry = ActiveSessionRegistry(
+        local_sessions_dir=tmp_path / "sessions",
+        persistence_enabled=False,
+    )
+
+    payload = registry.heartbeat({"requests": 1})
+    registry.close()
+
+    assert payload["metrics"] == {"requests": 1}
+    assert writes == []
+    assert not (tmp_path / "sessions").exists()
+
+
 @pytest.mark.parametrize("cluster_id", ["../outside", "../../outside", ".", "..", "a/b", "a\\b"])
 def test_cluster_id_rejects_path_traversal(cluster_id: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="single path-safe component"):
         ClusterConfig(enabled=True, cluster_id=cluster_id, cluster_dir=tmp_path)
+
+
+@pytest.mark.parametrize("field", ["session_id", "instance_id"])
+@pytest.mark.parametrize("value", ["../outside", "a/b", "a\\b", ".", ".."])
+def test_registry_rejects_path_bearing_identifiers(field: str, value: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="single path-safe component"):
+        ActiveSessionRegistry(
+            local_sessions_dir=tmp_path / "sessions",
+            **{field: value},
+        )
 
 
 def test_close_tolerates_unavailable_storage(
@@ -176,3 +208,53 @@ def test_list_active_sessions_prunes_stale_manifests(
 
     assert [item["session_id"] for item in sessions] == ["fresh"]
     assert not (stale_dir / "session.json").exists()
+
+
+def test_stale_pruning_is_best_effort(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2026, 4, 16, 18, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sr, "_utc_now", lambda: now)
+    stale_manifest = tmp_path / "sessions" / "stale" / "session.json"
+    stale_manifest.parent.mkdir(parents=True)
+    stale_manifest.write_text(
+        json.dumps(
+            {
+                "session_id": "stale",
+                "last_heartbeat_at": (now - timedelta(seconds=300)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    real_unlink = Path.unlink
+
+    def fail_stale_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path == stale_manifest:
+            raise PermissionError(path)
+        real_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_stale_unlink)
+
+    assert sr.list_active_sessions(tmp_path / "sessions", prune_stale=True) == []
+
+
+def test_aggregate_sessions_ignores_malformed_shared_metrics() -> None:
+    summary = sr.aggregate_sessions(
+        [
+            {
+                "agent_type": "proxy",
+                "instance_id": "instance-1",
+                "metrics": {
+                    "requests": "not-a-number",
+                    "tokens_saved": float("nan"),
+                    "input_tokens": True,
+                    "output_tokens": 2.5,
+                },
+            }
+        ]
+    )
+
+    assert summary["totals"] == {
+        "requests": 0,
+        "tokens_saved": 0,
+        "input_tokens": 0,
+        "output_tokens": 2.5,
+    }

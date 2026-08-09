@@ -827,6 +827,7 @@ class HeadroomProxy(
             if config.traffic_learning_agent_type != "unknown"
             else "proxy",
             cluster=ClusterConfig.from_env(),
+            persistence_enabled=not config.stateless,
         )
 
         # Cost-aware model routing (issue #1706). Disabled unless configured, so
@@ -4325,6 +4326,29 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             # _build_stats_payload bakes these in; strip for network callers.
             payload.pop("recent_requests", None)
             payload.pop("request_logs", None)
+            active_sessions = payload.get("active_sessions")
+            if isinstance(active_sessions, dict):
+                local_summary = active_sessions.get("local_summary", {})
+                if isinstance(local_summary, dict):
+                    local_summary = {
+                        key: value
+                        for key, value in local_summary.items()
+                        if key != "by_instance"
+                    }
+                payload["active_sessions"] = {"local_summary": local_summary}
+            cluster = payload.get("cluster")
+            if isinstance(cluster, dict):
+                cluster_summary = cluster.get("summary", {})
+                if isinstance(cluster_summary, dict):
+                    cluster_summary = {
+                        key: value
+                        for key, value in cluster_summary.items()
+                        if key != "by_instance"
+                    }
+                payload["cluster"] = {
+                    "enabled": bool(cluster.get("enabled", False)),
+                    "summary": cluster_summary,
+                }
         return payload
 
     @app.get("/stats-lifetime")

@@ -7,7 +7,6 @@ import json
 import logging
 import math
 import os
-import platform
 import re
 import tempfile
 import uuid
@@ -56,6 +55,15 @@ def _parse_iso(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _validate_path_component(value: str, *, label: str) -> str:
+    if value in {".", ".."} or not _SAFE_CLUSTER_ID.fullmatch(value):
+        raise ValueError(
+            f"{label} must be a single path-safe component containing only "
+            "letters, numbers, dots, underscores, and hyphens"
+        )
+    return value
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
@@ -79,11 +87,7 @@ class ClusterConfig:
     cluster_dir: Path
 
     def __post_init__(self) -> None:
-        if self.cluster_id in {".", ".."} or not _SAFE_CLUSTER_ID.fullmatch(self.cluster_id):
-            raise ValueError(
-                "HEADROOM_CLUSTER_ID must be a single path-safe component containing "
-                "only letters, numbers, dots, underscores, and hyphens"
-            )
+        _validate_path_component(self.cluster_id, label="HEADROOM_CLUSTER_ID")
 
     @classmethod
     def from_env(cls) -> ClusterConfig:
@@ -116,14 +120,19 @@ class ActiveSessionRegistry:
         local_sessions_dir: Path | None = None,
         cluster: ClusterConfig | None = None,
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+        persistence_enabled: bool = True,
     ) -> None:
-        self.session_id = session_id or str(uuid.uuid4())
-        hostname = platform.node() or "localhost"
-        self.instance_id = instance_id or f"{hostname}-{os.getpid()}"
+        self.session_id = _validate_path_component(
+            session_id or str(uuid.uuid4()), label="session_id"
+        )
+        self.instance_id = _validate_path_component(
+            instance_id or str(uuid.uuid4()), label="instance_id"
+        )
         self.agent_type = agent_type
         self.local_sessions_dir = local_sessions_dir or paths.sessions_dir()
         self.cluster = cluster or ClusterConfig.from_env()
         self.stale_after_seconds = max(int(stale_after_seconds), 1)
+        self.persistence_enabled = persistence_enabled
         self.started_at = _utc_now()
         self._last_payload: dict[str, Any] | None = None
 
@@ -169,24 +178,25 @@ class ActiveSessionRegistry:
             "cluster": self.cluster.snapshot(),
             "metrics": aggregate_metrics,
         }
-        try:
-            _atomic_write_json(self.local_manifest_path, payload)
-        except OSError as exc:
-            logger.warning(
-                "event=active_session_manifest_write_failed scope=local path=%s error=%s",
-                self.local_manifest_path,
-                exc,
-            )
-        cluster_path = self.cluster_manifest_path
-        if cluster_path is not None:
+        if self.persistence_enabled:
             try:
-                _atomic_write_json(cluster_path, payload)
+                _atomic_write_json(self.local_manifest_path, payload)
             except OSError as exc:
                 logger.warning(
-                    "event=active_session_manifest_write_failed scope=cluster path=%s error=%s",
-                    cluster_path,
+                    "event=active_session_manifest_write_failed scope=local path=%s error=%s",
+                    self.local_manifest_path,
                     exc,
                 )
+            cluster_path = self.cluster_manifest_path
+            if cluster_path is not None:
+                try:
+                    _atomic_write_json(cluster_path, payload)
+                except OSError as exc:
+                    logger.warning(
+                        "event=active_session_manifest_write_failed scope=cluster path=%s error=%s",
+                        cluster_path,
+                        exc,
+                    )
         self._last_payload = payload
         return payload
 
@@ -207,6 +217,8 @@ class ActiveSessionRegistry:
                 logger.warning("event=active_session_heartbeat_failed error=%s", exc)
 
     def close(self) -> None:
+        if not self.persistence_enabled:
+            return
         try:
             self.local_manifest_path.unlink(missing_ok=True)
         except OSError as exc:
@@ -263,7 +275,14 @@ def list_active_sessions(
             continue
         if payload.get("stale"):
             if prune_stale:
-                manifest.unlink(missing_ok=True)
+                try:
+                    manifest.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        "event=active_session_manifest_cleanup_failed scope=stale path=%s error=%s",
+                        manifest,
+                        exc,
+                    )
             continue
         sessions.append(payload)
     sessions.sort(key=lambda item: str(item.get("last_heartbeat_at", "")), reverse=True)
@@ -279,13 +298,20 @@ def aggregate_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     }
     by_agent: dict[str, int] = {}
     by_instance: dict[str, int] = {}
+
+    def metric_value(metrics: dict[str, Any], key: str) -> int | float:
+        value = metrics.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return 0
+        return value if math.isfinite(value) else 0
+
     for session in sessions:
         raw_metrics = session.get("metrics")
         metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
-        totals["requests"] += int(metrics.get("requests", 0) or 0)
-        totals["tokens_saved"] += int(metrics.get("tokens_saved", 0) or 0)
-        totals["input_tokens"] += int(metrics.get("input_tokens", 0) or 0)
-        totals["output_tokens"] += int(metrics.get("output_tokens", 0) or 0)
+        totals["requests"] += metric_value(metrics, "requests")
+        totals["tokens_saved"] += metric_value(metrics, "tokens_saved")
+        totals["input_tokens"] += metric_value(metrics, "input_tokens")
+        totals["output_tokens"] += metric_value(metrics, "output_tokens")
         agent = str(session.get("agent_type") or "unknown")
         instance = str(session.get("instance_id") or "unknown")
         by_agent[agent] = by_agent.get(agent, 0) + 1
