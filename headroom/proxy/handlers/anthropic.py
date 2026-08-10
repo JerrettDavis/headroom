@@ -2562,8 +2562,14 @@ class AnthropicHandlerMixin:
             # turn-hook fold (optimized_messages is post-hook). Runs unconditionally.
             try:
                 _orig_snapshot = original_client_messages  # noqa: F821 (bound at request start)
-                original_tokens = tokenizer.count_messages(_orig_snapshot)
-                optimized_tokens = tokenizer.count_messages(optimized_messages)
+                # Off the event loop (#2810): both passes are CPU-bound real BPE
+                # since #2543, and running them inline stalled every other
+                # in-flight request on the same process (~1s on a 2.3 MB body).
+                # Same tokenizer instance, so the reported values are unchanged.
+                original_tokens = await asyncio.to_thread(tokenizer.count_messages, _orig_snapshot)
+                optimized_tokens = await asyncio.to_thread(
+                    tokenizer.count_messages, optimized_messages
+                )
                 # Fold the tool-schema/desc compaction delta into BOTH endpoints so
                 # tok_before - tok_after == tok_saved stays coherent in the PERF line
                 # (count_messages never sees tool bytes). Same shape as the OpenAI chat
@@ -2657,7 +2663,11 @@ class AnthropicHandlerMixin:
                     parsed_original = json.loads(original_body_bytes)
                     if parsed_original != body:
                         body_mutation_tracker.mark_mutated("structural_diff_vs_original")
-                except (json.JSONDecodeError, ValueError):
+                # MemoryError is not a ValueError, so a re-parse spike on 1M-context
+                # bodies used to escape and abort an otherwise-fine request (#2768).
+                # This block is a safety net; marking mutated is already the safe
+                # outcome (it forces canonical re-serialization).
+                except (json.JSONDecodeError, ValueError, MemoryError, RecursionError):
                     body_mutation_tracker.mark_mutated("original_unparseable")
 
             if (
