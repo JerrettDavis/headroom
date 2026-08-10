@@ -3721,8 +3721,11 @@ class OpenAIHandlerMixin:
         # (result.tokens_before), which mismatches optimized_tokens (provider tokenizer)
         # and yields impossible tok_after>tok_before. Recount original from the
         # pre-compression snapshot so the message delta is on one scale.
-        original_tokens = tokenizer.count_messages(original_client_messages)
-        optimized_tokens = tokenizer.count_messages(body["messages"])
+        # Off the event loop (#2810): see the matching note in the Anthropic handler.
+        original_tokens = await asyncio.to_thread(
+            tokenizer.count_messages, original_client_messages
+        )
+        optimized_tokens = await asyncio.to_thread(tokenizer.count_messages, body["messages"])
         if tool_tokens_before_compaction > 0:
             try:
                 tool_tokens_after_compaction = tokenizer.count_text(_json_debug_dumps(tools))

@@ -467,6 +467,14 @@ class PrometheusMetrics:
         self.requests_by_stack[slug] += 1
         self.savings_tracker.record_lifetime_stack(slug)
 
+        # Same fan-out as record_compression. This header is the only signal
+        # that names the harness when an agent is pointed at a persistent proxy
+        # rather than launched by `headroom wrap`, and the beacon cannot import
+        # headroom.proxy to read requests_by_stack itself.
+        from headroom.telemetry.session import record_stack as _beacon_stack
+
+        _beacon_stack(slug)
+
     def record_compression(
         self,
         strategy: str,
@@ -496,6 +504,22 @@ class PrometheusMetrics:
         saved = original_tokens - compressed_tokens
         if saved > 0:
             self.tokens_saved_by_strategy[strategy] += saved
+
+        # Fan out to the beacon. This object is the configured
+        # CompressionObserver for the proxy's pipelines, so it is where those
+        # events already arrive with both token counts — a second observer here
+        # would mean a second measurement pass for numbers in hand. (The paths
+        # that have no observer at all pass telemetry's
+        # BeaconCompressionObserver directly instead.)
+        #
+        # The beacon is ON by default, so this does not short-circuit in
+        # practice and must stay off the aggregator's lock: it stages into a
+        # dedicated mutex that the request path never takes, which is what
+        # keeps this method's "synchronous + lock-free" contract honest with
+        # respect to everything else in the process.
+        from headroom.telemetry.session import record_compression as _beacon_compression
+
+        _beacon_compression(strategy, original_tokens, compressed_tokens)
 
     def record_extension_savings(self, key: str, saved: int) -> None:
         """Accumulate tokens saved by a proxy extension, keyed by ``key``.
