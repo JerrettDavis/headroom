@@ -36,6 +36,19 @@ function Ensure-PathEntry {
 function Ensure-ProfileBlock {
     param([string]$PathEntry)
 
+    # $PROFILE is empty when PowerShell cannot resolve the profile path for the
+    # current user (a fresh account with no Documents folder, a service/CI
+    # context, a redirected profile). Split-Path below would then throw
+    # "Cannot bind argument to parameter 'Path' because it is an empty string",
+    # and with $ErrorActionPreference = 'Stop' that aborts the whole installer
+    # AFTER the wrapper and persistent User PATH were already written. Skip the
+    # profile convenience block instead: Ensure-PathEntry has already persisted
+    # the PATH for new sessions.
+    if ([string]::IsNullOrEmpty($PROFILE)) {
+        Write-Info 'Skipping PowerShell profile update: $PROFILE is not set in this environment (PATH was still updated for new sessions).'
+        return
+    }
+
     $markerStart = '# >>> headroom docker-native >>>'
     $markerEnd = '# <<< headroom docker-native <<<'
     $escapedPathEntry = $PathEntry.Replace("'", "''")

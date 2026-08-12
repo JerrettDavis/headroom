@@ -675,6 +675,19 @@ def test_openclaw_source_dependency_matches_lockfile_registry_range() -> None:
     assert source_range == lock_range == "^0.22.3"
 
 
+def test_opencode_source_dependency_matches_lockfile_registry_range() -> None:
+    """The source checkout must remain npm-ci installable before a release exists."""
+    import json
+
+    package_json = json.loads((ROOT / "plugins" / "opencode" / "package.json").read_text())
+    package_lock = json.loads((ROOT / "plugins" / "opencode" / "package-lock.json").read_text())
+
+    source_range = package_json["dependencies"]["headroom-ai"]
+    lock_range = package_lock["packages"][""]["dependencies"]["headroom-ai"]
+
+    assert source_range == lock_range == "^0.22.3"
+
+
 def test_python_release_smoke_imports_installed_wheel_outside_source_tree() -> None:
     """The wheel smoke must not import the checkout package by accident."""
     script = (ROOT / "scripts" / "build_python_release_smoke.py").read_text(encoding="utf-8")
@@ -698,6 +711,21 @@ def test_publish_npm_regenerates_openclaw_dist_metadata_after_version_and_depend
     publish = block.index("npm publish --access public")
 
     assert version < dependency < prepare_dist < publish
+
+
+def test_publish_npm_rewrites_opencode_dependency_after_version_and_before_publish() -> None:
+    """The direct npm publish path must version and retarget the Opencode dependency."""
+    content = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    start = content.index("name: Publish ${{ env.NPM_OPENCODE_PACKAGE }} to npmjs.org")
+    end = content.index("continue-on-error: true", start)
+    block = content[start:end]
+
+    version = block.index('npm version "$version"')
+    dependency = block.index('pkg.dependencies["headroom-ai"]')
+    publish = block.index("npm publish --access public")
+
+    assert version < dependency < publish
 
 
 def test_sdist_license_is_packaged_and_verified_before_upload() -> None:
@@ -1259,7 +1287,7 @@ def test_release_please_config_and_manifest_are_present_and_consistent() -> None
         "changelog because the bot can't find its baseline."
     )
 
-    # extra-files: TypeScript SDK and openclaw plugin package.json
+    # extra-files: TypeScript SDK and npm plugin package.json files
     # files must be in lockstep with pyproject.toml.
     extra_paths = {ef["path"] for ef in root_pkg.get("extra-files", [])}
     assert "sdk/typescript/package.json" in extra_paths, (
@@ -1269,6 +1297,10 @@ def test_release_please_config_and_manifest_are_present_and_consistent() -> None
     assert "plugins/openclaw/package.json" in extra_paths, (
         "release-please must bump plugins/openclaw/package.json so the "
         "openclaw npm publish stays in sync."
+    )
+    assert "plugins/opencode/package.json" in extra_paths, (
+        "release-please must bump plugins/opencode/package.json so the "
+        "opencode npm publish stays in sync."
     )
 
 

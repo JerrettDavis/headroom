@@ -1163,6 +1163,19 @@ class HeadroomProxy(
         self._compression_timed_out_in_flight_max: int = 0
         self._compression_quarantine_activations: int = 0
         self._compression_quarantine_skips: int = 0
+        # Time cap on the timeout-debt quarantine. Python cannot preempt a
+        # worker, so one that never returns (a hung/pathological compression)
+        # would keep ``_compression_timed_out_in_flight > 0`` forever and pin the
+        # quarantine open — zeroing out ALL further compression (#2360). The
+        # deadline is (re)set on every fresh timeout; once it lapses with no new
+        # timeouts the leaked worker is presumed abandoned and compression
+        # resumes. The bounded executor still caps thread growth, and any new
+        # timeout re-arms the quarantine.
+        self._compression_quarantine_deadline: float = 0.0
+        self._compression_quarantine_max_seconds: float = _get_env_float(
+            "HEADROOM_COMPRESSION_QUARANTINE_MAX_SECONDS", 60.0
+        )
+        self._compression_quarantine_releases: int = 0
         self._compression_metrics_lock = threading.Lock()
 
         # Backend for Anthropic API (direct, LiteLLM, or any-llm)
@@ -1420,12 +1433,36 @@ class HeadroomProxy(
             ``asyncio.TimeoutError`` subclass) if a prior timed-out worker is
             still running.
         """
+        now = time.monotonic()
         with self._compression_metrics_lock:
             timed_out_in_flight = self._compression_timed_out_in_flight
-            if timed_out_in_flight > 0:
+            quarantined = timed_out_in_flight > 0 and now < self._compression_quarantine_deadline
+            # Debt outlived the cap: presume the worker leaked/hung and stop
+            # blocking on it. Count the release once per lapse (while debt stands
+            # and the deadline has passed) so operators can see it happened.
+            released = (
+                timed_out_in_flight > 0
+                and not quarantined
+                and self._compression_quarantine_deadline > 0.0
+            )
+            if quarantined:
                 self._compression_quarantine_skips += 1
+            if released:
+                self._compression_quarantine_releases += 1
+                # Clear the deadline so the release is recorded once, not on
+                # every subsequent request until the worker (maybe never) exits.
+                self._compression_quarantine_deadline = 0.0
 
-        if timed_out_in_flight > 0:
+        if released:
+            self.metrics.record_compression_quarantine("released")
+            logger.warning(
+                "Compression quarantine released after %.0fs cap; %d timed-out "
+                "worker(s) presumed leaked. Compression resumes.",
+                self._compression_quarantine_max_seconds,
+                timed_out_in_flight,
+            )
+
+        if quarantined:
             self.metrics.record_compression_quarantine("skipped")
             raise CompressionQuarantinedError(
                 f"compression quarantined: {timed_out_in_flight} timed-out worker(s) still running"
@@ -1463,6 +1500,12 @@ class HeadroomProxy(
             self._compression_timed_out_in_flight_max = max(
                 self._compression_timed_out_in_flight_max,
                 self._compression_timed_out_in_flight,
+            )
+            # (Re)arm the quarantine time cap on every fresh timeout, so ongoing
+            # slowness keeps quarantining while a single leaked worker cannot
+            # hold it past the cap (#2360).
+            self._compression_quarantine_deadline = (
+                time.monotonic() + self._compression_quarantine_max_seconds
             )
             state["timeout_debt_recorded"] = True
             if was_clear:

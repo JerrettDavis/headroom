@@ -697,6 +697,21 @@ class LiteLLMBackend(Backend):
             if anthropic_model.startswith("arn:aws:"):
                 return f"bedrock/converse/{anthropic_model}"
 
+            # Cross-region prefixed IDs are already fully qualified system-defined
+            # profile IDs — pass through directly.  Normalizing and re-looking them
+            # up in the discovery map can route the request to a wrong or
+            # unauthorized profile (e.g. an APPLICATION profile in the same account
+            # that also wraps the same foundation model). This applies whether the
+            # prefix arrives bare ("us.anthropic...") or already LiteLLM-qualified
+            # ("bedrock/us.anthropic...").
+            _CROSS_REGION_PREFIXES = ("au.", "us.", "eu.", "apac.", "global.")
+            if anthropic_model.startswith(_CROSS_REGION_PREFIXES):
+                return f"bedrock/{anthropic_model}"
+            if anthropic_model.startswith("bedrock/") and anthropic_model[
+                len("bedrock/") :
+            ].startswith(_CROSS_REGION_PREFIXES):
+                return anthropic_model
+
             normalized = _normalize_bedrock_profile_id(anthropic_model)
             if normalized and normalized in self._model_map:
                 return self._model_map[normalized]

@@ -27,8 +27,19 @@ from headroom.proxy.savings_tracker import SavingsTracker
 
 logger = logging.getLogger("headroom.proxy")
 
+# Sentinel label value that models past MAX_DISTINCT_MODELS collapse into, so
+# client-supplied model cardinality stays bounded (see record_request).
+_OTHER_MODEL = "other"
+
 
 def _escape_label_value(value: str) -> str:
+    # The /metrics body is emitted whole with .encode("utf-8") (server.py). A
+    # client-supplied value can be a valid str that is not UTF-8-encodable — a
+    # lone surrogate decoded from a JSON model id — which raises in the response
+    # encoder and 500s every scrape, not just its own line. Drop un-encodable
+    # code points before escaping so one malformed request can't down the
+    # endpoint. Byte-identical for encodable values, including non-ASCII.
+    value = value.encode("utf-8", "replace").decode("utf-8")
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
@@ -83,6 +94,9 @@ class PrometheusMetrics:
         self.requests_total = 0
         self.requests_by_provider: dict[str, int] = defaultdict(int)
         self.requests_by_model: dict[str, int] = defaultdict(int)
+        # Set once when requests_by_model first reaches MAX_DISTINCT_MODELS, so the
+        # cardinality-cap warning fires exactly once instead of per request.
+        self._model_cardinality_warned = False
         # Populated via X-Headroom-Stack header (TS SDK adapters, etc.)
         self.requests_by_stack: dict[str, int] = defaultdict(int)
         self.requests_cached = 0
@@ -317,6 +331,7 @@ class PrometheusMetrics:
             self.requests_total = 0
             self.requests_by_provider.clear()
             self.requests_by_model.clear()
+            self._model_cardinality_warned = False
             self.requests_by_stack.clear()
             self.requests_cached = 0
             self.requests_rate_limited = 0
@@ -737,6 +752,10 @@ class PrometheusMetrics:
         reduction/yield/ledger math never straddles two rulers. Defaults to
         ``input_tokens`` when omitted, preserving pre-split behaviour.
         """
+        # Local import mirrors record_stack: defers to call-time (the telemetry
+        # package is fully loaded by then), avoiding an import cycle at module load.
+        from headroom.telemetry.context import MAX_DISTINCT_MODELS
+
         ledger_input_tokens = input_tokens if local_input_tokens is None else local_input_tokens
         # Post-guard invariant (all providers): Headroom never forwards a request
         # larger than the original — handlers revert any inflation before sending
@@ -754,7 +773,25 @@ class PrometheusMetrics:
         async with self._lock:
             self.requests_total += 1
             self.requests_by_provider[provider] += 1
-            self.requests_by_model[model] += 1
+            # Cap client-supplied model cardinality. `model` is client-controlled
+            # (body.get("model") in the openai/gemini/bedrock handlers), so an
+            # arbitrary-model client would otherwise grow requests_by_model and the
+            # exported series without bound. Bucket over-cap models into "other"
+            # (the sentinel docs/observability.md documents for `tier`), mirroring
+            # the requests_by_stack cap. Membership test, never a defaultdict index:
+            # indexing would materialize the key and defeat the cap.
+            if model in self.requests_by_model or len(self.requests_by_model) < MAX_DISTINCT_MODELS:
+                bounded_model = model
+            else:
+                bounded_model = _OTHER_MODEL
+                if not self._model_cardinality_warned:
+                    self._model_cardinality_warned = True
+                    logger.warning(
+                        "metrics.record: model cardinality cap (%d) reached; "
+                        'bucketing further models into "other"',
+                        MAX_DISTINCT_MODELS,
+                    )
+            self.requests_by_model[bounded_model] += 1
 
             if cached:
                 self.requests_cached += 1
@@ -786,8 +823,13 @@ class PrometheusMetrics:
                 # is always a cold start (100% write, 0% read) — not a bust.
                 # Only flag as bust when a previously-warm model suddenly has
                 # high write ratio, indicating prefix invalidation.
-                model_req_num = self._cache_requests_by_model[model]
-                self._cache_requests_by_model[model] += 1
+                # bounded_model can be "other" once the cardinality cap trips, which
+                # mixes distinct models in this bust heuristic. That is acceptable:
+                # it only happens past MAX_DISTINCT_MODELS distinct models on cached
+                # anthropic traffic, the worst case is a mis-attributed bust stat,
+                # and it keeps _cache_requests_by_model bounded.
+                model_req_num = self._cache_requests_by_model[bounded_model]
+                self._cache_requests_by_model[bounded_model] += 1
                 if provider == "anthropic" and model_req_num > 0:
                     total_cached = cache_read_tokens + cache_write_tokens
                     if total_cached > 0 and cache_write_tokens > total_cached * 0.5:
@@ -922,6 +964,7 @@ class PrometheusMetrics:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             tokens_saved=tokens_saved,
+            tool_search_saved=tool_search_saved,
             latency_ms=latency_ms,
             cached=cached,
             overhead_ms=overhead_ms,
@@ -1302,10 +1345,11 @@ class PrometheusMetrics:
                     ]
                 )
                 for _provider, _reasons in self.cache_miss_attribution_by_provider.items():
+                    _safe_provider = _escape_label_value(str(_provider))
                     for _reason, _count in _reasons.items():
                         lines.append(
-                            f'headroom_cache_miss_attribution_total{{provider="{_provider}",'
-                            f'reason="{_reason}"}} {_count}'
+                            f'headroom_cache_miss_attribution_total{{provider="{_safe_provider}",'
+                            f'reason="{_escape_label_value(str(_reason))}"}} {_count}'
                         )
                 lines.append("")
 
@@ -1362,7 +1406,9 @@ class PrometheusMetrics:
                 ]
             )
             for provider, count in self.requests_by_provider.items():
-                lines.append(f'headroom_requests_by_provider{{provider="{provider}"}} {count}')
+                lines.append(
+                    f'headroom_requests_by_provider{{provider="{_escape_label_value(str(provider))}"}} {count}'
+                )
             lines.append("")
 
             lines.extend(
@@ -1372,7 +1418,9 @@ class PrometheusMetrics:
                 ]
             )
             for model, count in self.requests_by_model.items():
-                lines.append(f'headroom_requests_by_model{{model="{model}"}} {count}')
+                lines.append(
+                    f'headroom_requests_by_model{{model="{_escape_label_value(str(model))}"}} {count}'
+                )
             lines.append("")
 
             if self.transform_timing_sum:
@@ -1507,13 +1555,20 @@ class PrometheusMetrics:
                 lines.append("")
 
             if self.cache_by_provider:
+                # The exposition format wants each family's samples grouped, so the
+                # blocks below re-walk this dict once per family. Escape the provider
+                # keys once here instead of at all eleven emission sites.
+                cache_by_provider = {
+                    _escape_label_value(str(name)): stats
+                    for name, stats in self.cache_by_provider.items()
+                }
                 lines.extend(
                     [
                         "# HELP headroom_cache_read_tokens_total Provider cache read tokens",
                         "# TYPE headroom_cache_read_tokens_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_cache_read_tokens_total{{provider="{provider}"}} {stats["cache_read_tokens"]}'
                     )
@@ -1524,7 +1579,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_cache_write_tokens_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_cache_write_tokens_total{{provider="{provider}"}} {stats["cache_write_tokens"]}'
                     )
@@ -1535,7 +1590,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_cache_write_ttl_tokens_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_cache_write_ttl_tokens_total{{provider="{provider}",ttl="5m"}} {stats["cache_write_5m_tokens"]}'
                     )
@@ -1549,7 +1604,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_cache_write_ttl_requests_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_cache_write_ttl_requests_total{{provider="{provider}",ttl="5m"}} {stats["cache_write_5m_requests"]}'
                     )
@@ -1563,7 +1618,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_uncached_input_tokens_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_uncached_input_tokens_total{{provider="{provider}"}} {stats["uncached_input_tokens"]}'
                     )
@@ -1574,7 +1629,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_provider_cache_requests_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_provider_cache_requests_total{{provider="{provider}"}} {stats["requests"]}'
                     )
@@ -1585,7 +1640,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_provider_cache_hit_requests_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_provider_cache_hit_requests_total{{provider="{provider}"}} {stats["hit_requests"]}'
                     )
@@ -1596,7 +1651,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_provider_cache_bust_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_provider_cache_bust_total{{provider="{provider}"}} {stats["bust_count"]}'
                     )
@@ -1607,7 +1662,7 @@ class PrometheusMetrics:
                         "# TYPE headroom_provider_cache_bust_write_tokens_total counter",
                     ]
                 )
-                for provider, stats in self.cache_by_provider.items():
+                for provider, stats in cache_by_provider.items():
                     lines.append(
                         f'headroom_provider_cache_bust_write_tokens_total{{provider="{provider}"}} {stats["bust_write_tokens"]}'
                     )

@@ -403,7 +403,16 @@ class CCRResponseHandler:
             # echoed back verbatim as `input[]` items — not a single
             # role/content dict like chat completions. Sentinel key mirrors
             # `_openai_tool_results`; handle_response() extends on it.
-            return {"_openai_responses_output_items": response.get("output", [])}
+            # `.get("output", [])` only falls back when the key is absent, so a
+            # present-but-null `output` would return None and make the
+            # `current_messages.extend(...)` in handle_response raise TypeError;
+            # coerce to a list like the choices branch above.
+            output_items = response.get("output")
+            return {
+                "_openai_responses_output_items": output_items
+                if isinstance(output_items, list)
+                else []
+            }
         elif provider == "google":
             # Google/Gemini format: role is "model", content is in candidates[0].content.parts
             candidates = response.get("candidates", [])
@@ -905,8 +914,17 @@ class StreamingCCRHandler:
             if "content" in delta and delta["content"]:
                 message["content"] = (message.get("content") or "") + delta["content"]
 
-            if "tool_calls" in delta:
-                for tc_delta in delta["tool_calls"]:
+            # Guard the value, not just the key: some OpenAI-compatible
+            # providers include ``"tool_calls": null`` (and ``"function": null``)
+            # in a delta rather than omitting the key, which would make the
+            # iteration below raise ``TypeError: 'NoneType' object is not
+            # iterable`` and abort the whole reconstruction. Mirrors the
+            # ``and delta["content"]`` value-guard above.
+            tool_calls = delta.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for tc_delta in tool_calls:
+                    if not isinstance(tc_delta, dict):
+                        continue
                     idx = tc_delta.get("index", 0)
                     if idx not in tool_calls_map:
                         tool_calls_map[idx] = {
@@ -918,8 +936,8 @@ class StreamingCCRHandler:
                     tc = tool_calls_map[idx]
                     if "id" in tc_delta:
                         tc["id"] = tc_delta["id"]
-                    if "function" in tc_delta:
-                        fn = tc_delta["function"]
+                    fn = tc_delta.get("function")
+                    if isinstance(fn, dict):
                         if "name" in fn:
                             tc["function"]["name"] = fn["name"]
                         if "arguments" in fn:
