@@ -347,6 +347,112 @@ def log_outbound_request(
     )
 
 
+def count_cache_breakpoints(
+    system: Any,
+    messages: Any,
+    tools: Any,
+) -> dict[str, int]:
+    """Count client ``cache_control`` breakpoints per request section.
+
+    Besides raw counts, records how far from the END of the message list the
+    last marker sits (``last_marker_tail`` = messages after the last marked
+    one). A dropped or backward-moved final breakpoint — the signature of a
+    "large uncached tail next to a healthy cache read" billing regression —
+    shows up as ``last_marker_tail`` growing between inbound and outbound.
+    Nested markers inside ``tool_result`` list content are counted too, so a
+    transform that rewrites sub-blocks can't lose one invisibly.
+    """
+    system_count = 0
+    if isinstance(system, list):
+        system_count = sum(1 for b in system if isinstance(b, dict) and "cache_control" in b)
+
+    tools_count = 0
+    if isinstance(tools, list):
+        tools_count = sum(1 for t in tools if isinstance(t, dict) and "cache_control" in t)
+
+    message_count = 0
+    messages_total = 0
+    last_marker_index = -1
+    if isinstance(messages, list):
+        message_count = len(messages)
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                continue
+            found = 1 if "cache_control" in msg else 0
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if "cache_control" in block:
+                        found += 1
+                    inner = block.get("content")
+                    if isinstance(inner, list):
+                        found += sum(
+                            1 for sub in inner if isinstance(sub, dict) and "cache_control" in sub
+                        )
+            if found:
+                messages_total += found
+                last_marker_index = i
+
+    last_marker_tail = message_count - 1 - last_marker_index if last_marker_index >= 0 else -1
+    return {
+        "system": system_count,
+        "tools": tools_count,
+        "messages": messages_total,
+        "total": system_count + tools_count + messages_total,
+        "message_count": message_count,
+        "last_marker_tail": last_marker_tail,
+    }
+
+
+def log_cache_breakpoints(
+    *,
+    request_id: str | None,
+    inbound: dict[str, int],
+    outbound: dict[str, int],
+) -> None:
+    """One structured line per request: client breakpoints in vs forwarded out.
+
+    Per realignment build constraints: every cache-affecting decision is
+    logged. Escalates to WARNING when the forwarded request has fewer
+    breakpoints than the client sent, or the last marker moved further from
+    the end of the message list — either one silently un-caches the tail.
+    """
+    dropped = outbound["total"] < inbound["total"]
+    tail_grew = (
+        inbound["last_marker_tail"] >= 0
+        and outbound["last_marker_tail"] != inbound["last_marker_tail"]
+        and (
+            outbound["last_marker_tail"] < 0
+            or outbound["last_marker_tail"] > inbound["last_marker_tail"]
+        )
+    )
+    log = logger.warning if (dropped or tail_grew) else logger.info
+    log(
+        "event=cache_breakpoints request_id=%s "
+        "in_total=%d out_total=%d in_system=%d out_system=%d "
+        "in_tools=%d out_tools=%d in_messages=%d out_messages=%d "
+        "in_msg_count=%d out_msg_count=%d in_last_tail=%d out_last_tail=%d "
+        "dropped=%s tail_grew=%s",
+        request_id or "",
+        inbound["total"],
+        outbound["total"],
+        inbound["system"],
+        outbound["system"],
+        inbound["tools"],
+        outbound["tools"],
+        inbound["messages"],
+        outbound["messages"],
+        inbound["message_count"],
+        outbound["message_count"],
+        inbound["last_marker_tail"],
+        outbound["last_marker_tail"],
+        "true" if dropped else "false",
+        "true" if tail_grew else "false",
+    )
+
+
 def log_memory_injection(
     *,
     request_id: str,

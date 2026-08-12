@@ -303,6 +303,33 @@ def _resolve_1m_model(current: str | None) -> str:
     return base if base.endswith(_CONTEXT_1M_SUFFIX) else f"{base}{_CONTEXT_1M_SUFFIX}"
 
 
+def _apply_1m_to_claude_args(args: tuple[str, ...]) -> tuple[tuple[str, ...], str | None]:
+    """Add the ``[1m]`` suffix to an explicit ``--model`` in pass-through args.
+
+    Claude Code gives the ``--model`` CLI flag precedence over the
+    ``ANTHROPIC_MODEL`` env var, so when a user passes both ``--1m`` and
+    ``--model X`` the env-var suffix is silently shadowed and the session caps at
+    200k (#2915). Rewriting the flag's value the same way ``_resolve_1m_model``
+    rewrites the env var keeps ``--1m`` effective on the higher-precedence flag.
+
+    Handles ``--model VALUE`` and ``--model=VALUE`` (the first occurrence only, as
+    Claude Code honours the first). Idempotent via ``_resolve_1m_model``. Returns
+    ``(new_args, rewritten_value)``; ``rewritten_value`` is ``None`` when no
+    ``--model`` was present (the env-var path already covers that case).
+    """
+    out = list(args)
+    for i, arg in enumerate(out):
+        if arg == "--model" and i + 1 < len(out):
+            rewritten = _resolve_1m_model(out[i + 1])
+            out[i + 1] = rewritten
+            return tuple(out), rewritten
+        if arg.startswith("--model="):
+            rewritten = _resolve_1m_model(arg.split("=", 1)[1])
+            out[i] = f"--model={rewritten}"
+            return tuple(out), rewritten
+    return tuple(out), None
+
+
 def _normalize_tool_search_mode(value: str) -> str:
     """Validate an ``ENABLE_TOOL_SEARCH`` value and return it normalized.
 
@@ -1710,8 +1737,10 @@ def _index_serena_project(*, verbose: bool = False) -> None:
         result = run(
             [
                 "uvx",
+                # PyPI (prebuilt wheels), not the git source that fails to build
+                # under proot-based filesystems (#2871).
                 "--from",
-                "git+https://github.com/oraios/serena",
+                "serena-agent",
                 "serena",
                 "project",
                 "index",
@@ -4726,10 +4755,18 @@ def claude(
         # force it via ANTHROPIC_MODEL on the launched process.
         if context_1m:
             env[_ANTHROPIC_MODEL_ENV] = _resolve_1m_model(env.get(_ANTHROPIC_MODEL_ENV))
-            click.echo(
-                f"  {_ANTHROPIC_MODEL_ENV}={env[_ANTHROPIC_MODEL_ENV]} "
-                "(1M context window; issue #1158)"
-            )
+            # An explicit pass-through --model outranks ANTHROPIC_MODEL in Claude
+            # Code, so add the suffix there too or the env var is silently
+            # shadowed and the window stays 200k (#2915). Report what will
+            # actually take effect rather than the shadowed env value.
+            claude_args, _model_flag_1m = _apply_1m_to_claude_args(claude_args)
+            if _model_flag_1m is not None:
+                click.echo(f"  --model {_model_flag_1m} (1M context window; issue #1158)")
+            else:
+                click.echo(
+                    f"  {_ANTHROPIC_MODEL_ENV}={env[_ANTHROPIC_MODEL_ENV]} "
+                    "(1M context window; issue #1158)"
+                )
 
         result = subprocess.run([claude_bin, *claude_args], env=env)
         raise SystemExit(result.returncode)
@@ -6945,6 +6982,20 @@ def opencode(
             )
         subscription_resolution = _require_copilot_subscription_resolution()
 
+    # Verify the opencode binary exists BEFORE mutating any config. Otherwise a
+    # missing binary leaves headroom MCP/Serena/memory entries in the user's
+    # opencode config and an injected AGENTS.md, then errors with no cleanup --
+    # the config-before-verify anti-pattern (#1614). Siblings (claude, codex,
+    # goose, omp) already check first. `--prepare-only` intentionally writes
+    # config without launching, so it is exempt.
+    opencode_bin: str | None = None
+    if not prepare_only:
+        opencode_bin = shutil.which("opencode")
+        if not opencode_bin:
+            click.echo("Error: 'opencode' not found in PATH.")
+            click.echo("Install OpenCode: https://opencode.ai")
+            raise SystemExit(1)
+
     # Snapshot OpenCode config.json BEFORE any wrap-time mutation so
     # `headroom unwrap opencode` can restore the user's pre-wrap state.
     _opencode_config_file, _opencode_backup_file = opencode_config_paths()
@@ -6985,11 +7036,9 @@ def opencode(
         inject_opencode_provider_config(port)
         return
 
-    opencode_bin = shutil.which("opencode")
-    if not opencode_bin:
-        click.echo("Error: 'opencode' not found in PATH.")
-        click.echo("Install OpenCode: https://opencode.ai")
-        raise SystemExit(1)
+    # Past the prepare-only return the launch path always ran the binary check
+    # above, so opencode_bin is resolved.
+    assert opencode_bin is not None
 
     # Register our proxy client marker BEFORE _ensure_proxy so that another
     # wrapper's cleanup sees us as an active client and doesn't terminate a

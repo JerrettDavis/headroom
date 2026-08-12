@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -1241,6 +1242,156 @@ def test_cache_mode_reuses_prior_forwarded_prefix_and_compresses_only_new_suffix
             {"role": "assistant", "content": "turn2-assistant"},
             {"role": "user", "content": "COMPRESSED_TURN3"},
         ]
+
+
+def test_anthropic_handler_splits_prefix_trackers_when_tool_profiles_differ() -> None:
+    """The handler must pass its non-message cache affinity into resolution.
+
+    Anthropic's cache key begins with tools. Identical messages on two parallel
+    sub-calls therefore cannot safely share frozen-prefix state when their tool
+    arrays differ (#2671 Pattern B).
+    """
+    resolved = []
+    with _make_proxy_client() as client:
+        proxy = client.app.state.proxy
+        proxy.config.optimize = True
+        proxy.config.mode = "cache"
+        proxy.config.image_optimize = False
+
+        real_resolve = proxy.session_tracker_store.resolve_tracker
+
+        def _spy_resolve(session_id, provider, messages=None, cache_affinity=None):  # noqa: ANN001
+            tracker = real_resolve(
+                session_id,
+                provider,
+                messages=messages,
+                cache_affinity=cache_affinity,
+            )
+            resolved.append((cache_affinity, tracker))
+            return tracker
+
+        proxy.session_tracker_store.resolve_tracker = _spy_resolve
+
+        async def _fake_retry(method, url, headers, body, stream=False, **kwargs):  # noqa: ANN001
+            return httpx.Response(
+                200,
+                json={
+                    "id": "msg_affinity",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "ok"}],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 1,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                    },
+                },
+            )
+
+        proxy._retry_request = _fake_retry
+        headers = {"x-api-key": "test-key", "anthropic-version": "2023-06-01"}
+        messages = [{"role": "user", "content": "same parent transcript"}]
+
+        for tool_name in ("shell", "search"):
+            response = client.post(
+                "/v1/messages",
+                headers=headers,
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 32,
+                    "messages": messages,
+                    "tools": [
+                        {
+                            "name": tool_name,
+                            "description": tool_name,
+                            "input_schema": {"type": "object", "properties": {}},
+                        }
+                    ],
+                },
+            )
+            assert response.status_code == 200
+
+    assert len(resolved) == 2
+    assert resolved[0][0] != resolved[1][0]
+    assert resolved[0][1] is not resolved[1][1]
+
+
+def test_anthropic_handler_anchors_a_proven_rewritten_tail_to_stable_blocks() -> None:
+    """The real handler must feed last turn's bytes into normalization."""
+    bodies = []
+
+    def _history(turn: int, churn: int) -> list[dict]:
+        content = [{"type": "text", "text": f"stable-{index}"} for index in range(30)]
+        content.extend(
+            {"type": "text", "text": f"turn-{turn}-changing-{index}"} for index in range(churn)
+        )
+        content.extend(
+            [
+                {"type": "text", "text": "instruction: summarize"},
+                {"type": "text", "text": "fixed end-of-transcript reminder"},
+            ]
+        )
+        return [{"role": "user", "content": content}]
+
+    with _make_proxy_client() as client:
+        proxy = client.app.state.proxy
+        # Breakpoint ownership and lineage tracking apply even in passthrough
+        # mode. Keeping optimization off isolates that real handler wiring from
+        # the compression pipeline.
+        proxy.config.optimize = False
+        proxy.config.image_optimize = False
+        # This regression models a client whose next request replaces the same
+        # aggregate message. Do not synthesize an assistant history entry in
+        # the tracker, because that is a separate response-reconstruction path.
+        proxy._assistant_message_from_response_json = lambda _body: None
+
+        async def _fake_retry(method, url, headers, body, stream=False, **kwargs):  # noqa: ANN001
+            bodies.append(copy.deepcopy(body))
+            return httpx.Response(
+                200,
+                json={
+                    "id": "msg_rewrite",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {
+                        "input_tokens": 10_000,
+                        "output_tokens": 1,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 10_000,
+                    },
+                },
+            )
+
+        proxy._retry_request = _fake_retry
+        headers = {"x-api-key": "test-key", "anthropic-version": "2023-06-01"}
+        for turn, churn in enumerate((3, 5, 8), start=1):
+            response = client.post(
+                "/v1/messages",
+                headers=headers,
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 32,
+                    "messages": _history(turn, churn),
+                },
+            )
+            assert response.status_code == 200
+
+    breakpoint_indices = []
+    for body in bodies:
+        marked = [
+            index
+            for index, block in enumerate(body["messages"][0]["content"])
+            if "cache_control" in block
+        ]
+        assert len(marked) == 1
+        breakpoint_indices.append(marked[0])
+
+    # Cold request caches through its newest block. Once rewrite is proven,
+    # all subsequent calls pin the same 30-block boundary instead of creating
+    # an ever-growing full write on each turn.
+    assert breakpoint_indices == [34, 29, 29]
 
 
 def test_cache_mode_skips_same_message_append_rewrite_to_preserve_stability() -> None:

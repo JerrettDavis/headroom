@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -15,6 +16,56 @@ def test_docker_workflow_normalizes_repository_name_for_signing() -> None:
     assert "id: image-name" in content
     assert "tr '[:upper:]' '[:lower:]'" in content
     assert "steps.image-name.outputs.image_name" in content
+
+
+def test_docker_latest_promotion_is_owned_by_root_manifest_cell() -> None:
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "docker.yml").read_text())
+    jobs = workflow["jobs"]
+    build = jobs["docker-build"]
+    manifest = jobs["docker-manifest"]
+    variants = manifest["strategy"]["matrix"]["variant"]
+    build_variants = build["strategy"]["matrix"]["variant"]
+    architectures = build["strategy"]["matrix"]["arch"]
+    root = next(entry for entry in variants if entry["name"] == "")
+    nonroot = next(entry for entry in variants if entry["name"] == "nonroot")
+    promotion = next(
+        step for step in manifest["steps"] if step["name"] == "Re-tag root image as :latest"
+    )
+    command = promotion["run"]
+
+    assert len(variants) == 8
+    assert [entry["name"] for entry in build_variants] == [entry["name"] for entry in variants]
+    assert len(architectures) == 2
+    assert {entry["platform"] for entry in architectures} == {"linux/amd64", "linux/arm64"}
+    assert root["name"] == ""
+    assert nonroot["name"] == "nonroot"
+    assert "matrix.variant.name == ''" in promotion["if"]
+    assert "steps.manifest.outputs.index_digest != ''" in promotion["if"]
+    assert "steps.version.outputs.version != ''" in promotion["if"]
+    assert (
+        promotion["if"]
+        == "steps.manifest.outputs.index_digest != '' && matrix.variant.name == '' && steps.version.outputs.version != ''"
+    )
+    assert '"${IMAGE}:latest"' in command
+    assert '"${IMAGE}:${VERSION}"' in command
+    assert "promote-latest" not in jobs
+    assert manifest["needs"] == "docker-build"
+    assert manifest["if"] == "${{ always() }}"
+    step_names = [step["name"] for step in manifest["steps"]]
+    assert step_names.index("Sign multi-arch index manifest with cosign") < step_names.index(
+        "Re-tag root image as :latest"
+    )
+    manifest_script = next(
+        step["run"] for step in manifest["steps"] if step["name"] == "Create multi-arch manifest"
+    )
+    assert 'digest_count="$(find "${DIGEST_DIR}" -maxdepth 1 -type f | wc -l)"' in manifest_script
+    assert '"${digest_count}" -ne 2' in manifest_script
+    assert manifest_script.index('"${digest_count}" -ne 2') < manifest_script.index(
+        "docker buildx imagetools create"
+    )
+    guard_start = manifest_script.index('"${digest_count}" -ne 2')
+    create_start = manifest_script.index("docker buildx imagetools create")
+    assert guard_start < manifest_script.index("exit 1", guard_start) < create_start
 
 
 def test_release_workflow_publishes_both_node_packages_to_github_packages() -> None:

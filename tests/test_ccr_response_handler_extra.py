@@ -137,6 +137,27 @@ def test_create_tool_result_message_google_and_generic_formats() -> None:
     assert invalid_google["parts"][0]["functionResponse"]["response"] == {"content": "not-json"}
 
 
+def test_create_tool_result_message_google_preserves_call_id() -> None:
+    handler = CCRResponseHandler()
+    message = handler._create_tool_result_message(
+        [
+            CCRToolResult(
+                tool_call_id="call-1",
+                tool_name="headroom_retrieve",
+                content='{"count": 1}',
+                success=True,
+            )
+        ],
+        "google",
+    )
+
+    assert message["parts"][0]["functionResponse"] == {
+        "name": "headroom_retrieve",
+        "id": "call-1",
+        "response": {"count": 1},
+    }
+
+
 def test_extract_assistant_message_google_and_generic() -> None:
     handler = CCRResponseHandler()
     google_message = handler._extract_assistant_message(
