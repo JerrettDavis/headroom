@@ -1032,6 +1032,7 @@ async def test_ws_session_log_prefix_uses_session_id(caplog: pytest.LogCaptureFi
     assert handler.logger.entries
     assert handler.logger.entries[0].request_id != "req-ws-1"
     assert "[req-ws-1] PERF" in caplog.text
+    assert f"[{handler.logger.entries[0].request_id}] PERF" not in caplog.text
 
 
 @pytest.mark.asyncio

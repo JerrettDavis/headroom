@@ -176,8 +176,11 @@ async def test_count_tokens_offloaded_fails_open_on_executor_quarantine() -> Non
 
     proxy = _make_proxy()
     # Record a concurrent compression as timed out so the real executor guard
-    # quarantines the next call — no mock of the helper itself.
+    # quarantines the next call — no mock of the helper itself. The quarantine
+    # is now time-capped, so timeout debt alone is deliberately insufficient:
+    # an absent/expired deadline means the leaked worker has been released.
     proxy._compression_timed_out_in_flight = 1
+    proxy._compression_quarantine_deadline = time.monotonic() + 60.0
 
     tokenizer, tokens = await proxy._count_tokens_offloaded(
         "qwen2.5-coder", [{"role": "user", "content": "hello world"}]
@@ -194,6 +197,7 @@ async def test_count_tokens_offloaded_returns_count_text_capable_tokenizer() -> 
     proxy = _make_proxy()
     # Quarantine forces the fail-open branch (an EstimatingTokenCounter).
     proxy._compression_timed_out_in_flight = 1
+    proxy._compression_quarantine_deadline = time.monotonic() + 60.0
 
     # The empty-messages count is intentionally discarded by that handler
     # (it sums text parts itself), so only the tokenizer matters here.
