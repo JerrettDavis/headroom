@@ -869,14 +869,23 @@ class PrometheusMetrics:
         # would hold the lock for the whole write instead of just the syscall.
         # ponytail: default thread pool, not a dedicated executor -- give it one
         # if a profile ever shows writers parked on flock saturating the pool.
-        if tokens_saved > 0 and not self._stateless:
+        # tool_search_deferral saves tool-SCHEMA tokens that never move the
+        # message-level tok_before/after, so a tool-heavy turn can have
+        # tokens_saved=0 while genuinely deferring thousands of tokens. Fold that
+        # component into the ledger delta the same way the PERF headline and
+        # perf/analyzer do (`headline_before = before + tool_saved`); otherwise
+        # `headroom savings` understates real compression 7-10x on tool-search
+        # sessions and drops deferral-only turns from the ledger entirely (#2795).
+        deferral_saved = max(0, int(tool_search_saved))
+        ledger_saved = tokens_saved + deferral_saved
+        if ledger_saved > 0 and not self._stateless:
             # `input_tokens` here is the optimized (post-compression) count
             # that was actually forwarded — see emit_request_outcome, which
             # passes `input_tokens=outcome.optimized_tokens`. The ledger's
             # `before` is the pre-compression original and `after` is what we
             # forwarded, and `headroom savings` derives the reduction percent
             # as saved / before. Passing the forwarded count as `before`
-            # understated the original by `tokens_saved`, inflating that
+            # understated the original by `ledger_saved`, inflating that
             # percentage (e.g. a real 40% reduction was reported as ~67%).
             # Reconstruct the original as forwarded + saved.
             await asyncio.to_thread(
@@ -887,7 +896,7 @@ class PrometheusMetrics:
                 # `tokens_saved` yields a mixed-ruler before/after (local 10->6
                 # with the provider reporting 8 would record 12->8). Use the
                 # caller's local count when supplied.
-                tokens_before=ledger_input_tokens + tokens_saved,
+                tokens_before=ledger_input_tokens + ledger_saved,
                 tokens_after=ledger_input_tokens,
                 model=model,
                 client=client or "proxy",

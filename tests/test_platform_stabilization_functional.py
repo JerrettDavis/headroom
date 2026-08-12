@@ -56,6 +56,7 @@ def test_v1_compress_success_reports_actual_metrics(monkeypatch) -> None:
     proxy = app.state.proxy
     request_messages = [{"role": "user", "content": "summarize this repeated payload"}]
     compressed_messages = [{"role": "user", "content": "summary payload"}]
+    ccr_hash = "abc123def4567890abc123de"
 
     def fake_apply(**kwargs):
         assert kwargs["messages"] == request_messages
@@ -65,7 +66,7 @@ def test_v1_compress_success_reports_actual_metrics(monkeypatch) -> None:
             tokens_before=100,
             tokens_after=40,
             transforms_applied=["test:compress"],
-            markers_inserted=["marker-1"],
+            markers_inserted=[ccr_hash],
         )
 
     # The default /v1/compress mode runs a marker-free pipeline derived from
@@ -88,7 +89,7 @@ def test_v1_compress_success_reports_actual_metrics(monkeypatch) -> None:
     assert body["compression_ratio"] == 0.4
     assert body["transforms_applied"] == ["test:compress"]
     assert body["transforms_summary"] == {"test:compress": 1}
-    assert body["ccr_hashes"] == ["marker-1"]
+    assert body["ccr_hashes"] == [ccr_hash]
 
 
 def test_v1_compress_timeout_fails_open_quickly(monkeypatch) -> None:

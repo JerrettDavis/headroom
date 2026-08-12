@@ -58,6 +58,7 @@ class CCRToolResult:
     content: str
     success: bool
     items_retrieved: int = 0
+    tool_name: str | None = None
 
 
 @dataclass
@@ -211,6 +212,7 @@ class CCRResponseHandler:
                     tool_call_id=ccr_call.tool_call_id,
                     content=content,
                     success=False,
+                    tool_name=ccr_call.tool_name,
                 )
 
             # Retrieval is by hash: always return the full original content.
@@ -229,6 +231,7 @@ class CCRResponseHandler:
                     content=content,
                     success=True,
                     items_retrieved=entry.original_item_count,
+                    tool_name=ccr_call.tool_name,
                 )
 
             miss_status = (
@@ -249,6 +252,7 @@ class CCRResponseHandler:
                 tool_call_id=ccr_call.tool_call_id,
                 content=content,
                 success=False,
+                tool_name=ccr_call.tool_name,
             )
 
         except Exception as e:
@@ -264,6 +268,7 @@ class CCRResponseHandler:
                 tool_call_id=ccr_call.tool_call_id,
                 content=content,
                 success=False,
+                tool_name=ccr_call.tool_name,
             )
 
     def _create_tool_result_message(
@@ -337,14 +342,13 @@ class CCRResponseHandler:
                     response_data = json.loads(result.content)
                 except json.JSONDecodeError:
                     response_data = {"content": result.content}
-                parts.append(
-                    {
-                        "functionResponse": {
-                            "name": result.tool_call_id,  # tool_call_id contains the function name for Google
-                            "response": response_data,
-                        }
-                    }
-                )
+                function_response = {
+                    "name": result.tool_name or result.tool_call_id,
+                    "response": response_data,
+                }
+                if result.tool_name and result.tool_call_id != result.tool_name:
+                    function_response["id"] = result.tool_call_id
+                parts.append({"functionResponse": function_response})
             return {
                 "role": "user",
                 "parts": parts,
