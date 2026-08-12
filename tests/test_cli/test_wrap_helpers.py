@@ -110,6 +110,35 @@ def test_wrap_claude_allows_claude_print_short_flag_in_passthrough_args() -> Non
 
 
 # ---------------------------------------------------------------------------
+# _apply_1m_to_claude_args — add the [1m] suffix to an explicit pass-through
+# --model so it survives Claude Code's CLI-over-env precedence (#2915).
+# ---------------------------------------------------------------------------
+def test_apply_1m_rewrites_model_flag_value() -> None:
+    args, rewritten = wrap_mod._apply_1m_to_claude_args(("--model", "opusplan"))
+    assert args == ("--model", "opusplan[1m]")
+    assert rewritten == "opusplan[1m]"
+
+
+def test_apply_1m_rewrites_equals_model_flag() -> None:
+    args, rewritten = wrap_mod._apply_1m_to_claude_args(("--model=opusplan",))
+    assert args == ("--model=opusplan[1m]",)
+    assert rewritten == "opusplan[1m]"
+
+
+def test_apply_1m_is_idempotent_on_already_suffixed_model() -> None:
+    args, rewritten = wrap_mod._apply_1m_to_claude_args(("--model", "opusplan[1m]"))
+    assert args == ("--model", "opusplan[1m]")
+    assert rewritten == "opusplan[1m]"
+
+
+def test_apply_1m_noop_without_model_flag() -> None:
+    original = ("--permission-mode", "auto", "--resume")
+    args, rewritten = wrap_mod._apply_1m_to_claude_args(original)
+    assert args == original
+    assert rewritten is None
+
+
+# ---------------------------------------------------------------------------
 # _run_proxy_only_watcher — must print banner, call setup callback, install
 # signal handlers, and clean up. Heavily mocked since the real watcher
 # blocks on `time.sleep` indefinitely.

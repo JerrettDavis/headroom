@@ -697,6 +697,7 @@ SETTINGS: tuple[SettingField, ...] = (
 )
 
 _BY_KEY: dict[str, SettingField] = {f.key: f for f in SETTINGS}
+_BY_ENV: dict[str, SettingField] = {f.env: f for f in SETTINGS}
 
 
 class SettingsValidationError(Exception):
@@ -712,6 +713,27 @@ class SettingsValidationError(Exception):
         super().__init__(
             f"settings validation failed: unknown={unknown_keys} errors={field_errors}"
         )
+
+
+def _normalize_values(values: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite known env aliases to their JSON/API keys."""
+    normalized: dict[str, Any] = {}
+    source_keys: dict[str, str] = {}
+    conflicts: dict[str, str] = {}
+    for incoming_key, value in values.items():
+        field = _BY_ENV.get(incoming_key)
+        key = field.key if field is not None else incoming_key
+        if key in normalized:
+            if normalized[key] != value:
+                conflicts[key] = (
+                    f"conflicting values supplied for {source_keys[key]!r} and {incoming_key!r}"
+                )
+            continue
+        normalized[key] = value
+        source_keys[key] = incoming_key
+    if conflicts:
+        raise SettingsValidationError([], conflicts)
+    return normalized
 
 
 def _coerce(field: SettingField, value: Any) -> Any:
@@ -792,6 +814,7 @@ def validate(values: dict[str, Any]) -> dict[str, Any]:
     Raises :class:`SettingsValidationError` when any key is unknown or any value
     fails coercion. Returns the coerced dict (``None`` values dropped) on success.
     """
+    values = _normalize_values(values)
     unknown = [key for key in values if key not in _BY_KEY]
     field_errors: dict[str, str] = {}
     coerced: dict[str, Any] = {}
@@ -879,6 +902,7 @@ def save(values: dict[str, Any]) -> None:
     secret's display value verbatim when the user hasn't touched it; anything
     else is validated/coerced and stored.
     """
+    values = _normalize_values(values)
     clear_keys = {key for key, value in values.items() if value is None and key in _BY_KEY}
     retained_keys = {
         key
