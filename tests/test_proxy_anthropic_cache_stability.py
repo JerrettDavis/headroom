@@ -17,6 +17,15 @@ from headroom.proxy.handlers.anthropic import AnthropicHandlerMixin
 from headroom.proxy.server import ProxyConfig, create_app
 
 
+def _force_compression(monkeypatch) -> None:  # noqa: ANN001
+    decision = SimpleNamespace(should_compress=True, passthrough_reason=None)
+    decision.apply_to_tags = lambda tags: None
+    monkeypatch.setattr(
+        "headroom.proxy.handlers.anthropic.CompressionDecision.decide",
+        lambda **kwargs: decision,
+    )
+
+
 class _FakePrefixTracker:
     def __init__(self, frozen_count: int):
         self._frozen_count = frozen_count
@@ -994,7 +1003,8 @@ def test_token_mode_does_not_force_freeze_all_previous_turns() -> None:
         assert captured["frozen_message_count"] >= 0
 
 
-def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history() -> None:
+def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history(monkeypatch) -> None:
+    _force_compression(monkeypatch)
     captured = {}
     with _make_proxy_client() as client:
         proxy = client.app.state.proxy
@@ -1013,6 +1023,11 @@ def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history() -> Non
             {"role": "assistant", "content": "turn1-assistant"},
             {"role": "user", "content": "current turn"},
         ]
+        # Mid-session: the first two messages were already forwarded last turn,
+        # so they form the byte-stable cached prefix the handler must replay
+        # even if a transform tries to mutate them.
+        fake_tracker._last_original_messages = original_messages[:2]
+        fake_tracker._last_forwarded_messages = original_messages[:2]
 
         def _fake_apply(**kwargs):
             mutated = list(kwargs["messages"])
@@ -1064,7 +1079,11 @@ def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history() -> Non
         assert sent_messages[1] == original_messages[1]
 
 
-def test_cache_mode_does_not_forward_latest_turn_rewrites() -> None:
+def test_cache_mode_cold_start_forwards_pipeline_rewrites(monkeypatch) -> None:
+    _force_compression(monkeypatch)
+    # Issue #2357: on a true session cold start (no prior forwarded messages,
+    # no frozen prefix) there is no provider cache to protect, so the full
+    # pipeline output is forwarded and recorded for byte-identical replay.
     captured = {}
     with _make_proxy_client() as client:
         proxy = client.app.state.proxy
@@ -1129,7 +1148,12 @@ def test_cache_mode_does_not_forward_latest_turn_rewrites() -> None:
         )
 
         assert response.status_code == 200
-        assert captured["body"]["messages"] == original_messages
+        sent_messages = captured["body"]["messages"]
+        assert sent_messages[:2] == original_messages[:2]
+        assert sent_messages[2]["content"] == "REWRITTEN_CURRENT_TURN"
+        # Recorded as forwarded so later turns replay this prefix verbatim
+        # (the tracker may append the assistant reply after the forwarded turns).
+        assert fake_tracker._last_forwarded_messages[: len(sent_messages)] == sent_messages
 
 
 def test_cache_mode_reuses_prior_forwarded_prefix_and_compresses_only_new_suffix() -> None:

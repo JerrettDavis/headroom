@@ -136,6 +136,21 @@ SETTINGS: tuple[SettingField, ...] = (
         help="Disable CCR entirely (no markers, no injected retrieve tool).",
         tier="basic",
     ),
+    SettingField(
+        "HEADROOM_CCR_INLINE_RESOLVE",
+        "ccr_inline_resolve",
+        "Resolve CCR markers inline",
+        "Compression",
+        "bool",
+        default=False,
+        help=(
+            "Resolve <<ccr:...>> markers on the response path instead of "
+            "relying on headroom_retrieve tool calls. For callers with no "
+            "tool-call round-trip (e.g. a LiteLLM guardrail/proxy hop). "
+            "Non-streaming responses only."
+        ),
+        tier="advanced",
+    ),
     # --- Limits ---
     SettingField(
         "HEADROOM_RPM",

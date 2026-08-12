@@ -23,6 +23,11 @@
           "type": "json",
           "path": "plugins/openclaw/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "plugins/opencode/package.json",
+          "jsonpath": "$.version"
         }
       ]
     }

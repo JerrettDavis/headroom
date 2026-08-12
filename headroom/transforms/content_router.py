@@ -1394,11 +1394,12 @@ class RouterCompressionResult:
             LOG fallback chain it's three. Lets log readers see *how*
             we got to the final compressor without parsing the
             decision_reason string.
-        cache_hit: True when this result came from the router's
-            result_cache (no fresh compression ran). Currently the
-            single-content compress() path doesn't populate the cache,
-            so this is False in practice — placeholder for the
-            cache-wire-up follow-up.
+        cache_hit: True when this result was reused from a cache
+            instead of a fresh compression run. compress() itself
+            never sets this (only apply() has the router-internal
+            two-tier cache); it is set by callers that cache unit
+            results — e.g. the OpenAI Responses handler marks reused
+            units via ``replace(router_result, cache_hit=True)``.
     """
 
     compressed: str

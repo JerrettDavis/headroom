@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 import httpx
 
 from headroom.agent_savings import proxy_pipeline_kwargs
+from headroom.ccr.marker_resolution import resolve_markers_in_response
 from headroom.config import unwrap_tool_call_name
 from headroom.copilot_auth import (
     apply_copilot_api_auth,
@@ -1589,6 +1590,72 @@ class OpenAIHandlerMixin:
             await traffic_learner.on_messages(messages)
         except Exception as exc:
             logger.debug("[%s] Traffic learner (chat): %s", request_id, exc)
+
+    async def _observe_openai_ws_response_create(
+        self,
+        inner_payload: dict[str, Any],
+        *,
+        seen_call_ids: set[str],
+        baseline: bool,
+        request_id: str,
+    ) -> None:
+        """Feed one Codex WS ``response.create`` turn into the traffic learner.
+
+        A long-lived Codex WebSocket resends the full transcript on every
+        ``response.create`` (and replays it wholesale on reconnect/resume), so
+        the HTTP one-shot ingestion would count the same tool results as new
+        evidence over and over. This dedups per connection by tool-call id:
+
+        * ``baseline=True`` (the first frame) records the already-present
+          transcript as seen WITHOUT learning from it, so a reconnect that
+          replays old turns adds no spurious evidence.
+        * later frames learn only the tool results whose call id first appears
+          after the baseline, then mark them seen.
+
+        Preference extraction (:meth:`on_messages`) is skipped on the baseline
+        frame and runs on later frames, where it already looks only at the most
+        recent messages (the new turn).
+        """
+        traffic_learner = getattr(self, "traffic_learner", None)
+        if traffic_learner is None:
+            return
+        try:
+            memory_handler = getattr(self, "memory_handler", None)
+            if (
+                traffic_learner._backend is None
+                and memory_handler
+                and memory_handler.initialized
+                and memory_handler.backend
+            ):
+                traffic_learner.set_backend(memory_handler.backend)
+
+            learner_messages = _responses_input_to_learner_messages(
+                inner_payload.get("instructions"),
+                inner_payload.get("input", ""),
+            )
+            tool_results = traffic_learner.extract_tool_results_from_messages(learner_messages)
+            for tool_result in tool_results:
+                call_id = tool_result.get("call_id") or ""
+                # A result already seen on this connection (or baselined) is not
+                # re-learned. Results without an id fall back to learn-once-per
+                # -frame on non-baseline frames (still deduped by the learner's
+                # own pattern accumulation).
+                if call_id:
+                    if call_id in seen_call_ids:
+                        continue
+                    seen_call_ids.add(call_id)
+                if baseline:
+                    continue
+                await traffic_learner.on_tool_result(
+                    tool_name=tool_result["tool_name"],
+                    tool_input=tool_result["input"],
+                    tool_output=tool_result["output"],
+                    is_error=tool_result["is_error"],
+                )
+            if not baseline:
+                await traffic_learner.on_messages(learner_messages)
+        except Exception as exc:
+            logger.debug("[%s] Traffic learner (ws): %s", request_id, exc)
 
     @staticmethod
     def _headroom_bypass_enabled(headers: Any) -> bool:
@@ -4135,6 +4202,19 @@ class OpenAIHandlerMixin:
                             # feedback_no_silent_fallbacks.md.
                             raise
 
+                    # Inline marker resolution runs OUTSIDE the tool-call
+                    # gate above: the callers this flag exists for (#2509,
+                    # Headroom as a LiteLLM guardrail hop) never emit a
+                    # headroom_retrieve tool call, so gating on one would
+                    # make the flag a no-op for exactly its use case.
+                    # Non-streaming responses only.
+                    if (
+                        getattr(self.config, "ccr_resolve_markers_inline", False)
+                        and backend_response.body
+                        and backend_response.status_code == 200
+                    ):
+                        backend_response.body = resolve_markers_in_response(backend_response.body)
+
                     # Extract usage from the FINAL backend body (after
                     # any CCR resolution) so the prefix tracker counts
                     # cache stats from the LAST upstream call.
@@ -4718,6 +4798,22 @@ class OpenAIHandlerMixin:
                     response_headers["x-headroom-cached"] = "true"
                 if _compression_failed:
                     response_headers["x-headroom-compression-failed"] = "true"
+
+                # Inline marker resolution, non-streaming only. The direct
+                # path has no CCR tool-call handling at all, which is
+                # exactly the #2509 shape: markers would otherwise reach
+                # the client as raw text.
+                if (
+                    getattr(self.config, "ccr_resolve_markers_inline", False)
+                    and resp_json
+                    and response.status_code == 200
+                ):
+                    resolved_json = resolve_markers_in_response(resp_json)
+                    return Response(
+                        content=json.dumps(resolved_json).encode(),
+                        status_code=response.status_code,
+                        headers=response_headers,
+                    )
 
                 return Response(
                     content=response.content,
@@ -5891,6 +5987,21 @@ class OpenAIHandlerMixin:
                             headers=sse_headers,
                         )
 
+                    # Inline marker resolution, non-streaming only. Runs
+                    # outside the has_ccr_tool_calls gate above on purpose:
+                    # the #2509 case has no retrieve tool call at all.
+                    if (
+                        getattr(self.config, "ccr_resolve_markers_inline", False)
+                        and resp_json
+                        and response.status_code == 200
+                    ):
+                        resolved_json = resolve_markers_in_response(resp_json)
+                        return Response(
+                            content=json.dumps(resolved_json).encode(),
+                            status_code=response.status_code,
+                            headers=response_headers,
+                        )
+
                     return Response(
                         content=response.content,
                         status_code=response.status_code,
@@ -6594,6 +6705,27 @@ class OpenAIHandlerMixin:
             ws_recorded_tokens_saved_total = 0
             ws_recorded_attempted_input_tokens_total = 0
             ws_response_create_frames = 1
+            # Per-connection traffic-learner dedup: tool-call ids already
+            # observed on this WS, so a replayed transcript (each turn resends
+            # the full history; reconnect replays it wholesale) is not counted
+            # as new evidence. Seeded from the first frame as a baseline.
+            ws_learner_seen_call_ids: set[str] = set()
+            # Baseline the first frame's transcript into the learner: record its
+            # tool-call ids as seen WITHOUT learning, so a reconnect that replays
+            # this history adds no spurious evidence. Later frames learn only the
+            # results appended after this point. `body` here is the original
+            # client frame (parsed before memory injection / compression).
+            if isinstance(body, dict) and body:
+                _ws_first_inner = (
+                    body["response"] if isinstance(body.get("response"), dict) else body
+                )
+                if isinstance(_ws_first_inner, dict):
+                    await self._observe_openai_ws_response_create(
+                        _ws_first_inner,
+                        seen_call_ids=ws_learner_seen_call_ids,
+                        baseline=True,
+                        request_id=request_id,
+                    )
             ws_client_frames_total = 1
             ws_upstream_frames_total = 0
             ws_cancel_frames = 0
@@ -7267,6 +7399,15 @@ class OpenAIHandlerMixin:
                                 frame_type="response.create",
                             )
                             return raw_msg, False, "invalid_inner_payload"
+                        # Learn from this turn's newly appended tool results.
+                        # Dedup against the per-connection baseline so the
+                        # replayed transcript prefix is not re-counted.
+                        await self._observe_openai_ws_response_create(
+                            inner_payload,
+                            seen_call_ids=ws_learner_seen_call_ids,
+                            baseline=False,
+                            request_id=request_id,
+                        )
                         store_forced = _ensure_chatgpt_responses_store_false(
                             inner_payload,
                             is_chatgpt_auth=is_chatgpt_auth,
@@ -7781,6 +7922,9 @@ class OpenAIHandlerMixin:
                                 RequestOutcome(
                                     # Per-emission ids keep dashboard request-log keys unique.
                                     request_id=await self._next_request_id(),
+                                    # PERF remains grouped under the stable WS
+                                    # session id even though feed rows are unique.
+                                    perf_request_id=request_id,
                                     provider="openai",
                                     model=model_for_metrics,
                                     original_tokens=max(0, input_delta) + max(0, saved_delta),
@@ -8357,6 +8501,7 @@ class OpenAIHandlerMixin:
                     RequestOutcome(
                         # Per-emission ids keep dashboard request-log keys unique.
                         request_id=await self._next_request_id(),
+                        perf_request_id=request_id,
                         provider="openai",
                         model=model_name,
                         original_tokens=residual_input_tokens + residual_tokens_saved,

@@ -1030,8 +1030,15 @@ async def test_ws_session_log_prefix_uses_session_id(caplog: pytest.LogCaptureFi
         await handler.handle_openai_responses_ws(client_ws)
 
     assert handler.logger.entries
-    assert handler.logger.entries[0].request_id != "req-ws-1"
+    turn_request_id = handler.logger.entries[0].request_id
+    assert turn_request_id != "req-ws-1"
+    # Session lifecycle and PERF lines keep the session id so a session's log
+    # lines stay greppable together. The dashboard feed row retains its fresh
+    # per-turn id independently.
+    assert "[req-ws-1] WS /v1/responses accepted" in caplog.text
+    assert "[req-ws-1] WS /v1/responses completed" in caplog.text
     assert "[req-ws-1] PERF" in caplog.text
+    assert f"[{turn_request_id}] PERF" not in caplog.text
 
 
 @pytest.mark.asyncio
