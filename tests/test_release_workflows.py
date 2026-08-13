@@ -30,9 +30,7 @@ def test_every_published_docker_variant_includes_bedrock_auth_dependencies() -> 
 
     bake = (ROOT / "docker-bake.hcl").read_text(encoding="utf-8")
     extras_lines = [
-        line.strip()
-        for line in bake.splitlines()
-        if line.strip().startswith("HEADROOM_EXTRAS =")
+        line.strip() for line in bake.splitlines() if line.strip().startswith("HEADROOM_EXTRAS =")
     ]
     assert len(extras_lines) == 9
     assert all("bedrock" in line for line in extras_lines), extras_lines
