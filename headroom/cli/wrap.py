@@ -451,6 +451,8 @@ def _resolved_tool_search_mode(flag_value: str | None) -> str:
     existing = os.environ.get(_TOOL_SEARCH_ENV)
     if existing is not None:
         probe[_TOOL_SEARCH_ENV] = existing
+    if os.environ.get("CLAUDE_CODE_USE_FOUNDRY"):
+        probe["CLAUDE_CODE_USE_FOUNDRY"] = os.environ["CLAUDE_CODE_USE_FOUNDRY"]
     written = _configure_tool_search_env(probe, flag_value)
     return written if written is not None else probe.get(_TOOL_SEARCH_ENV, "")
 
@@ -1474,6 +1476,36 @@ def _write_claude_wrap_base_url(
     if port is not None:
         _write_wrap_marker(path, port=port, key=key, previous=previous)
     return previous
+
+
+def _write_claude_wrap_tool_search(value: str, *, settings_path: Path | None = None) -> str | None:
+    """Persist the resolved tool-search mode for daemon-spawned workers.
+
+    Claude Code workers read project settings afresh rather than inheriting
+    the parent process environment (#2492). Keep this separate from the proxy
+    URL crash marker: a stale tool-search mode cannot route traffic to a dead
+    process, and is restored transactionally when the wrap session exits.
+    """
+    path = settings_path or (Path.cwd() / ".claude" / "settings.local.json")
+    payload = _read_settings_for_write(path)
+    env_map = dict(payload.get("env") or {}) if isinstance(payload.get("env"), dict) else {}
+    previous = env_map.get(_TOOL_SEARCH_ENV)
+    env_map[_TOOL_SEARCH_ENV] = value
+    payload["env"] = env_map
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_text(path, json.dumps(payload, indent=2) + "\n")
+    return previous
+
+
+def _restore_claude_wrap_tool_search(
+    previous: str | None, *, settings_path: Path | None = None
+) -> None:
+    """Restore the project-local tool-search value written for this session."""
+    _restore_claude_wrap_base_url(
+        previous,
+        settings_path=settings_path,
+        _key_override=_TOOL_SEARCH_ENV,
+    )
 
 
 def _restore_claude_wrap_base_url(
@@ -4701,6 +4733,8 @@ def claude(
 
     proxy_holder: list[subprocess.Popen | None] = [None]
     _saved_base_url: list[str | None] = [None]  # previous settings.json value for restore
+    _tool_search_not_written = object()
+    _saved_tool_search: list[object | str | None] = [_tool_search_not_written]
     _settings_foundry: list[bool] = [False]
     port_holder: list[int] = [port]
     _settings_vertex: list[bool] = [False]
@@ -4932,6 +4966,11 @@ def claude(
         # Issue #746: keep Claude Code's on-demand tool loading on through the
         # proxy so tool schemas are not eagerly materialized into local context.
         _tool_search_value = _configure_tool_search_env(env, tool_search)
+        _resolved_tool_search_value = env.get(_TOOL_SEARCH_ENV, "")
+        _saved_tool_search[0] = _write_claude_wrap_tool_search(
+            _resolved_tool_search_value,
+            settings_path=_wrap_settings_path,
+        )
         if _tool_search_value is not None:
             # Describe what the written value actually does: --tool-search
             # false/0/no/off turns deferral OFF, and the banner must say so
@@ -4977,6 +5016,11 @@ def claude(
         click.echo(f"  Error: {e}")
         raise SystemExit(1) from e
     finally:
+        if _saved_tool_search[0] is not _tool_search_not_written:
+            _restore_claude_wrap_tool_search(
+                cast(str | None, _saved_tool_search[0]),
+                settings_path=_wrap_settings_path,
+            )
         _restore_claude_wrap_base_url(
             _saved_base_url[0],
             foundry_mode=_settings_foundry[0],
