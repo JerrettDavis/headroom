@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import headroom._ort as ort_runtime
 import headroom.transforms.content_router as content_router_module
 from headroom.transforms.content_detector import ContentType, DetectionResult
 from headroom.transforms.content_router import (
@@ -35,6 +36,11 @@ def _reset_detect_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(content_router_module, "_detect_native_unhealthy", False)
     monkeypatch.setattr(content_router_module, "_detect_backend_warned", False)
     monkeypatch.setattr(content_router_module, "_detect_panic_warned", False)
+    # Router unit tests replace ``headroom._core.detect_content_type`` with
+    # deterministic fakes. Keep the separate ORT API-compatibility preflight
+    # open so those fakes reach the watchdog/circuit-breaker behavior under
+    # test; incompatibility itself is covered in test_ort_dylib.py (#2960).
+    monkeypatch.setattr(ort_runtime, "rust_ort_runtime_compatible", lambda: True)
 
 
 def test_compression_cache_handles_hits_skips_evictions_and_clear(
