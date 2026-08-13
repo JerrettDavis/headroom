@@ -791,6 +791,11 @@ def verify_vscode_wrap(base_env: dict[str, str], project_dir: Path) -> None:
             "VS Code wrap should configure the project-scoped proxy URL",
         )
         assert_true(
+            f'"github.copilot.advanced.debug.overrideCapiUrl": '
+            f'"http://127.0.0.1:{port}{project_prefix}"' in configured,
+            "VS Code wrap should route Copilot Chat generation through Headroom",
+        )
+        assert_true(
             '"github.copilot.advanced.debug.overrideAuthType": "token"' in configured,
             "VS Code wrap should configure token auth",
         )

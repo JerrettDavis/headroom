@@ -5477,8 +5477,8 @@ def vscode_copilot(
 ) -> None:
     """Run Headroom for GitHub Copilot inside Visual Studio Code.
 
-    Transparently overrides Copilot's proxy endpoint, preserving the model
-    selected in VS Code. It does not edit Codex settings.
+    Transparently overrides Copilot's proxy and CAPI endpoints, preserving the
+    model selected in VS Code. It does not edit Codex settings.
     """
     resolution = _require_copilot_subscription_resolution()
     target_settings = settings_file or vscode_settings_path()
@@ -5497,6 +5497,9 @@ def vscode_copilot(
         click.echo("  Add these user settings to VS Code:")
         click.echo(
             f'  "github.copilot.advanced.debug.overrideProxyUrl": "{vscode_proxy_url(actual_port, _project_name_from_cwd())}",'
+        )
+        click.echo(
+            f'  "github.copilot.advanced.debug.overrideCapiUrl": "{vscode_proxy_url(actual_port, _project_name_from_cwd())}",'
         )
         click.echo('  "github.copilot.advanced.debug.overrideAuthType": "token"')
 
