@@ -148,6 +148,57 @@ def test_wrap_claude_plain_mode_api_key_auth_skips_remote_control_warning(
     assert "Remote Control" not in output
 
 
+def test_wrap_claude_rejects_conflicting_auth_before_proxy_mutation(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    user_settings = tmp_path / "user-settings.json"
+    user_settings.write_text('{"env":{"ANTHROPIC_AUTH_TOKEN":"token-value"}}', encoding="utf-8")
+    monkeypatch.setattr(wrap_mod, "claude_user_settings_path", lambda: user_settings)
+    monkeypatch.setattr(wrap_mod.shutil, "which", lambda _name: "/usr/bin/claude")
+    proxy_calls: list[int] = []
+    monkeypatch.setattr(wrap_mod, "_register_proxy_client", lambda port: proxy_calls.append(port))
+
+    result = runner.invoke(
+        main,
+        ["wrap", "claude", "--no-mcp", "--no-tokensave", "--no-serena"],
+        env={"ANTHROPIC_API_KEY": "api-value"},
+    )
+
+    assert result.exit_code != 0
+    assert "both ANTHROPIC_API_KEY" in result.output
+    assert "shell environment" in result.output
+    assert str(user_settings) in result.output
+    assert "api-value" not in result.output
+    assert "token-value" not in result.output
+    assert proxy_calls == []
+
+
+def test_wrap_claude_includes_shared_project_settings_in_auth_precedence(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    user_settings = tmp_path / "user-settings.json"
+    user_settings.write_text("{}", encoding="utf-8")
+    project_dir = tmp_path / ".claude"
+    project_dir.mkdir()
+    shared_settings = project_dir / "settings.json"
+    shared_settings.write_text('{"env":{"ANTHROPIC_AUTH_TOKEN":"token-value"}}', encoding="utf-8")
+    monkeypatch.setattr(wrap_mod, "claude_user_settings_path", lambda: user_settings)
+    monkeypatch.setattr(wrap_mod.shutil, "which", lambda _name: "/usr/bin/claude")
+
+    result = runner.invoke(
+        main,
+        ["wrap", "claude", "--no-mcp", "--no-tokensave", "--no-serena"],
+        env={"ANTHROPIC_API_KEY": "api-value"},
+    )
+
+    assert result.exit_code != 0
+    assert str(shared_settings) in result.output
+    assert "api-value" not in result.output
+    assert "token-value" not in result.output
+
+
 def test_wrap_claude_sibling_note_accurate_under_1m_and_tool_search_optouts(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
