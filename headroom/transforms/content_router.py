@@ -940,6 +940,20 @@ def _detect_content(content: str) -> DetectionResult:
         # another stuck daemon thread, so route straight to pure-Python.
         return _regex_detect_content_type(content)
 
+    # fastembed enables ort's API-24 feature. Entering the native initializer
+    # with an older pip ONNX Runtime does not raise: ort recursively re-enters
+    # its OnceLock error path and parks forever (#2960). Preflight before the
+    # extension call so supported Python 3.10 installs degrade immediately.
+    from headroom._ort import rust_ort_runtime_compatible
+
+    if not rust_ort_runtime_compatible():
+        _detect_native_unhealthy = True
+        logger.warning(
+            "Native content detection requires ONNX Runtime 1.24+; "
+            "using pure-Python detection for this process."
+        )
+        return _regex_detect_content_type(content)
+
     from headroom._core import detect_content_type as _rust_detect
 
     try:
