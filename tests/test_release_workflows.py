@@ -6,8 +6,62 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    import tomli as tomllib  # type: ignore[no-redef]
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_every_published_docker_variant_includes_bedrock_auth_dependencies() -> None:
+    """Every image that advertises ``--backend bedrock`` must ship botocore.
+
+    Temporary AWS credentials take LiteLLM's botocore-backed authentication
+    path.  The default images previously installed only ``proxy``/``code``, so
+    the documented Docker Bedrock command failed at runtime with
+    ``No module named 'botocore'`` (#1551).  Keep the standalone Dockerfile and
+    every bake target on the existing ``bedrock`` package extra.
+    """
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG HEADROOM_EXTRAS=proxy,code,bedrock" in dockerfile
+
+    bake = (ROOT / "docker-bake.hcl").read_text(encoding="utf-8")
+    extras_lines = [
+        line.strip()
+        for line in bake.splitlines()
+        if line.strip().startswith("HEADROOM_EXTRAS =")
+    ]
+    assert len(extras_lines) == 9
+    assert all("bedrock" in line for line in extras_lines), extras_lines
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    bedrock_names = {
+        Requirement(requirement).name
+        for requirement in project["project"]["optional-dependencies"]["bedrock"]
+    }
+    assert {"boto3", "botocore"} <= bedrock_names
+
+
+def test_public_docker_instructions_use_the_current_organization_package() -> None:
+    """Do not send users back to the personal GHCR package frozen at 0.27.0."""
+    public_docs = (
+        "README.md",
+        "llms.txt",
+        "docker-compose.yml",
+        "TESTING-copilot-subscription.md",
+        "wiki/cli.md",
+        "wiki/docker-install.md",
+    )
+    deprecated = "ghcr.io/chopratejas/headroom"
+    current = "ghcr.io/headroomlabs-ai/headroom"
+
+    for relative_path in public_docs:
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert deprecated not in content, relative_path
+        assert current in content, relative_path
 
 
 def test_docker_workflow_normalizes_repository_name_for_signing() -> None:
