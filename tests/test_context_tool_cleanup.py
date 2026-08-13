@@ -230,6 +230,7 @@ def test_a_completed_purge_never_runs_again(home):
     `test_a_completed_purge_still_cleans_a_different_project`.
     """
     bin_dir = paths.bin_dir()
+    bin_dir.parent.mkdir(parents=True)
 
     assert context_tool_cleanup.purge_context_tool_artifacts() == []
     assert (bin_dir.parent / ".context-tools-purged").exists()
@@ -252,6 +253,7 @@ def test_a_completed_purge_still_cleans_a_different_project(home, monkeypatch):
     A completed run in project A must not leave project B's fenced guidance in
     place forever — the stamp only ever covered a snapshot of ``Path.cwd()``.
     """
+    paths.bin_dir().parent.mkdir(parents=True)
     assert context_tool_cleanup.purge_context_tool_artifacts() == []
     assert (paths.bin_dir().parent / ".context-tools-purged").exists()
 
@@ -272,6 +274,7 @@ def test_a_completed_purge_still_cleans_a_different_project(home, monkeypatch):
 
 def test_a_completed_purge_still_inspects_a_repointed_codex_home(home, monkeypatch):
     """``CODEX_HOME`` can point somewhere new after the stamp; that target is not exempt."""
+    paths.bin_dir().parent.mkdir(parents=True)
     assert context_tool_cleanup.purge_context_tool_artifacts() == []
     assert (paths.bin_dir().parent / ".context-tools-purged").exists()
 
@@ -299,6 +302,7 @@ def test_a_scoped_deferral_does_not_withhold_the_global_stamp(home):
     still be written — otherwise a permanently-broken ``.continue/config.json``
     would force every hook/binary/MCP step to be re-walked on every launch.
     """
+    paths.bin_dir().parent.mkdir(parents=True)
     _write(home / "project" / ".continue" / "config.json", "{not json")
 
     report = context_tool_cleanup.purge_context_tool_artifacts()

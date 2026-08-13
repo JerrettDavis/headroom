@@ -217,8 +217,16 @@ def purge_context_tool_artifacts() -> list[str]:
         # lost by stamping the global half done now.
         if not any(line.startswith(_DEFERRED_PREFIXES) for line in report):
             try:
-                marker.parent.mkdir(parents=True, exist_ok=True)
-                marker.touch()
+                # Cleanup must not become the first mutation on a pristine
+                # machine. In particular, ``wrap <missing-tool>`` validates
+                # the binary after the wrap-group migration hook; creating
+                # ``~/.headroom`` merely to stamp an empty scan violates that
+                # command's no-side-effects-on-failure contract. Established
+                # Headroom installs already have the state directory and get
+                # the one-time fast path; clean machines cheaply rescan until
+                # some real Headroom state exists.
+                if marker.parent.is_dir():
+                    marker.touch()
             except OSError:
                 pass  # Unwritable workspace: the purge simply runs again next time.
 
