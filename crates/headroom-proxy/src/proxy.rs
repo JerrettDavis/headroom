@@ -25,7 +25,7 @@ use crate::compression;
 use crate::config::Config;
 use crate::error::ProxyError;
 use crate::headers::{build_forward_request_headers, filter_response_headers};
-use crate::health::{healthz, healthz_upstream};
+use crate::health::{healthz, healthz_upstream, rollout_status};
 use crate::websocket::ws_handler;
 // Phase F PR-F1: imported as `classify_auth_mode` to make the call
 // site self-documenting. `AuthMode` is re-exported under the same
@@ -157,6 +157,7 @@ pub fn build_app(state: AppState) -> Router {
     let mut router = Router::new()
         .route("/healthz", get(healthz))
         .route("/healthz/upstream", get(healthz_upstream))
+        .route("/rollout/status", get(rollout_status))
         // PR-D3: Prometheus scrape endpoint. Renders the global
         // registry in text format. The handler is stateless — no
         // `AppState` needed — and idempotent across concurrent

@@ -98,7 +98,6 @@ split_into_sections = _mixed_content.split_into_sections
 _detect_backend_warned = False
 _detect_panic_warned = False
 _detect_native_unhealthy = False  # circuit breaker: native detect hung once (#575)
-_detect_native_verified = False  # native detect has returned once -> skip the watchdog
 
 
 # Shared calibrated fallback estimator (tiktoken cl100k_base ~90% accuracy,
@@ -917,7 +916,6 @@ def _detect_content(content: str) -> DetectionResult:
     `_strategy_from_detection` keys off that field alone.
     """
     global _detect_backend_warned, _detect_panic_warned, _detect_native_unhealthy
-    global _detect_native_verified
 
     # Detect on the unwrapped payload so a tool-output envelope's tags don't get
     # the whole result misclassified as HTML/XML (#route-converter corruption).
@@ -940,22 +938,30 @@ def _detect_content(content: str) -> DetectionResult:
         # another stuck daemon thread, so route straight to pure-Python.
         return _regex_detect_content_type(content)
 
+    # fastembed enables ort's API-24 feature. Entering the native initializer
+    # with an older pip ONNX Runtime does not raise: ort recursively re-enters
+    # its OnceLock error path and parks forever (#2960). Preflight before the
+    # extension call so supported Python 3.10 installs degrade immediately.
+    from headroom._ort import rust_ort_runtime_compatible
+
+    if not rust_ort_runtime_compatible():
+        _detect_native_unhealthy = True
+        logger.warning(
+            "Native content detection requires ONNX Runtime 1.24+; "
+            "using pure-Python detection for this process."
+        )
+        return _regex_detect_content_type(content)
+
     from headroom._core import detect_content_type as _rust_detect
 
     try:
-        # The native detector can deadlock on FIRST use (#575 — seen on Windows
-        # and macOS/arm64). Bound it with a watchdog so a hang degrades to the
-        # pure-Python detector; the previous win32-only guard left other
-        # platforms unprotected, so a hung Linux sidecar silently stopped
-        # compressing (every request failed open to passthrough). Watchdog until
-        # the native detector has returned once, then use the direct fast path —
-        # the hang is first-use only, so steady state pays no per-call thread
-        # overhead. win32 keeps watchdogging every call (unchanged).
-        if sys.platform == "win32" or not _detect_native_verified:
-            rust_result = _rust_detect_watchdogged(_rust_detect, content, _detect_timeout_secs())
-        else:
-            rust_result = _rust_detect(content)
-        _detect_native_verified = True  # returned without hanging -> trusted hot path
+        # Native detector state can become wedged after an earlier successful
+        # call (for example when another test or component initializes ORT).
+        # A one-time "verified" fast path therefore turns a later native stall
+        # into an unbounded process hang. Keep every call bounded; on timeout
+        # the process-wide circuit breaker below makes subsequent calls use the
+        # pure-Python detector without spawning more watchdog threads.
+        rust_result = _rust_detect_watchdogged(_rust_detect, content, _detect_timeout_secs())
         # Rust's `content_type` is the lowercase string tag (e.g.
         # "json_array"); translate to the Python `ContentType` enum so
         # downstream mapping keys match.

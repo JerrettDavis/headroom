@@ -546,7 +546,16 @@ class TestDoctorCommand:
         monkeypatch.setattr(doctor_mod, "codex_config_path", lambda: tmp_path / "config.toml")
         monkeypatch.setattr(doctor_mod, "savings_path", lambda: tmp_path / "savings.json")
         monkeypatch.setattr(doctor_mod, "list_manifests", lambda: [])
-        for var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "HEADROOM_PORT"):
+        for var in (
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_VERTEX",
+            "OPENAI_BASE_URL",
+            "HEADROOM_PORT",
+        ):
             monkeypatch.delenv(var, raising=False)
         return tmp_path
 
@@ -566,6 +575,23 @@ class TestDoctorCommand:
         assert result.exit_code == 2
         assert "not reachable" in result.output
 
+    def test_conflicting_claude_auth_is_a_redacted_failure(self, runner, isolated, monkeypatch):
+        settings = isolated / "settings.json"
+        settings.write_text('{"env":{"ANTHROPIC_AUTH_TOKEN":"token-value"}}', encoding="utf-8")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "api-value")
+        monkeypatch.setattr(doctor_mod, "probe_json", self._probe(None, None))
+
+        result = runner.invoke(main, ["doctor", "--json"])
+
+        assert result.exit_code == 2
+        payload = json.loads(result.output)
+        auth = next(check for check in payload["checks"] if check["name"] == "claude auth")
+        assert auth["status"] == "fail"
+        assert "shell environment" in auth["summary"]
+        assert str(settings) in auth["summary"]
+        assert "api-value" not in result.output
+        assert "token-value" not in result.output
+
     def test_warnings_only_exits_1(self, runner, isolated, monkeypatch):
         monkeypatch.setattr(doctor_mod, "probe_json", self._probe(LIVEZ_OK, STATS_OK))
         monkeypatch.setattr(doctor_mod, "get_version", lambda: "0.26.0")
@@ -576,6 +602,7 @@ class TestDoctorCommand:
     def test_remote_control_warning_exits_1(self, runner, isolated, monkeypatch):
         monkeypatch.setattr(doctor_mod, "probe_json", self._probe(LIVEZ_OK, STATS_OK))
         monkeypatch.setattr(doctor_mod, "get_version", lambda: "0.26.0")
+        monkeypatch.setattr(doctor_mod, "detect_claude_code_version", lambda: None)
         (isolated / "settings.json").write_text(
             json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"}}),
             encoding="utf-8",

@@ -30,6 +30,8 @@ from headroom.paths import savings_path
 from headroom.providers.claude import (
     REMOTE_CONTROL_BASE_URL_ENV,
     REMOTE_CONTROL_SIBLING_GATE_NOTE,
+    claude_auth_conflict_message,
+    claude_auth_conflict_sources,
     detect_claude_code_version,
     is_custom_anthropic_base_url,
     remote_control_applies_to_auth,
@@ -187,6 +189,39 @@ def check_claude_routing(settings_path: Path, port: int) -> CheckResult:
             hint="wrap it: headroom wrap claude",
         )
     return _classify_routing_url(name, base_url, port, source=str(settings_path))
+
+
+def check_claude_auth_conflict(
+    settings_path: Path,
+    project_settings_path: Path,
+    project_local_settings_path: Path,
+    environ: Mapping[str, str],
+) -> CheckResult | None:
+    """Report contradictory effective Claude credentials without their values."""
+
+    def settings_env(path: Path) -> dict[str, object]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        env = payload.get("env") if isinstance(payload, dict) else None
+        return dict(env) if isinstance(env, dict) else {}
+
+    conflict = claude_auth_conflict_sources(
+        (str(settings_path), settings_env(settings_path)),
+        (str(project_settings_path), settings_env(project_settings_path)),
+        (str(project_local_settings_path), settings_env(project_local_settings_path)),
+        ("shell environment", environ),
+    )
+    if conflict is None:
+        return None
+    return CheckResult(
+        name="claude auth",
+        status=FAIL,
+        summary=claude_auth_conflict_message(conflict),
+    )
 
 
 def check_claude_remote_control_gate(
@@ -567,16 +602,26 @@ def doctor(port: int, emit_json: bool) -> None:
     stats = probe_json(f"{base_url}/stats", timeout=5.0) if livez else None
     installed = get_version()
 
+    project_claude_settings = Path.cwd() / ".claude" / "settings.json"
+    project_local_claude_settings = Path.cwd() / ".claude" / "settings.local.json"
     checks = [
         check_proxy_liveness(livez, base_url),
         check_version_drift(livez, installed),
         check_claude_routing(claude_settings_path(), port),
-        check_wrap_marker_staleness(Path.cwd() / ".claude" / "settings.local.json"),
+        check_wrap_marker_staleness(project_local_claude_settings),
         check_codex_routing(codex_config_path(), port),
         check_shell_env(os.environ, port),
         check_savings(stats, savings_path()),
         check_budget(stats),
     ]
+    auth_conflict_check = check_claude_auth_conflict(
+        claude_settings_path(),
+        project_claude_settings,
+        project_local_claude_settings,
+        os.environ,
+    )
+    if auth_conflict_check is not None:
+        checks.append(auth_conflict_check)
     # Lazy resolver: `claude --version` is a Node CLI subprocess (seconds of
     # cold start, 10s worst-case timeout) — only pay for it when the RC gate
     # is actually plausible (custom base URL + subscription auth).

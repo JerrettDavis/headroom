@@ -674,6 +674,7 @@ def _shape_openai_responses_payload(
     *,
     model: str,
     request_id: str,
+    output_shaper_enabled: bool | None = None,
 ) -> tuple[list[str], bool]:
     """Output shaping for a Responses payload (opt-in, HEADROOM_OUTPUT_SHAPER).
 
@@ -704,7 +705,7 @@ def _shape_openai_responses_payload(
             shape_responses_request,
         )
 
-        settings = OutputShaperSettings.from_env()
+        settings = OutputShaperSettings.from_env(enabled=output_shaper_enabled)
         if not settings.enabled:
             return [], False
 
@@ -762,36 +763,9 @@ def _compact_openai_responses_tools(
     return compact_tools(payload)
 
 
-def _responses_request_allows_memory_tool_continuation(payload: dict[str, Any]) -> bool:
-    """Return whether Responses memory tools may rely on stored continuations.
-
-    Headroom memory tools use ``previous_response_id`` continuations after a
-    tool call. Those continuations require the originating response to be
-    stored. When a client explicitly sends ``store=false``, preserve that
-    contract and skip the Responses memory-tool injection path instead of
-    mutating the request.
-    """
-
-    return payload.get("store") is not False
-
-
-def _ensure_responses_store_for_memory_tools(
-    payload: dict[str, Any],
-    *,
-    memory_tools_injected: bool,
-) -> bool:
-    """Return True when memory-tool injection requires and receives store=true."""
-
-    if memory_tools_injected and payload.get("store") is not True:
-        payload["store"] = True
-        return True
-    return False
-
-
 def _allow_responses_memory_tools(is_chatgpt_auth: bool) -> bool:
-    # ChatGPT Codex rejects Responses payloads unless store=false. The
-    # transparent memory-tool continuation flow needs stored responses, so keep
-    # it on the regular API path only.
+    # Preserve the ChatGPT Codex route's existing store policy and memory-tool
+    # exclusion while API Responses memory continuations stay stateless.
     return not is_chatgpt_auth
 
 
@@ -1046,6 +1020,23 @@ def _responses_input_to_items(input_data: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _responses_stateless_output_items(output_items: Any) -> list[dict[str, Any]]:
+    """Return response items that can be replayed without provider state."""
+    if not isinstance(output_items, list):
+        return []
+    return [
+        item
+        for item in output_items
+        if isinstance(item, dict)
+        and not (item.get("type") == "reasoning" and not item.get("encrypted_content"))
+    ]
+
+
+def _responses_stateless_input_items(input_data: Any) -> list[dict[str, Any]]:
+    """Normalize input and remove reasoning items without encrypted content."""
+    return _responses_stateless_output_items(_responses_input_to_items(input_data))
+
+
 def _dedup_responses_output_items(
     items: list[dict[str, Any]],
     output_types: frozenset[str],
@@ -1181,6 +1172,47 @@ def _openai_responses_to_sse(response: dict[str, Any]) -> list[bytes]:
     return events
 
 
+def _openai_responses_from_sse(sse_text: str) -> dict[str, Any] | None:
+    """Reassemble the final Responses API JSON body from an SSE stream.
+
+    Inverse of ``_openai_responses_to_sse``, for upstreams that answer a
+    ``stream: false`` request with a valid ``200 text/event-stream`` body
+    (#2613). The terminal ``response.completed`` event carries the complete
+    response object, so no delta accumulation is needed. Returns ``None``
+    when no terminal event is present — the caller forwards the raw body
+    unchanged in that case.
+    """
+    completed: dict[str, Any] | None = None
+    data_lines: list[str] = []
+
+    def _consume(lines: list[str]) -> None:
+        nonlocal completed
+        if not lines:
+            return
+        data_str = "\n".join(lines)
+        if data_str == "[DONE]":
+            return
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError:
+            return
+        if isinstance(data, dict) and data.get("type") == "response.completed":
+            response = data.get("response")
+            if isinstance(response, dict):
+                completed = response
+
+    for raw_line in sse_text.split("\n"):
+        line = raw_line.rstrip("\r")
+        if not line:
+            _consume(data_lines)
+            data_lines = []
+        elif line.startswith("data:"):
+            # Per the SSE spec, strip at most one leading space after the colon.
+            data_lines.append(line[5:].removeprefix(" "))
+    _consume(data_lines)
+    return completed
+
+
 def _output_shaping_holdout_fraction() -> float:
     from headroom.proxy import runtime_env
 
@@ -1196,6 +1228,7 @@ def _shape_openai_responses_for_output(
     input_tokens: int,
     model: str,
     conversation_key: str | None = None,
+    output_shaper_enabled: bool | None = None,
 ) -> Any:
     """Apply OpenAI Responses output shaping and attach holdout labels."""
     from headroom.proxy.output_savings import (
@@ -1212,7 +1245,7 @@ def _shape_openai_responses_for_output(
         shape_openai_responses_request,
     )
 
-    settings = OutputShaperSettings.from_env()
+    settings = OutputShaperSettings.from_env(enabled=output_shaper_enabled)
     result = ShapeResult()
     if not settings.enabled:
         return result
@@ -1279,6 +1312,7 @@ def _shape_openai_response_create_frame(
     *,
     input_tokens: int,
     conversation_key: str | None = None,
+    output_shaper_enabled: bool | None = None,
 ) -> tuple[str, bool, list[str], str | None]:
     try:
         parsed = json.loads(raw_msg)
@@ -1297,6 +1331,7 @@ def _shape_openai_response_create_frame(
         input_tokens=input_tokens,
         model=str(payload.get("model") or ""),
         conversation_key=conversation_key,
+        output_shaper_enabled=output_shaper_enabled,
     )
     labels = list(result.labels or [])
     if not result.changed:
@@ -2433,6 +2468,7 @@ class OpenAIHandlerMixin:
         request_id: str,
         timing: dict[str, float] | None = None,
         client: str | None = None,
+        savings_tags: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool, int, list[str], str | None, int, int, int]:
         """Compress an OpenAI Responses payload through the shared router.
 
@@ -2579,6 +2615,23 @@ class OpenAIHandlerMixin:
             working["tools"] = _deferred_tools
             modified = True
             transforms.append("openai:responses:tool_search_deferral")
+            try:
+                from headroom.proxy.savings_attribution import record_savings
+
+                deferred = [
+                    tool
+                    for tool in _deferred_tools
+                    if isinstance(tool, dict) and tool.get("defer_loading")
+                ]
+                record_savings(
+                    savings_tags if savings_tags is not None else {},
+                    "tool_search",
+                    tokens=self.openai_provider.get_token_counter(model).count_text(
+                        _json_debug_dumps(deferred)
+                    ),
+                )
+            except Exception:
+                logger.debug("tool-search savings attribution skipped", exc_info=True)
 
         # Turn hooks (opt-in extensions): a registered hook may inspect or rewrite
         # the outbound tools before we send — the extensible counterpart to the
@@ -2617,6 +2670,17 @@ class OpenAIHandlerMixin:
                 messages=_msgs_before,
                 tools=working.get("tools"),
                 config=getattr(self, "config", None),
+                tags=savings_tags if savings_tags is not None else {},
+                count_messages=lambda value: self.openai_provider.get_token_counter(
+                    model
+                ).count_text(_json_debug_dumps(value)),
+                count_tools=lambda value: (
+                    self.openai_provider.get_token_counter(model).count_text(
+                        _json_debug_dumps(value)
+                    )
+                    if value
+                    else 0
+                ),
             )
             # Streaming turns get fold-only hooks, same rule as the
             # chat-completions path. A hook that defers work to `on_response`
@@ -2787,6 +2851,7 @@ class OpenAIHandlerMixin:
         request_id: str,
         timeout: float = COMPRESSION_TIMEOUT_SECONDS,
         client: str | None = None,
+        savings_tags: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool, int, list[str], str | None, int, int, int, dict[str, float]]:
         timing: dict[str, float] = {}
 
@@ -2799,7 +2864,16 @@ class OpenAIHandlerMixin:
             # closure so the extra payload serialization stays off the event
             # loop.
             shape_labels, shape_mutated = _shape_openai_responses_payload(
-                payload, model=model, request_id=request_id
+                payload,
+                model=model,
+                request_id=request_id,
+                output_shaper_enabled=(
+                    getattr(getattr(self, "config", None), "rollout", None).is_enabled(
+                        "proxy_output_shaper"
+                    )
+                    if getattr(getattr(self, "config", None), "rollout", None) is not None
+                    else None
+                ),
             )
             compression_kwargs: dict[str, Any] = {
                 "model": model,
@@ -2807,6 +2881,8 @@ class OpenAIHandlerMixin:
                 "timing": timing,
                 "client": client,
             }
+            if savings_tags is not None:
+                compression_kwargs["savings_tags"] = savings_tags
             while True:
                 try:
                     result = self._compress_openai_responses_payload(
@@ -2818,7 +2894,7 @@ class OpenAIHandlerMixin:
                     unsupported_kwarg = next(
                         (
                             name
-                            for name in ("client", "timing")
+                            for name in ("savings_tags", "client", "timing")
                             if f"unexpected keyword argument '{name}'" in str(exc)
                             and name in compression_kwargs
                         ),
@@ -3022,6 +3098,9 @@ class OpenAIHandlerMixin:
         # if httpx lacks brotli support the response body is undecipherable → 502.
         headers.pop("accept-encoding", None)
         tags = extract_tags(headers)
+        from headroom.proxy.savings_attribution import bind_scope
+
+        bind_scope(tags, request.scope)
         client = classify_client(headers)
         # Surface the image-compression decision (computed earlier) into
         # tags now that the tags dict exists. Same observability pattern
@@ -3549,6 +3628,10 @@ class OpenAIHandlerMixin:
                 ),
             )
             injector.scan_for_markers(optimized_messages)
+            # Shape-only scanning also matches markers from other context
+            # tools; drop hashes this proxy never actually stored before
+            # they can drive tool injection (issue #2836).
+            injector.verify_ownership()
             if (
                 self.config.ccr_inject_system_instructions
                 and not stream
@@ -3560,6 +3643,7 @@ class OpenAIHandlerMixin:
                 from headroom.proxy.helpers import (
                     apply_session_sticky_ccr_tool,
                     has_new_ccr_markers,
+                    history_references_ccr_tool,
                 )
 
                 # #1850: markers replayed from overlay_cached_prefix are
@@ -3578,6 +3662,7 @@ class OpenAIHandlerMixin:
                     request_id=request_id,
                     existing_tools=tools,
                     has_compressed_content_this_turn=has_new_compressed_content,
+                    history_has_ccr_reference=history_references_ccr_tool(optimized_messages),
                 )
                 if ccr_tool_injected:
                     logger.debug(
@@ -3883,6 +3968,7 @@ class OpenAIHandlerMixin:
             run_request_hooks,
         )
 
+        _th_ctx: TurnContext | None = None
         if registered_turn_hooks():
             _th_tools_before = body.get("tools")
             _th_tok_before = (
@@ -3896,6 +3982,11 @@ class OpenAIHandlerMixin:
                 messages=body["messages"],
                 tools=_th_tools_before,
                 config=self.config,
+                tags=tags,
+                count_messages=tokenizer.count_messages,
+                count_tools=lambda value: (
+                    tokenizer.count_text(json.dumps(value, default=str)) if value else 0
+                ),
             )
             # Snapshot messages BEFORE the hook (same tokenizer) so we can tell whether
             # the hook itself folded — comparing against optimized_tokens instead
@@ -3980,7 +4071,13 @@ class OpenAIHandlerMixin:
                 shape_openai_chat_request,
             )
 
-            _shaper_settings = OutputShaperSettings.from_env()
+            _shaper_settings = OutputShaperSettings.from_env(
+                enabled=(
+                    self.config.rollout.is_enabled("proxy_output_shaper")
+                    if getattr(self.config, "rollout", None) is not None
+                    else None
+                )
+            )
             if _shaper_settings.enabled:
                 # Conversation-stable holdout: a whole conversation is treatment
                 # or control, which keeps the A/B comparison clean and the
@@ -4417,12 +4514,13 @@ class OpenAIHandlerMixin:
                         # replaces the response, this original is the one nobody
                         # else will read.
                         _hook_usage.record(_hook_resp_json, **CHAT_USAGE_KEYS)
-                        _hook_ctx = _TurnContext(
+                        _hook_ctx = _th_ctx or _TurnContext(
                             provider="openai",
                             model=str(model),
                             messages=body["messages"],
                             tools=body.get("tools"),
                             config=self.config,
+                            tags=tags,
                         )
 
                         async def _hook_call_model(_msgs):
@@ -4960,6 +5058,9 @@ class OpenAIHandlerMixin:
         # to decompress already-decoded JSON and reject it with HTTP 400 (#1542).
         headers.pop("content-encoding", None)
         tags = extract_tags(headers)
+        from headroom.proxy.savings_attribution import bind_scope
+
+        bind_scope(tags, request.scope)
         client = classify_client(headers)
 
         # Learn from the original client payload before memory context or
@@ -5234,10 +5335,7 @@ class OpenAIHandlerMixin:
                     else:
                         memory_tool_defs_responses.append(t)
 
-                if (
-                    responses_memory_tools_allowed
-                    and _responses_request_allows_memory_tool_continuation(body)
-                ):
+                if responses_memory_tools_allowed:
                     resp_tools = body.get("tools") or []
                     resp_tools, mem_tools_injected = _apply_sticky_mem_tools_resp(
                         provider="openai",
@@ -5249,23 +5347,16 @@ class OpenAIHandlerMixin:
                     )
                     if mem_tools_injected:
                         body["tools"] = resp_tools
+                        include = body.get("include")
+                        if isinstance(include, list):
+                            if "reasoning.encrypted_content" not in include:
+                                body["include"] = [*include, "reasoning.encrypted_content"]
+                        elif include is None:
+                            body["include"] = ["reasoning.encrypted_content"]
                         body_mutation_tracker.mark_mutated("responses_memory_tools")
                         logger.info(
                             f"[{request_id}] Memory: Injected memory tools (openai/responses)"
                         )
-                        if _ensure_responses_store_for_memory_tools(
-                            body,
-                            memory_tools_injected=True,
-                        ):
-                            body_mutation_tracker.mark_mutated("responses_memory_store")
-                            logger.info(
-                                f"[{request_id}] Memory: forced store=true for Responses memory tool continuation"
-                            )
-                elif self.memory_handler.config.inject_tools:
-                    logger.info(
-                        "[%s] Memory: skipped Responses memory tools because client set store=false",
-                        request_id,
-                    )
             except Exception as e:
                 logger.warning(f"[{request_id}] Memory injection failed (responses): {e}")
         elif self.memory_handler and memory_user_id and _bypass:
@@ -5322,6 +5413,7 @@ class OpenAIHandlerMixin:
                     model=model,
                     request_id=request_id,
                     client=client,
+                    savings_tags=tags,
                 )
                 attempted_input_tokens = int(_attempted_tokens)
                 if _transforms:
@@ -5410,6 +5502,11 @@ class OpenAIHandlerMixin:
                 conversation_key=(
                     f"header:x-headroom-session-id:{_http_conversation_key}"
                     if _http_conversation_key
+                    else None
+                ),
+                output_shaper_enabled=(
+                    self.config.rollout.is_enabled("proxy_output_shaper")
+                    if getattr(self.config, "rollout", None) is not None
                     else None
                 ),
             )
@@ -5588,6 +5685,7 @@ class OpenAIHandlerMixin:
                                 messages=body.get(_resp_key) or [],
                                 tools=body.get("tools"),
                                 config=self.config,
+                                tags=tags,
                             )
 
                             async def _resp_hook_call_model(
@@ -5648,9 +5746,49 @@ class OpenAIHandlerMixin:
 
                     total_latency = (time.time() - start_time) * 1000
 
+                    # Some OpenAI-compatible upstreams answer a ``stream: false``
+                    # request with a valid 200 SSE body carrying Responses API
+                    # events (#2613). Reassemble the terminal response JSON so
+                    # the buffered path keeps working — previously
+                    # ``response.json()`` raised JSONDecodeError past the
+                    # narrow usage-extraction catch below and the successful
+                    # upstream reply surfaced as a 502 proxy_error.
+                    upstream_content_type = response.headers.get("content-type", "")
+                    if (
+                        response.status_code == 200
+                        and "text/event-stream" in upstream_content_type.lower()
+                    ):
+                        completed_json = _openai_responses_from_sse(response.text)
+                        if completed_json is None:
+                            # No terminal event to adapt — forward the
+                            # successful upstream body unchanged rather than
+                            # fabricating a 502.
+                            return Response(
+                                content=response.content,
+                                status_code=response.status_code,
+                                headers=_sanitize_forwarded_response_headers(response.headers),
+                            )
+                        adapted_headers = {
+                            k: v
+                            for k, v in response.headers.items()
+                            if k.lower()
+                            not in (
+                                "content-type",
+                                "content-length",
+                                "content-encoding",
+                                "transfer-encoding",
+                            )
+                        }
+                        response = httpx.Response(
+                            status_code=response.status_code,
+                            content=json.dumps(completed_json).encode(),
+                            headers={**adapted_headers, "content-type": "application/json"},
+                        )
+
                     total_input_tokens = original_tokens  # fallback
                     output_tokens = 0
                     cache_read_tokens = 0
+                    resp_json = None
                     try:
                         resp_json = response.json()
                         usage = resp_json.get("usage", {})
@@ -5669,7 +5807,13 @@ class OpenAIHandlerMixin:
                         details = usage.get("input_tokens_details")
                         if isinstance(details, dict):
                             cache_read_tokens = _usage_int(details.get("cached_tokens"))
-                    except (KeyError, TypeError, AttributeError) as e:
+                    except (
+                        json.JSONDecodeError,
+                        ValueError,
+                        KeyError,
+                        TypeError,
+                        AttributeError,
+                    ) as e:
                         logger.debug(
                             f"[{request_id}] Failed to extract cached tokens from OpenAI passthrough response: {e}"
                         )
@@ -5839,17 +5983,17 @@ class OpenAIHandlerMixin:
                                 )
 
                             if tool_outputs:
-                                # Make continuation request with tool results
-                                response_id = resp_json.get("id")
+                                # Make a stateless continuation with the complete
+                                # item history instead of relying on retained state.
                                 continuation_body = {
-                                    "model": model,
-                                    "input": tool_outputs,
+                                    **body,
+                                    "input": [
+                                        *_responses_stateless_input_items(body.get("input")),
+                                        *_responses_stateless_output_items(output_items),
+                                        *tool_outputs,
+                                    ],
                                 }
-                                if response_id:
-                                    continuation_body["previous_response_id"] = response_id
-                                existing_tools = body.get("tools")
-                                if existing_tools:
-                                    continuation_body["tools"] = existing_tools
+                                continuation_body.pop("previous_response_id", None)
 
                                 cont_response = await self._retry_request(
                                     "POST", url, headers, continuation_body
@@ -5987,6 +6131,25 @@ class OpenAIHandlerMixin:
                             headers=sse_headers,
                         )
 
+                    if buffered_stream_ccr and response.status_code == 200 and not resp_json:
+                        logger.warning(
+                            f"[{request_id}] CCR: rejecting malformed buffered Responses 200 "
+                            f"reply (content-type={response.headers.get('content-type')!r}, "
+                            f"body_bytes={len(response.content)})"
+                        )
+                        return Response(
+                            content=json.dumps(
+                                {
+                                    "error": {
+                                        "type": "upstream_protocol_error",
+                                        "message": "Upstream returned an invalid buffered response.",
+                                    }
+                                }
+                            ),
+                            status_code=502,
+                            media_type="application/json",
+                        )
+
                     # Inline marker resolution, non-streaming only. Runs
                     # outside the has_ccr_tool_calls gate above on purpose:
                     # the #2509 case has no retrieve tool call at all.
@@ -6014,118 +6177,44 @@ class OpenAIHandlerMixin:
 
                 class _BufferedCCRResponse(Response):
                     async def __call__(self, scope, receive, send):  # noqa: ANN001
-                        await asyncio.sleep(0)
-                        loop = asyncio.get_running_loop()
-                        keepalive_deadline = loop.time() + 1.0
-                        started = False
+                        # Send nothing until the buffered operation resolves —
+                        # see the AnthropicHandler twin for the full rationale.
+                        # Committing `200 text/event-stream` on a keepalive timer,
+                        # before the outcome is known, turns every non-200 or
+                        # unparseable upstream reply into a 200 with no usable
+                        # body and discards the status the client needs to back
+                        # off on.
                         try:
-                            while True:
-                                timeout = (
-                                    0.25 if started else max(0.0, keepalive_deadline - loop.time())
-                                )
-                                done, _ = await asyncio.wait({operation}, timeout=timeout)
-                                if done:
-                                    try:
-                                        result = operation.result()
-                                    except Exception as e:
-                                        await record_failed(provider="openai")
-                                        logger.error(
-                                            f"[{request_id}] OpenAI responses request failed: {type(e).__name__}: {e}"
-                                        )
-                                        if not started:
-                                            await send(
-                                                {
-                                                    "type": "http.response.start",
-                                                    "status": 502,
-                                                    "headers": [
-                                                        (b"content-type", b"application/json")
-                                                    ],
-                                                }
-                                            )
-                                            await send(
-                                                {
-                                                    "type": "http.response.body",
-                                                    "body": json.dumps(
-                                                        {
-                                                            "error": {
-                                                                "message": "An error occurred while processing your request. Please try again.",
-                                                                "type": "server_error",
-                                                                "code": "proxy_error",
-                                                            }
-                                                        }
-                                                    ).encode(),
-                                                    "more_body": False,
-                                                }
-                                            )
-                                            return
-                                        await send(
-                                            {
-                                                "type": "http.response.body",
-                                                "body": b'event: error\ndata: {"type":"error","error":{"message":"An error occurred while processing the request."}}\n\n',
-                                                "more_body": False,
-                                            }
-                                        )
-                                        return
-
-                                    if not started:
-                                        await result(scope, receive, send)
-                                        return
-
-                                    body_iterator = getattr(result, "body_iterator", None)
-                                    if body_iterator is not None:
-                                        async for chunk in body_iterator:
-                                            await send(
-                                                {
-                                                    "type": "http.response.body",
-                                                    "body": chunk,
-                                                    "more_body": True,
-                                                }
-                                            )
-                                        await send(
-                                            {
-                                                "type": "http.response.body",
-                                                "body": b"",
-                                                "more_body": False,
-                                            }
-                                        )
-                                        return
-
-                                    await send(
+                            result = await operation
+                        except Exception as e:
+                            await record_failed(provider="openai")
+                            logger.error(
+                                f"[{request_id}] OpenAI responses request failed: {type(e).__name__}: {e}"
+                            )
+                            await send(
+                                {
+                                    "type": "http.response.start",
+                                    "status": 502,
+                                    "headers": [(b"content-type", b"application/json")],
+                                }
+                            )
+                            await send(
+                                {
+                                    "type": "http.response.body",
+                                    "body": json.dumps(
                                         {
-                                            "type": "http.response.body",
-                                            "body": b'event: error\ndata: {"type":"error","error":{"message":"An error occurred while processing the request."}}\n\n',
-                                            "more_body": False,
+                                            "error": {
+                                                "message": "An error occurred while processing your request. Please try again.",
+                                                "type": "server_error",
+                                                "code": "proxy_error",
+                                            }
                                         }
-                                    )
-                                    return
-
-                                if not started:
-                                    await send(
-                                        {
-                                            "type": "http.response.start",
-                                            "status": 200,
-                                            "headers": [(b"content-type", b"text/event-stream")],
-                                        }
-                                    )
-                                    started = True
-                                await send(
-                                    {
-                                        "type": "http.response.body",
-                                        "body": b'event: ping\ndata: {"type":"ping"}\n\n',
-                                        "more_body": True,
-                                    }
-                                )
-                        except asyncio.CancelledError:
-                            raise
-                        finally:
-                            if not operation.done():
-                                operation.cancel()
-                            try:
-                                await operation
-                            except asyncio.CancelledError:
-                                pass
-                            except Exception:
-                                pass
+                                    ).encode(),
+                                    "more_body": False,
+                                }
+                            )
+                            return
+                        await result(scope, receive, send)
 
                 return _BufferedCCRResponse(media_type="text/event-stream")
             return await _buffered_ccr_operation()
@@ -6670,6 +6759,8 @@ class OpenAIHandlerMixin:
                 return json.dumps(flattened, ensure_ascii=False)
 
             body: dict[str, Any] = {}
+            current_response_input: list[dict[str, Any]] = []
+            current_response_template: dict[str, Any] = {}
             tokens_saved = 0
             # Session-scoped accumulator for tokens we *attempted* to
             # compress (extracted units + schema). Drives the active-
@@ -6868,7 +6959,8 @@ class OpenAIHandlerMixin:
                 try:
                     # Unwrap response.create envelope to access the response body
                     ws_response_body = frame_body.get("response", frame_body)
-
+                    if not isinstance(ws_response_body, dict):
+                        return frame_raw
                     # Per-project memory routing (GH #462). For WS,
                     # ``ws_response_body`` carries ``instructions`` —
                     # that's the system-prompt-equivalent we feed to the
@@ -7014,6 +7106,15 @@ class OpenAIHandlerMixin:
                     )
                     if mem_injected:
                         ws_response_body["tools"] = ws_tools
+                        include = ws_response_body.get("include")
+                        if isinstance(include, list):
+                            if "reasoning.encrypted_content" not in include:
+                                ws_response_body["include"] = [
+                                    *include,
+                                    "reasoning.encrypted_content",
+                                ]
+                        elif include is None:
+                            ws_response_body["include"] = ["reasoning.encrypted_content"]
 
                         # Add memory instruction so the model uses
                         # memory tools as persistent cross-session knowledge.
@@ -7053,6 +7154,12 @@ class OpenAIHandlerMixin:
                 body.get("type") == "response.create" or ("type" not in body and "input" in body)
             ):
                 first_msg_raw = await _prepare_memory_frame(body, first_msg_raw)
+                first_response_body = body.get("response", body)
+                current_response_input = _responses_input_to_items(
+                    first_response_body.get("input")
+                    if isinstance(first_response_body, dict)
+                    else None
+                )
 
             # Hot-fix follow-up to PR #406 — inline Rust compression on the
             # WS first frame before forwarding upstream. PR #406 enabled
@@ -7293,6 +7400,11 @@ class OpenAIHandlerMixin:
                         self.openai_provider,
                     ),
                     conversation_key=f"ws:{session_id}",
+                    output_shaper_enabled=(
+                        self.config.rollout.is_enabled("proxy_output_shaper")
+                        if getattr(self.config, "rollout", None) is not None
+                        else None
+                    ),
                 )
                 _append_unique_transforms(transforms_applied, _shape_labels)
                 if _shape_modified:
@@ -7307,6 +7419,19 @@ class OpenAIHandlerMixin:
                     )
 
             first_msg_raw = _normalize_ws_response_create_for_upstream(first_msg_raw)
+            try:
+                final_first_body = json.loads(first_msg_raw)
+            except json.JSONDecodeError:
+                final_first_body = None
+            if isinstance(final_first_body, dict):
+                final_first_response = final_first_body.get("response", final_first_body)
+                if isinstance(final_first_response, dict):
+                    current_response_template = dict(final_first_response)
+                    current_response_template.pop("input", None)
+                    current_response_template.pop("previous_response_id", None)
+                    current_response_input = _responses_input_to_items(
+                        final_first_response.get("input")
+                    )
             _first_upstream_body: Any = None
             try:
                 _first_upstream_body = json.loads(first_msg_raw)
@@ -7645,6 +7770,8 @@ class OpenAIHandlerMixin:
                         nonlocal ws_client_frames_total, ws_cancel_frames
                         nonlocal ws_frames_compressed
                         nonlocal ws_last_client_frame_type, ws_client_disconnect_seen
+                        nonlocal current_response_input
+                        nonlocal current_response_template
                         client_frame_index = 1
                         try:
                             while True:
@@ -7697,6 +7824,14 @@ class OpenAIHandlerMixin:
                                     and _inbound_frame_body.get("type") == "response.create"
                                 ):
                                     ws_response_create_frames += 1
+                                    inbound_response = _inbound_frame_body.get(
+                                        "response", _inbound_frame_body
+                                    )
+                                    current_response_input = _responses_input_to_items(
+                                        inbound_response.get("input")
+                                        if isinstance(inbound_response, dict)
+                                        else None
+                                    )
                                     msg = await _prepare_memory_frame(_inbound_frame_body, msg)
                                 (
                                     msg,
@@ -7719,6 +7854,11 @@ class OpenAIHandlerMixin:
                                             self.openai_provider,
                                         ),
                                         conversation_key=f"ws:{session_id}",
+                                        output_shaper_enabled=(
+                                            self.config.rollout.is_enabled("proxy_output_shaper")
+                                            if getattr(self.config, "rollout", None) is not None
+                                            else None
+                                        ),
                                     )
                                     _append_unique_transforms(
                                         transforms_applied,
@@ -7736,6 +7876,27 @@ class OpenAIHandlerMixin:
                                         )
 
                                 msg = _normalize_ws_response_create_for_upstream(msg)
+                                if ws_last_client_frame_type == "response.create":
+                                    try:
+                                        outbound_body = json.loads(msg)
+                                        outbound_body = (
+                                            outbound_body.get("response", outbound_body)
+                                            if isinstance(outbound_body, dict)
+                                            else {}
+                                        )
+                                        if isinstance(outbound_body, dict):
+                                            current_response_template = dict(outbound_body)
+                                            current_response_template.pop("input", None)
+                                            current_response_template.pop(
+                                                "previous_response_id", None
+                                            )
+                                        candidate_input = _responses_input_to_items(
+                                            outbound_body.get("input")
+                                        )
+                                        if candidate_input:
+                                            current_response_input = candidate_input
+                                    except (json.JSONDecodeError, AttributeError, TypeError):
+                                        current_response_input = []
                                 _outbound_frame_body: Any = None
                                 try:
                                     _outbound_frame_body = json.loads(msg)
@@ -7792,10 +7953,11 @@ class OpenAIHandlerMixin:
                         """Relay upstream→client with transparent memory tool handling.
 
                         Uses a buffer-then-decide approach:
-                        1. Buffer events until first output item arrives
-                        2. If first output is a memory tool → suppress entire response,
-                           execute tools silently, send continuation upstream
-                        3. If first output is non-memory → flush buffer, stream normally
+                        1. Buffer events until the first non-reasoning output item arrives
+                        2. If a memory tool arrives, suppress the response and execute it
+                           silently before sending a stateless continuation upstream
+                        3. Flush ordinary output as soon as the response is known not to
+                           begin with a reasoning-only prelude
                         4. Continuation response events are relayed to Codex seamlessly
 
                         This prevents orphaned response.created events from confusing Codex.
@@ -7820,25 +7982,22 @@ class OpenAIHandlerMixin:
                         nonlocal ws_recorded_overhead_ms_total, ws_recorded_ttfb_ms
                         nonlocal ws_upstream_frames_total, ws_last_upstream_frame_type
                         nonlocal ws_ttfb_ms
-
-                        memory_enabled = bool(
-                            self.memory_handler and memory_user_id and ws_memory_tools_allowed
-                        )
+                        nonlocal current_response_input
 
                         # Per-response state (reset after each response.completed)
                         event_buffer: list[str] = []
                         decided = False
                         suppress_response = False
                         pending_fcs: list[dict[str, Any]] = []
-                        resp_id: str | None = None
+                        response_output_items: list[dict[str, Any]] = []
 
                         def _reset() -> None:
-                            nonlocal decided, suppress_response, resp_id
+                            nonlocal decided, suppress_response
                             event_buffer.clear()
                             decided = False
                             suppress_response = False
                             pending_fcs.clear()
-                            resp_id = None
+                            response_output_items.clear()
 
                         response_started_ms: float | None = None
 
@@ -8066,6 +8225,11 @@ class OpenAIHandlerMixin:
                                     ws_cache_write_tokens_total += usage_cache_write_tokens
                                     ws_uncached_input_tokens_total += usage_uncached_tokens
 
+                                memory_enabled = bool(
+                                    self.memory_handler
+                                    and memory_user_id
+                                    and ws_memory_tools_allowed
+                                )
                                 if not memory_enabled:
                                     if event_type == "response.completed":
                                         response_completed_seen = True
@@ -8073,17 +8237,25 @@ class OpenAIHandlerMixin:
                                     await websocket.send_text(msg_str)
                                     continue
 
-                                # --- Phase 1: Buffer until first output item ---
-                                if not decided:
-                                    event_buffer.append(msg_str)
-
-                                    if event_type == "response.output_item.added":
-                                        item = event.get("item", {})
+                                if event_type == "response.output_item.done":
+                                    item = event.get("item", {})
+                                    if isinstance(item, dict):
+                                        response_output_items.append(item)
                                         if (
                                             item.get("type") == "function_call"
                                             and item.get("name") in MEMORY_TOOL_NAMES
                                         ):
-                                            # Memory tool first → suppress entire response
+                                            pending_fcs.append(item)
+
+                                if not decided:
+                                    event_buffer.append(msg_str)
+                                    if event_type == "response.output_item.added":
+                                        item = event.get("item", {})
+                                        if (
+                                            isinstance(item, dict)
+                                            and item.get("type") == "function_call"
+                                            and item.get("name") in MEMORY_TOOL_NAMES
+                                        ):
                                             suppress_response = True
                                             decided = True
                                             event_buffer.clear()
@@ -8091,106 +8263,108 @@ class OpenAIHandlerMixin:
                                                 f"[{request_id}] WS Memory: Detected "
                                                 f"{item.get('name')} — suppressing response"
                                             )
-                                        else:
-                                            # Non-memory first → flush buffer, pass through
+                                        elif not (
+                                            isinstance(item, dict)
+                                            and item.get("type") == "reasoning"
+                                        ):
                                             decided = True
                                             for buf in event_buffer:
                                                 await websocket.send_text(buf)
                                             event_buffer.clear()
-
+                                            continue
                                     elif event_type == "response.completed":
-                                        # No output items at all — flush
                                         decided = True
-                                for buf in event_buffer:
-                                    await websocket.send_text(buf)
-                                event_buffer.clear()
-                                await _record_ws_response_metrics()
-                                _reset()
-                                response_completed_seen = True
-
-                                continue
-
-                                # --- Phase 2a: Suppress mode (memory response) ---
-                                if suppress_response:
-                                    if event_type == "response.output_item.done":
-                                        item = event.get("item", {})
-                                        if (
-                                            item.get("type") == "function_call"
-                                            and item.get("name") in MEMORY_TOOL_NAMES
-                                        ):
-                                            pending_fcs.append(item)
-
-                                    elif event_type == "response.completed":
                                         response_completed_seen = True
                                         await _record_ws_response_metrics()
-                                        resp = event.get("response", {})
-                                        resp_id = resp.get("id")
-
-                                        if pending_fcs:
-                                            logger.info(
-                                                f"[{request_id}] WS Memory: Executing "
-                                                f"{len(pending_fcs)} tool(s) transparently"
-                                            )
-
-                                            # Execute memory tool calls
-                                            tool_outputs: list[dict[str, Any]] = []
-                                            for fc in pending_fcs:
-                                                call_id = fc.get("call_id", fc.get("id", ""))
-                                                fc_name = fc.get("name", "")
-                                                args_str = fc.get("arguments") or "{}"
-                                                try:
-                                                    fc_args = json.loads(args_str)
-                                                except (json.JSONDecodeError, TypeError):
-                                                    fc_args = {}
-
-                                                await self.memory_handler._ensure_initialized()
-                                                if self.memory_handler._backend:
-                                                    result = await self.memory_handler._execute_memory_tool(
-                                                        fc_name,
-                                                        fc_args,
-                                                        memory_user_id,
-                                                        "openai",
-                                                    )
-                                                else:
-                                                    result = json.dumps(
-                                                        {"error": "backend not ready"}
-                                                    )
-
-                                                tool_outputs.append(
-                                                    {
-                                                        "type": "function_call_output",
-                                                        "call_id": call_id,
-                                                        "output": result,
-                                                    }
-                                                )
-                                                logger.info(
-                                                    f"[{request_id}] WS Memory: Executed "
-                                                    f"{fc_name} for user {memory_user_id}"
-                                                )
-
-                                            # Send continuation upstream
-                                            cont: dict[str, Any] = {
-                                                "type": "response.create",
-                                                "response": {"input": tool_outputs},
-                                            }
-                                            if resp_id:
-                                                cont["response"]["previous_response_id"] = resp_id
-                                            await upstream.send(
-                                                _normalize_ws_response_create_for_upstream(
-                                                    json.dumps(cont)
-                                                )
-                                            )
-                                            logger.info(
-                                                f"[{request_id}] WS Memory: Sent continuation "
-                                                f"with {len(tool_outputs)} result(s)"
-                                            )
-
+                                        for buf in event_buffer:
+                                            await websocket.send_text(buf)
                                         _reset()
-                                    # All events suppressed in this mode
+                                        continue
+                                    if not decided:
+                                        continue
+
+                                if not suppress_response:
+                                    await websocket.send_text(msg_str)
+                                    if event_type == "response.completed":
+                                        response_completed_seen = True
+                                        await _record_ws_response_metrics()
+                                        _reset()
                                     continue
 
-                                # --- Phase 2b: Pass-through mode ---
-                                await websocket.send_text(msg_str)
+                                if event_type != "response.completed":
+                                    continue
+
+                                response_completed_seen = True
+                                await _record_ws_response_metrics()
+
+                                logger.info(
+                                    f"[{request_id}] WS Memory: Executing "
+                                    f"{len(pending_fcs)} tool(s) transparently"
+                                )
+
+                                # Execute memory tool calls.
+                                tool_outputs: list[dict[str, Any]] = []
+                                for fc in pending_fcs:
+                                    call_id = fc.get("call_id", fc.get("id", ""))
+                                    fc_name = fc.get("name", "")
+                                    args_str = fc.get("arguments") or "{}"
+                                    try:
+                                        fc_args = json.loads(args_str)
+                                    except (json.JSONDecodeError, TypeError):
+                                        fc_args = {}
+
+                                    await self.memory_handler._ensure_initialized()
+                                    if self.memory_handler._backend:
+                                        result = await self.memory_handler._execute_memory_tool(
+                                            fc_name,
+                                            fc_args,
+                                            memory_user_id,
+                                            "openai",
+                                        )
+                                    else:
+                                        result = json.dumps({"error": "backend not ready"})
+
+                                    tool_outputs.append(
+                                        {
+                                            "type": "function_call_output",
+                                            "call_id": call_id,
+                                            "output": result,
+                                        }
+                                    )
+                                    logger.info(
+                                        f"[{request_id}] WS Memory: Executed "
+                                        f"{fc_name} for user {memory_user_id}"
+                                    )
+
+                                stateless_input = _responses_stateless_input_items(
+                                    current_response_input
+                                )
+                                stateless_output = _responses_stateless_output_items(
+                                    response_output_items
+                                )
+                                current_response_input = [
+                                    *stateless_input,
+                                    *stateless_output,
+                                    *tool_outputs,
+                                ]
+                                continuation_response = {
+                                    **current_response_template,
+                                    "input": current_response_input,
+                                }
+                                continuation_response.pop("previous_response_id", None)
+                                cont: dict[str, Any] = {
+                                    "type": "response.create",
+                                    "response": continuation_response,
+                                }
+                                continuation_raw = _strip_codex_lite_metadata(json.dumps(cont))
+                                await upstream.send(
+                                    _normalize_ws_response_create_for_upstream(continuation_raw)
+                                )
+                                logger.info(
+                                    f"[{request_id}] WS Memory: Sent continuation "
+                                    f"with {len(tool_outputs)} result(s)"
+                                )
+                                _reset()
 
                         except asyncio.CancelledError:
                             raise

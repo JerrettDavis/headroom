@@ -6,8 +6,60 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    import tomli as tomllib  # type: ignore[no-redef]
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_every_published_docker_variant_includes_bedrock_auth_dependencies() -> None:
+    """Every image that advertises ``--backend bedrock`` must ship botocore.
+
+    Temporary AWS credentials take LiteLLM's botocore-backed authentication
+    path.  The default images previously installed only ``proxy``/``code``, so
+    the documented Docker Bedrock command failed at runtime with
+    ``No module named 'botocore'`` (#1551).  Keep the standalone Dockerfile and
+    every bake target on the existing ``bedrock`` package extra.
+    """
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG HEADROOM_EXTRAS=proxy,code,bedrock" in dockerfile
+
+    bake = (ROOT / "docker-bake.hcl").read_text(encoding="utf-8")
+    extras_lines = [
+        line.strip() for line in bake.splitlines() if line.strip().startswith("HEADROOM_EXTRAS =")
+    ]
+    assert len(extras_lines) == 9
+    assert all("bedrock" in line for line in extras_lines), extras_lines
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    bedrock_names = {
+        Requirement(requirement).name
+        for requirement in project["project"]["optional-dependencies"]["bedrock"]
+    }
+    assert {"boto3", "botocore"} <= bedrock_names
+
+
+def test_public_docker_instructions_use_the_current_organization_package() -> None:
+    """Do not send users back to the personal GHCR package frozen at 0.27.0."""
+    public_docs = (
+        "README.md",
+        "llms.txt",
+        "docker-compose.yml",
+        "TESTING-copilot-subscription.md",
+        "wiki/cli.md",
+        "wiki/docker-install.md",
+    )
+    deprecated = "ghcr.io/chopratejas/headroom"
+    current = "ghcr.io/headroomlabs-ai/headroom"
+
+    for relative_path in public_docs:
+        content = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert deprecated not in content, relative_path
+        assert current in content, relative_path
 
 
 def test_docker_workflow_normalizes_repository_name_for_signing() -> None:
@@ -66,6 +118,40 @@ def test_docker_latest_promotion_is_owned_by_root_manifest_cell() -> None:
     guard_start = manifest_script.index('"${digest_count}" -ne 2')
     create_start = manifest_script.index("docker buildx imagetools create")
     assert guard_start < manifest_script.index("exit 1", guard_start) < create_start
+
+
+def test_docker_manifest_downloads_exactly_one_artifact_per_architecture() -> None:
+    """Each manifest cell must download exactly its two architecture digests.
+
+    Keeping the variant before a trailing wildcard makes prefix-related names
+    overlap: ``digests-code-*`` also selects code-nonroot, code-slim, and
+    code-slim-nonroot. The 0.35.0 Docker release exposed this by downloading
+    eight markers into the code manifest job instead of two.
+    """
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "docker.yml").read_text())
+    jobs = workflow["jobs"]
+    build = jobs["docker-build"]
+    manifest = jobs["docker-manifest"]
+    upload = next(step for step in build["steps"] if step.get("name") == "Upload digest marker")
+    downloads = [
+        step
+        for step in manifest["steps"]
+        if step.get("name")
+        in {
+            "Download amd64 digest for this variant",
+            "Download arm64 digest for this variant",
+        }
+    ]
+
+    assert upload["with"]["name"] == (
+        "digests-${{ matrix.variant.name || 'root' }}-${{ matrix.arch.name }}"
+    )
+    assert [step["with"]["name"] for step in downloads] == [
+        "digests-${{ matrix.variant.name || 'root' }}-amd64",
+        "digests-${{ matrix.variant.name || 'root' }}-arm64",
+    ]
+    assert all("pattern" not in step["with"] for step in downloads)
+    assert all(step["with"]["path"] == "${{ runner.temp }}/digests" for step in downloads)
 
 
 def test_release_workflow_publishes_both_node_packages_to_github_packages() -> None:
@@ -1285,6 +1371,22 @@ def test_release_please_config_and_manifest_are_present_and_consistent() -> None
         "`vX.Y.Z`, not `headroom-ai-vX.Y.Z`. Reverting this setting "
         "would orphan every prior tag and produce a months-long "
         "changelog because the bot can't find its baseline."
+    )
+
+    # This manifest has one package. Sending it through the merge plugin
+    # produces the group title `chore: release main`, which contains neither
+    # the package component nor its version. On merge, release-please cannot
+    # associate that title with `headroom-ai`, leaves the PR tagged
+    # `autorelease: pending`, and never emits the release event that publishes
+    # to PyPI. Keep the single package on the normal, versioned PR path and
+    # preserve the component in the title used to match the merged PR.
+    assert config.get("separate-pull-requests") is True, (
+        "The single root package must bypass release-please's merge plugin; "
+        "its grouped PR title is `chore: release main` and cannot be tagged."
+    )
+    assert config.get("pull-request-title-pattern") == ("chore: release${component} ${version}"), (
+        "Release PR titles must include both component and version so "
+        "release-please can match the merged PR back to headroom-ai."
     )
 
     # extra-files: TypeScript SDK and npm plugin package.json files
