@@ -5,6 +5,20 @@ description: All configuration options for the Headroom Python and TypeScript SD
 
 Headroom can be configured via the SDK constructor, proxy command line, environment variables, or per-request overrides.
 
+## Runtime Rollout Channels
+
+Headroom uses rollout channels to control which behaviors an already-installed
+artifact may expose. They do not select a package or released version.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HEADROOM_ROLLOUT_CHANNEL` | `stable` | Selects `stable`, `beta`, `canary`, or `dev`. |
+| `HEADROOM_FEATURES` | unset | Comma-separated feature names to request explicitly. |
+| `HEADROOM_DISABLE_FEATURES` | unset | Comma-separated feature names to force off. Disable wins over every enable path. |
+| `HEADROOM_UNSAFE_ALLOW_UNSTABLE_FEATURES` | unset | Break-glass override for emergency mitigation only. |
+
+See [Runtime Rollouts](/docs/runtime-rollouts) for policy, provenance, and
+contributor rules.
 If Codex history disappeared after using an older wrapper, see [Recover Codex State](/docs/codex-recovery) before wrapping Codex again.
 
 ## SDK Modes (`default_mode` / `headroom_mode`)
