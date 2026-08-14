@@ -1476,6 +1476,11 @@ class TrafficLearner:
                         "input": tool_use.get("input", {}),
                         "output": str(result_content),
                         "is_error": block.get("is_error", False) or _is_error(str(result_content)),
+                        # Stable per-turn identity (the tool_use/tool_result id).
+                        # Lets a caller dedup a replayed transcript so the same
+                        # result is not counted as evidence twice — used by the
+                        # Codex WebSocket ingestion path.
+                        "call_id": tool_use_id,
                     }
                 )
 

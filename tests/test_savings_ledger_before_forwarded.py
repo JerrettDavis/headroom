@@ -21,8 +21,11 @@ class _FakeSavingsTracker:
 
 
 class _FakeOtelMetrics:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
     def record_proxy_request(self, **kwargs: Any) -> None:
-        pass
+        self.calls.append(kwargs)
 
 
 @pytest.mark.asyncio
@@ -63,6 +66,29 @@ async def test_record_savings_event_uses_original_input_as_before(
             "source": "proxy",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_record_request_forwards_tool_savings_to_otel() -> None:
+    otel = _FakeOtelMetrics()
+    metrics = prometheus_metrics.PrometheusMetrics(
+        savings_tracker=_FakeSavingsTracker(),
+        otel_metrics=otel,
+    )
+
+    await metrics.record_request(
+        provider="anthropic",
+        model="claude-opus-4-6",
+        input_tokens=600,
+        output_tokens=25,
+        tokens_saved=400,
+        tool_search_saved=13182,
+        latency_ms=10.0,
+    )
+
+    assert len(otel.calls) == 1
+    assert otel.calls[0]["tokens_saved"] == 400
+    assert otel.calls[0]["tool_search_saved"] == 13182
 
 
 def _capture_ledger(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:

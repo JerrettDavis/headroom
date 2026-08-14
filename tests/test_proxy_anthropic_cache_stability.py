@@ -17,6 +17,15 @@ from headroom.proxy.handlers.anthropic import AnthropicHandlerMixin
 from headroom.proxy.server import ProxyConfig, create_app
 
 
+def _force_compression(monkeypatch) -> None:  # noqa: ANN001
+    decision = SimpleNamespace(should_compress=True, passthrough_reason=None)
+    decision.apply_to_tags = lambda tags: None
+    monkeypatch.setattr(
+        "headroom.proxy.handlers.anthropic.CompressionDecision.decide",
+        lambda **kwargs: decision,
+    )
+
+
 class _FakePrefixTracker:
     def __init__(self, frozen_count: int):
         self._frozen_count = frozen_count
@@ -506,6 +515,9 @@ def test_ccr_system_instruction_injection_disabled_when_prefix_frozen(monkeypatc
             def scan_for_markers(self, messages):  # noqa: ANN001
                 return []
 
+            def verify_ownership(self, store=None):  # noqa: ANN001
+                return self.detected_hashes
+
         monkeypatch.setattr("headroom.ccr.CCRToolInjector", _FakeInjector)
 
         async def _fake_retry(method, url, headers, body, stream=False, **kwargs):  # noqa: ANN001
@@ -573,6 +585,9 @@ def test_ccr_tool_injection_disabled_when_prefix_frozen(monkeypatch) -> None:
             def scan_for_markers(self, messages):  # noqa: ANN001
                 return []
 
+            def verify_ownership(self, store=None):  # noqa: ANN001
+                return self.detected_hashes
+
         monkeypatch.setattr("headroom.ccr.CCRToolInjector", _FakeInjector)
 
         async def _fake_retry(method, url, headers, body, stream=False, **kwargs):  # noqa: ANN001
@@ -621,10 +636,22 @@ def test_ccr_tool_stays_in_forwarded_tools_across_frozen_transition() -> None:
     value: unit-testing the old policy in isolation is exactly what let a
     wrong-but-self-consistent decision pass.
     """
+    from headroom.cache.compression_store import get_compression_store, reset_compression_store
     from headroom.ccr.tool_injection import CCR_TOOL_NAME
     from headroom.proxy.helpers import (
         _reset_session_ccr_tracker_for_test,
         serialize_tool_definition_canonical,
+    )
+
+    # verify_ownership() (issue #2836) requires the marker's hash to be a
+    # real store entry — seed one with the exact hash the marker text below
+    # references, via explicit_hash (the store's own hash generation from
+    # `original` content wouldn't match this hand-typed literal).
+    reset_compression_store()
+    get_compression_store().store(
+        original="original tool output",
+        compressed="[50 items compressed to 5]",
+        explicit_hash="abc123def456abc123def456",
     )
 
     marker_message = {
@@ -702,6 +729,7 @@ def test_ccr_tool_stays_in_forwarded_tools_across_frozen_transition() -> None:
             assert _post().status_code == 200
     finally:
         _reset_session_ccr_tracker_for_test()
+        reset_compression_store()
 
     assert len(forwarded) == 2, "expected exactly two forwarded requests"
 
@@ -994,7 +1022,8 @@ def test_token_mode_does_not_force_freeze_all_previous_turns() -> None:
         assert captured["frozen_message_count"] >= 0
 
 
-def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history() -> None:
+def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history(monkeypatch) -> None:
+    _force_compression(monkeypatch)
     captured = {}
     with _make_proxy_client() as client:
         proxy = client.app.state.proxy
@@ -1013,6 +1042,11 @@ def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history() -> Non
             {"role": "assistant", "content": "turn1-assistant"},
             {"role": "user", "content": "current turn"},
         ]
+        # Mid-session: the first two messages were already forwarded last turn,
+        # so they form the byte-stable cached prefix the handler must replay
+        # even if a transform tries to mutate them.
+        fake_tracker._last_original_messages = original_messages[:2]
+        fake_tracker._last_forwarded_messages = original_messages[:2]
 
         def _fake_apply(**kwargs):
             mutated = list(kwargs["messages"])
@@ -1064,7 +1098,11 @@ def test_cache_mode_restores_frozen_prefix_if_transform_mutates_history() -> Non
         assert sent_messages[1] == original_messages[1]
 
 
-def test_cache_mode_does_not_forward_latest_turn_rewrites() -> None:
+def test_cache_mode_cold_start_forwards_pipeline_rewrites(monkeypatch) -> None:
+    _force_compression(monkeypatch)
+    # Issue #2357: on a true session cold start (no prior forwarded messages,
+    # no frozen prefix) there is no provider cache to protect, so the full
+    # pipeline output is forwarded and recorded for byte-identical replay.
     captured = {}
     with _make_proxy_client() as client:
         proxy = client.app.state.proxy
@@ -1129,7 +1167,12 @@ def test_cache_mode_does_not_forward_latest_turn_rewrites() -> None:
         )
 
         assert response.status_code == 200
-        assert captured["body"]["messages"] == original_messages
+        sent_messages = captured["body"]["messages"]
+        assert sent_messages[:2] == original_messages[:2]
+        assert sent_messages[2]["content"] == "REWRITTEN_CURRENT_TURN"
+        # Recorded as forwarded so later turns replay this prefix verbatim
+        # (the tracker may append the assistant reply after the forwarded turns).
+        assert fake_tracker._last_forwarded_messages[: len(sent_messages)] == sent_messages
 
 
 def test_cache_mode_reuses_prior_forwarded_prefix_and_compresses_only_new_suffix() -> None:

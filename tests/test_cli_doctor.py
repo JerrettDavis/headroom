@@ -390,6 +390,17 @@ class TestShellEnv:
         env = {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}
         assert check_shell_env(env, 8787).status == WARN
 
+    def test_ollama_launch_url_names_the_collision(self):
+        # `ollama launch claude` points Claude Code at Ollama's :11434, which
+        # outranks the persistent Headroom route (issue #2199). The diagnostic
+        # must name Ollama, not tell the user to re-probe port 11434.
+        env = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:11434"}
+        result = check_shell_env(env, 8787)
+        assert result.status == WARN
+        assert "Ollama" in result.summary
+        assert "#2199" in (result.hint or "")
+        assert "--port 11434" not in (result.hint or "")
+
 
 class TestSavings:
     def test_from_stats_passes_with_totals(self, tmp_path):
@@ -535,7 +546,16 @@ class TestDoctorCommand:
         monkeypatch.setattr(doctor_mod, "codex_config_path", lambda: tmp_path / "config.toml")
         monkeypatch.setattr(doctor_mod, "savings_path", lambda: tmp_path / "savings.json")
         monkeypatch.setattr(doctor_mod, "list_manifests", lambda: [])
-        for var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "HEADROOM_PORT"):
+        for var in (
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_VERTEX",
+            "OPENAI_BASE_URL",
+            "HEADROOM_PORT",
+        ):
             monkeypatch.delenv(var, raising=False)
         return tmp_path
 
@@ -565,6 +585,7 @@ class TestDoctorCommand:
     def test_remote_control_warning_exits_1(self, runner, isolated, monkeypatch):
         monkeypatch.setattr(doctor_mod, "probe_json", self._probe(LIVEZ_OK, STATS_OK))
         monkeypatch.setattr(doctor_mod, "get_version", lambda: "0.26.0")
+        monkeypatch.setattr(doctor_mod, "detect_claude_code_version", lambda: None)
         (isolated / "settings.json").write_text(
             json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"}}),
             encoding="utf-8",
