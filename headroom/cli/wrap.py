@@ -77,6 +77,8 @@ from headroom.providers.claude import (
     REMOTE_CONTROL_BASE_URL_ENV,
     TOOL_SEARCH_DEFAULT,
     TOOL_SEARCH_ENV,
+    claude_auth_conflict_message,
+    claude_auth_conflict_sources,
     claude_user_settings_path,
     configure_vscode_claude_settings,
     detect_claude_code_version,
@@ -258,6 +260,30 @@ def _read_settings_for_write(path: Path) -> dict[str, Any]:
             f"{path} does not contain a JSON object. Fix or move it, then re-run."
         )
     return cast("dict[str, Any]", payload)
+
+
+def _claude_settings_env(path: Path) -> dict[str, object]:
+    """Read a Claude settings env block for preflight validation."""
+    env = _read_settings_for_write(path).get("env")
+    return dict(env) if isinstance(env, dict) else {}
+
+
+def _raise_on_claude_auth_conflict(
+    *,
+    user_settings_path: Path,
+    project_settings_path: Path,
+    project_local_settings_path: Path,
+    environ: dict[str, str],
+) -> None:
+    """Refuse an auth state Claude Code rejects before mutating wrap state."""
+    conflict = claude_auth_conflict_sources(
+        (str(user_settings_path), _claude_settings_env(user_settings_path)),
+        (str(project_settings_path), _claude_settings_env(project_settings_path)),
+        (str(project_local_settings_path), _claude_settings_env(project_local_settings_path)),
+        ("shell environment", environ),
+    )
+    if conflict is not None:
+        raise click.ClickException(claude_auth_conflict_message(conflict))
 
 
 def _append_text(path: Path, content: str) -> None:
@@ -4745,6 +4771,12 @@ def claude(
     # early proxy-start failure would make the finally raise UnboundLocalError,
     # masking the real error and skipping cleanup(). Mirrors the holders above.
     _wrap_settings_path = Path.cwd() / ".claude" / "settings.local.json"
+    _raise_on_claude_auth_conflict(
+        user_settings_path=claude_user_settings_path(),
+        project_settings_path=Path.cwd() / ".claude" / "settings.json",
+        project_local_settings_path=_wrap_settings_path,
+        environ=dict(os.environ),
+    )
     cleanup = _make_cleanup(proxy_holder, port_holder)
     signal.signal(signal.SIGINT, _ignore_child_sigint)
     signal.signal(signal.SIGTERM, cleanup)
