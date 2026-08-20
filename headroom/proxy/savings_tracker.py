@@ -768,11 +768,31 @@ class SavingsTracker:
         delta_output_tokens_saved = max(_coerce_int(output_tokens_saved), 0)
         delta_cache_read_tokens = _coerce_int(cache_read_tokens)
         priced = estimated_savings_usd
-        delta_savings_usd = (
-            max(_coerce_float(priced.get("compression")), 0.0)
-            if priced is not None
-            else _estimate_compression_savings_usd(model, delta_tokens_saved)
-        )
+        # ``estimate_request_savings_usd`` prices FOUR buckets, but this method
+        # only ever read three — ``tool_schema`` was computed and dropped on the
+        # floor. Tool-schema deferral is a quarter of the token headline on real
+        # traffic (2.7M of 11.2M), and ``tokens_saved`` here is the bare
+        # message-level figure (the caller folds deferral in separately for the
+        # ledger, see prometheus_metrics.record_request), so the dollars were
+        # simply missing rather than counted elsewhere. That is why "Cost saved"
+        # read materially below the token-savings percent on the same traffic.
+        # Add it to the compression bucket, matching how the PERF headline and
+        # perf/analyzer fold deferral into one number.
+        if priced is not None:
+            # Two DISJOINT buckets: the caller passes bare message savings as
+            # ``compression_tokens_saved`` and deferral separately as
+            # ``tool_schema_tokens_saved`` (see prometheus_metrics.record_request),
+            # so summing them is additive, not double counting. Written as a
+            # statement rather than folded into the ternary below — a money path
+            # should not depend on the reader knowing that ``a + b if c else d``
+            # groups as ``(a + b) if c else d``.
+            delta_savings_usd = max(_coerce_float(priced.get("compression")), 0.0) + max(
+                _coerce_float(priced.get("tool_schema")), 0.0
+            )
+        else:
+            # No priced breakdown available: only message savings are known here,
+            # so this path stays message-only exactly as before.
+            delta_savings_usd = _estimate_compression_savings_usd(model, delta_tokens_saved)
         delta_output_savings_usd = (
             max(_coerce_float(priced.get("output_shaping")), 0.0)
             if priced is not None

@@ -1467,3 +1467,69 @@ def test_version_sync_covers_every_file_the_verifier_gates() -> None:
         "server.json",
     ]:
         assert fragment in sync, f"version-sync.py no longer propagates a version to {fragment}"
+
+
+def test_metadata_sync_does_not_persist_credentials_for_branch_supplied_code() -> None:
+    """The release credential must not be readable by the synced branch's code.
+
+    ``release-metadata-sync`` triggers on a push to the ``release-please--branches--**``
+    glob, which is not a protected namespace, and then runs
+    ``scripts/version-sync.py`` *from the checked-out branch*. With
+    ``actions/checkout``'s default ``persist-credentials: true`` the token is
+    written to ``.git/config`` before that script runs, so anyone able to push a
+    matching branch could read it. The credential reaches PyPI, npm and GHCR via
+    the ``release: published`` publishes, so this is not a theoretical leak.
+    """
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-metadata-sync.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["sync"]["steps"]
+
+    checkouts = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout")]
+    assert checkouts, "expected a checkout step"
+    for step in checkouts:
+        assert step.get("with", {}).get("persist-credentials") is False, step
+        # A token passed to checkout is exactly what persist-credentials would
+        # write to disk; the push step supplies it via env instead.
+        assert "token" not in step.get("with", {}), step
+
+
+@pytest.mark.parametrize(
+    "workflow_path,job",
+    [
+        (".github/workflows/release-please.yml", "release-please"),
+        (".github/workflows/release-metadata-sync.yml", "sync"),
+    ],
+)
+def test_release_workflows_prefer_scoped_app_token(workflow_path: str, job: str) -> None:
+    """A repo-scoped, short-lived app token must be preferred over the PAT.
+
+    The PAT carries a maintainer's entire account and bypasses branch and tag
+    protection (#2955). The app-token step is gated on ``vars.RELEASE_APP_ID``
+    and marked ``continue-on-error`` so an unconfigured app falls back to the
+    existing chain rather than blocking a release.
+    """
+    workflow = yaml.safe_load((ROOT / workflow_path).read_text(encoding="utf-8"))
+    steps = workflow["jobs"][job]["steps"]
+
+    minters = [
+        s for s in steps if str(s.get("uses", "")).startswith("actions/create-github-app-token")
+    ]
+    assert len(minters) == 1, steps
+    minter = minters[0]
+    assert minter["id"] == "app-token"
+    assert minter["continue-on-error"] is True
+    assert "vars.RELEASE_APP_ID" in str(minter["if"])
+
+    # Whatever consumes the credential must try the app token first.
+    consumers = [
+        value
+        for step in steps
+        for value in list(step.get("with", {}).values()) + list(step.get("env", {}).values())
+        if "RELEASE_PLEASE_TOKEN" in str(value)
+    ]
+    assert consumers, "expected a step consuming the release credential"
+    for value in consumers:
+        assert str(value).index("steps.app-token.outputs.token") < str(value).index(
+            "secrets.RELEASE_PLEASE_TOKEN"
+        ), value
