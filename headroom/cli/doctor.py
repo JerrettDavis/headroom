@@ -14,7 +14,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Callable, Mapping
+import sys
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -148,47 +149,76 @@ def check_version_drift(livez: dict[str, Any] | None, installed: str) -> CheckRe
     )
 
 
-def check_claude_routing(settings_path: Path, port: int) -> CheckResult:
-    """Is Claude Code configured to route through the proxy?"""
+def _claude_base_url_in(path: Path) -> tuple[str, CheckResult | None]:
+    """Read ``env.ANTHROPIC_BASE_URL`` from one Claude settings file.
+
+    Returns ``(base_url, error)``. A parse problem comes back as a WARN so the
+    caller surfaces it verbatim instead of skipping the file and reporting the
+    misleading "not routed".
+    """
     name = "claude"
-    if not settings_path.exists():
-        return CheckResult(
-            name=name,
-            status=WARN,
-            summary="not routed (no ~/.claude/settings.json)",
-            hint="wrap it: headroom wrap claude",
-        )
     try:
-        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return CheckResult(
-            name=name,
-            status=WARN,
-            summary=f"could not parse {settings_path}: {exc}",
-        )
+        return "", CheckResult(name=name, status=WARN, summary=f"could not parse {path}: {exc}")
     # `json.loads` succeeds on valid non-object JSON (e.g. `[]`, `null`, `42`),
     # which a hand-edited or reset settings file can contain. `.get` on a
     # non-dict raises AttributeError, and it is not one of the caught parse
     # errors above, so it would crash the very command run to diagnose the
     # broken config. Treat a non-object like an unparseable file.
     if not isinstance(payload, dict):
-        return CheckResult(
+        return "", CheckResult(
             name=name,
             status=WARN,
-            summary=f"could not parse {settings_path}: not a JSON object",
+            summary=f"could not parse {path}: not a JSON object",
         )
-    base_url = ""
     env_block = payload.get("env")
     if isinstance(env_block, dict):
-        base_url = str(env_block.get("ANTHROPIC_BASE_URL", "") or "")
-    if not base_url:
+        return str(env_block.get("ANTHROPIC_BASE_URL", "") or ""), None
+    return "", None
+
+
+def check_claude_routing(
+    settings_path: Path,
+    port: int,
+    project_settings_paths: Sequence[Path] | None = None,
+) -> CheckResult:
+    """Is Claude Code configured to route through the proxy?
+
+    Claude Code layers project settings over user settings, and `headroom init
+    claude` without --global writes the project-scoped
+    ``.claude/settings.local.json``. Reading only ``~/.claude/settings.json``
+    reported "not routed" for sessions that demonstrably were -- confirmed by
+    `ps eww` on the live process and by active compression on it (#3205).
+    Candidates are consulted in Claude's own precedence order, and the summary
+    names the file that supplied the routing so the scope is never ambiguous.
+    """
+    name = "claude"
+    candidates = [*(project_settings_paths or []), settings_path]
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
         return CheckResult(
             name=name,
             status=WARN,
-            summary="not routed (no ANTHROPIC_BASE_URL in settings env)",
+            summary="not routed (no ~/.claude/settings.json)",
             hint="wrap it: headroom wrap claude",
         )
-    return _classify_routing_url(name, base_url, port, source=str(settings_path))
+    first_error: CheckResult | None = None
+    for candidate in existing:
+        base_url, error = _claude_base_url_in(candidate)
+        if error is not None:
+            first_error = first_error or error
+            continue
+        if base_url:
+            return _classify_routing_url(name, base_url, port, source=str(candidate))
+    if first_error is not None:
+        return first_error
+    return CheckResult(
+        name=name,
+        status=WARN,
+        summary="not routed (no ANTHROPIC_BASE_URL in settings env)",
+        hint="wrap it: headroom wrap claude",
+    )
 
 
 def check_claude_auth_conflict(
@@ -221,6 +251,51 @@ def check_claude_auth_conflict(
         name="claude auth",
         status=FAIL,
         summary=claude_auth_conflict_message(conflict),
+    )
+
+
+def claude_desktop_config_dir() -> Path:
+    """Return Claude Desktop's per-user config directory for this platform.
+
+    Claude Desktop (``com.anthropic.claudefordesktop``) stores its config here,
+    distinct from Claude Code CLI's ``~/.claude``. Directory existence is used as
+    a proxy for "Desktop is installed / has been run" (#2925).
+    """
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Claude"
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else home / "AppData" / "Roaming"
+        return base / "Claude"
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else home / ".config"
+    return base / "Claude"
+
+
+def check_claude_desktop(config_dir: Path) -> CheckResult | None:
+    """Surface that Claude Desktop agent sessions bypass the proxy (#2925 / #869).
+
+    Claude Desktop unconditionally overwrites ``ANTHROPIC_BASE_URL`` when it
+    spawns agent sessions, so a correctly-wrapped ``~/.claude/settings.json``
+    (which the ``claude`` check verifies for the terminal CLI) does not route
+    Desktop traffic. Without this, ``doctor`` passes on the settings value alone
+    and never hints that Desktop sessions are unrouted.
+
+    Reported as its own per-surface row -- like ``wrap_marker`` and ``shell env``
+    -- and only when Desktop is detected, so it never contradicts a genuinely
+    routed CLI. Returns ``None`` when Desktop is absent (no row).
+    """
+    if not config_dir.exists():
+        return None
+    return CheckResult(
+        name="claude desktop",
+        status=WARN,
+        summary="agent sessions bypass the proxy (Desktop overwrites ANTHROPIC_BASE_URL)",
+        hint=(
+            "Desktop routing is not supported yet (see #869); use the terminal "
+            "Claude Code CLI for proxy-routed sessions."
+        ),
     )
 
 
@@ -358,7 +433,37 @@ def check_codex_routing(config_path: Path, port: int) -> CheckResult:
             summary=f"routed to port {match.group(1)}, but doctor probed port {port}",
             hint=f"re-run with: headroom doctor --port {match.group(1)}",
         )
+    # Routed, but Codex may still attach no credentials. A ChatGPT-OAuth user
+    # needs `requires_openai_auth = true` in the provider block or Codex sends
+    # no Authorization header at all and every request 401s with "Missing
+    # bearer" (#3206). That failure is invisible from here -- the proxy is up,
+    # the block is present -- so this check is the only place it can surface.
+    if _codex_block_missing_openai_auth(text, config_path):
+        return CheckResult(
+            name=name,
+            status=WARN,
+            summary="routed, but Codex will send no Authorization (missing requires_openai_auth)",
+            hint="re-run: headroom wrap codex (or headroom init codex) to rewrite the block",
+        )
     return CheckResult(name=name, status=PASS, summary=f"routed ({config_path})")
+
+
+def _codex_block_missing_openai_auth(text: str, config_path: Path) -> bool:
+    """ChatGPT-OAuth Codex routed without ``requires_openai_auth`` (#3206)."""
+    start = text.find("[model_providers.headroom]")
+    if start == -1:
+        return False
+    rest = text[start + len("[model_providers.headroom]") :]
+    end = rest.find("\n[")
+    block = rest if end == -1 else rest[:end]
+    if "requires_openai_auth" in block:
+        return False
+    try:
+        from headroom.providers.codex.install import codex_uses_chatgpt_auth
+
+        return codex_uses_chatgpt_auth(config_path.parent / "auth.json")
+    except Exception:  # pragma: no cover - never let a doctor check crash
+        return False
 
 
 def check_shell_env(environ: Mapping[str, str], port: int) -> CheckResult:
@@ -607,7 +712,11 @@ def doctor(port: int, emit_json: bool) -> None:
     checks = [
         check_proxy_liveness(livez, base_url),
         check_version_drift(livez, installed),
-        check_claude_routing(claude_settings_path(), port),
+        check_claude_routing(
+            claude_settings_path(),
+            port,
+            [project_local_claude_settings, project_claude_settings],
+        ),
         check_wrap_marker_staleness(project_local_claude_settings),
         check_codex_routing(codex_config_path(), port),
         check_shell_env(os.environ, port),
@@ -630,6 +739,9 @@ def doctor(port: int, emit_json: bool) -> None:
     )
     if remote_control_gate_check is not None:
         checks.append(remote_control_gate_check)
+    desktop_check = check_claude_desktop(claude_desktop_config_dir())
+    if desktop_check is not None:
+        checks.append(desktop_check)
     deployments = check_deployments(list_manifests())
     if deployments is not None:
         checks.append(deployments)

@@ -65,6 +65,7 @@ from ..tokenizers.base import count_content_blocks
 from ..tokenizers.estimator import EstimatingTokenCounter
 from . import mixed_content as _mixed_content
 from .base import Transform
+from .compression_policy import cache_write_multiplier_for_ttl
 from .compressor_registry import (
     CompressInput,
     CompressorDescriptor,
@@ -529,6 +530,20 @@ def _tool_call_args_text(raw: Any) -> str:
     else:
         return ""
     return " ".join(text.split())[:300]
+
+
+def read_protection_enabled() -> bool:
+    """True when HEADROOM_PROTECT_READS opts into byte-exact file-read protection.
+
+    Shared by every request path (chat/Anthropic ``ContentRouter.apply`` and the
+    OpenAI Responses units path) so the flag means the same thing everywhere.
+    """
+    return os.environ.get("HEADROOM_PROTECT_READS", "0").strip().lower() not in (
+        "0",
+        "",
+        "false",
+        "no",
+    )
 
 
 def _tool_call_command_text(raw: Any) -> str:
@@ -1527,6 +1542,11 @@ class ContentRouterConfig:
     # Runs in both modes: lossless references verbatim/folded content; CCR mode
     # references the earlier block's kompressed-but-CCR-recoverable form
     # (deterministic content-hash → stable → still cache-safe, no added loss).
+    # Per request the fold is skipped when the caller reports the serving path
+    # cannot resolve the in-context `[↑NL same as msg M]` pointer
+    # (`apply(cross_turn_dedup_recoverable=False)`, e.g. OpenAI chat-completions
+    # streaming, where no CCR retrieval tool can be injected and clients never
+    # show the model numbered messages).
     enable_cross_turn_dedup: bool = False
     # Lossless-then-lossy. In lossy mode (not `lossless`), after a byte/data
     # lossless fold (search/log/text) run the aggressive lossy compressor
@@ -1856,7 +1876,11 @@ class ContentRouter(Transform):
         ).strip().lower() in ("1", "true", "yes", "on")
         self._text_crusher: Any = None
         # Cross-turn dedup: config field OR env HEADROOM_DEDUPE (robust to how the
-        # config was built). Effective only in lossless mode (guarded in apply()).
+        # config was built). Runs in BOTH modes — the call site in ``apply()`` has
+        # no lossless guard, and ``_cross_turn_dedup_messages`` documents working
+        # against lossless folds and CCR-recoverable forms alike. (This comment
+        # previously claimed "lossless mode only", which reads as "inert in your
+        # config" to anyone auditing why dedup never fired.)
         self._cross_turn_dedup_enabled: bool = (
             self.config.enable_cross_turn_dedup
             or os.environ.get("HEADROOM_DEDUPE", "").strip().lower() in ("1", "true", "yes", "on")
@@ -1923,7 +1947,19 @@ class ContentRouter(Transform):
         # we match that posture with a dedicated lock rather than relying on
         # GIL atomicity (which would not protect the read-then-evict sequence).
         self._frozen_verdicts: dict[int, bool] = {}
-        self._frozen_verdicts_max = 4096
+        # The store is process-wide (one router per pipeline, shared by every
+        # session), so the cap must scale with the number of CONCURRENT
+        # sessions, not one user's workload: at org scale (many users behind
+        # one sidecar) 4096 churns in minutes and FIFO eviction lets tightened
+        # thresholds flip a still-cached block's verdict — a prefix bust.
+        # Read at construction so tests and multi-tenant deployments can size
+        # it via HEADROOM_FROZEN_VERDICTS_MAX without a module reload.
+        try:
+            self._frozen_verdicts_max = max(
+                256, int(os.environ.get("HEADROOM_FROZEN_VERDICTS_MAX", "4096"))
+            )
+        except ValueError:
+            self._frozen_verdicts_max = 4096
         self._frozen_lock = threading.Lock()
         # Reset verdicts whenever the shadowed cache is cleared.
         self._cache.register_on_clear(self._clear_frozen_verdicts)
@@ -4529,6 +4565,7 @@ class ContentRouter(Transform):
         transforms_applied: list[str],
         batch_state: dict[str, int | None] | None = None,
         p_alive_override: float | None = None,
+        write_multiplier: float | None = None,
     ) -> bool:
         """Break-even gate for one candidate mutation (#856 P2, flag-gated).
 
@@ -4613,7 +4650,15 @@ class ContentRouter(Transform):
                 p_alive = _p_alive
             except ValueError:
                 logger.warning("HEADROOM_NET_COST_P_ALIVE malformed; using 1.0")
-        gain = float(policy.net_mutation_gain(delta_t, suffix, reads, p_alive))
+        gain = float(
+            policy.net_mutation_gain(
+                delta_t,
+                suffix,
+                reads,
+                p_alive,
+                write_multiplier=write_multiplier,
+            )
+        )
         allowed = gain > 0.0
         logger.info(
             "NetCostPolicy slot=%d delta_t=%d suffix=%d reads=%.1f p_alive=%.2f "
@@ -4743,6 +4788,20 @@ class ContentRouter(Transform):
         # pass a policy — ``_record_to_toin`` treats that as "no gate"
         # to preserve pre-F2.2 behaviour for non-proxy callers.
         self._runtime_compression_policy = kwargs.get("compression_policy")
+        # Cross-turn dedup recoverability gate. The fold rewrites a repeated
+        # span to a bare in-context pointer (``[↑NL same as msg M]``) that names
+        # Headroom's internal message index. That reference is only resolvable
+        # where the model can locate the original: on the OpenAI
+        # chat-completions streaming path (e.g. ``wrap copilot``) no CCR
+        # retrieval tool can be injected (the path cannot intercept tool calls)
+        # and the client never shows the model numbered messages, so the
+        # pointer reads as deleted content and the model retry-loops on the
+        # "missing" output. Same recoverability posture as the lossy
+        # ``lossy_unrecoverable_skipped`` guard: when the caller reports the
+        # path cannot resolve in-context pointers, skip the fold and keep the
+        # bytes verbatim. Default True: every path that does not opt out keeps
+        # today's behavior.
+        dedup_pointers_recoverable = bool(kwargs.get("cross_turn_dedup_recoverable", True))
 
         tokens_before = sum(tokenizer.count_text(str(m.get("content", ""))) for m in messages)
         context = kwargs.get("context", "")
@@ -4794,12 +4853,7 @@ class ContentRouter(Transform):
         # Type-specific by design: grep/test/ls output stays compressible, so the
         # cache-mode delta still compresses whenever the newest turn is NOT a read.
         self._protect_read_tool_ids = set()
-        if os.environ.get("HEADROOM_PROTECT_READS", "0").strip().lower() not in (
-            "0",
-            "",
-            "false",
-            "no",
-        ):
+        if read_protection_enabled():
             # Use _tool_call_commands (the parsed shell command), NOT
             # _tool_call_args (a compact free-text blob that, for OpenAI-style
             # JSON-string args, is the raw ``{"command": ...}`` JSON — on which
@@ -4821,12 +4875,7 @@ class ContentRouter(Transform):
         # cat/sed/head code reads are protected on ANY model/harness, not just
         # those that emit tool-call/tool_result blocks.
         self._protect_read_msg_indices: set[int] = set()
-        if os.environ.get("HEADROOM_PROTECT_READS", "0").strip().lower() not in (
-            "0",
-            "",
-            "false",
-            "no",
-        ):
+        if read_protection_enabled():
             for _idx, _m in enumerate(messages):
                 if _m.get("role") != "user":
                     continue
@@ -4976,7 +5025,22 @@ class ContentRouter(Transform):
         # env-constant behaviour. Derived once here (not per slot) — idle is a
         # per-request property, like frozen_message_count.
         netcost_p_alive_override: float | None = None
+        netcost_write_multiplier: float | None = None
         if netcost_enabled:
+            # Prefer the authoritative per-request prompt-cache TTL when the
+            # caller has one; retain the env setting for other providers and
+            # legacy callers.
+            request_ttl = kwargs.get("cache_ttl_seconds")
+            if request_ttl is None:
+                netcost_ttl = _net_cost_cache_ttl_seconds()
+            else:
+                try:
+                    netcost_ttl = float(request_ttl)
+                except (TypeError, ValueError):
+                    netcost_ttl = _net_cost_cache_ttl_seconds()
+                if not math.isfinite(netcost_ttl) or netcost_ttl <= 0.0:
+                    netcost_ttl = _net_cost_cache_ttl_seconds()
+            netcost_write_multiplier = cache_write_multiplier_for_ttl(netcost_ttl)
             netcost_suffix_tokens = [0] * (num_messages + 1)
             for j in range(num_messages - 1, -1, -1):
                 netcost_suffix_tokens[j] = netcost_suffix_tokens[j + 1] + _netcost_message_tokens(
@@ -4989,8 +5053,7 @@ class ContentRouter(Transform):
                 except (TypeError, ValueError):
                     idle_f = None
                 if idle_f is not None and math.isfinite(idle_f) and idle_f >= 0.0:
-                    ttl = _net_cost_cache_ttl_seconds()
-                    netcost_p_alive_override = max(0.0, 1.0 - idle_f / ttl)
+                    netcost_p_alive_override = max(0.0, 1.0 - idle_f / netcost_ttl)
 
         # Tasks: list of (slot_index, content, context, bias, content_key)
         _PendingTask = tuple[int, str, str, float, int, bool]
@@ -5294,6 +5357,7 @@ class ContentRouter(Transform):
                         transforms_applied=transforms_applied,
                         batch_state=netcost_batch_state,
                         p_alive_override=netcost_p_alive_override,
+                        write_multiplier=netcost_write_multiplier,
                     ):
                         # Net-cost gate: mutation would cost more in cache
                         # invalidation than it saves — leave untouched.
@@ -5471,6 +5535,7 @@ class ContentRouter(Transform):
                         transforms_applied=transforms_applied,
                         batch_state=netcost_batch_state,
                         p_alive_override=netcost_p_alive_override,
+                        write_multiplier=netcost_write_multiplier,
                     ):
                         result_slots[slot_idx] = message
                         continue
@@ -5508,7 +5573,7 @@ class ContentRouter(Transform):
         # later duplicate would carry the same (recoverable) form anyway; dedup
         # just points to the earlier copy instead of repeating it. Frozen +
         # cache_control blocks are reference targets only (never rewritten).
-        if self._cross_turn_dedup_enabled:
+        if self._cross_turn_dedup_enabled and dedup_pointers_recoverable:
             transformed_messages = self._cross_turn_dedup_messages(
                 transformed_messages, frozen_message_count, transforms_applied, route_counts
             )
@@ -5526,7 +5591,16 @@ class ContentRouter(Transform):
         if route_counts["user_msg"]:
             parts.append(f"{route_counts['user_msg']} skipped (user)")
         if route_counts["small"]:
-            parts.append(f"{route_counts['small']} skipped (<50 words)")
+            # Report the thresholds actually in force, not a literal. This line
+            # used to read "skipped (<50 words)" unconditionally: wrong number
+            # (the message gate is `min_tokens`, which profiles set anywhere from
+            # 10 to 250), wrong unit (tokens and characters, never words), and it
+            # merged two different gates under one label. Operators read it as
+            # evidence of a mis-set threshold and tuned the wrong knob.
+            parts.append(
+                f"{route_counts['small']} skipped "
+                f"(<{min_tokens} tok msg / <{min_chars_for_block_compression} chars block)"
+            )
         if route_counts["recent_code"]:
             parts.append(f"{route_counts['recent_code']} protected (recent code)")
         if route_counts["analysis_ctx"]:
