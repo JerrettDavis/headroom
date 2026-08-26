@@ -948,6 +948,14 @@ class PrometheusMetrics:
                 model=model,
                 input_tokens=input_tokens,
                 tokens_saved=tokens_saved,
+                # ``tokens_saved`` is message-only; deferral rides separately and
+                # the two are disjoint. This argument was the missing link: the
+                # value arrives at this method (see the parameter above) and is
+                # already folded into ``savings_usd`` below, but it stopped here,
+                # so per-model tokens under-reported by exactly the deferral while
+                # per-model dollars did not — a tool-heavy model showed real money
+                # saved next to "0 tokens saved".
+                tool_search_saved=tool_search_saved,
                 provider=provider,
                 project=project,
                 cache_read_tokens=cache_read_tokens,

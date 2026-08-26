@@ -579,19 +579,37 @@ def format_report(report: PerfReport) -> str:
         lines.append("Per-Model Breakdown")
         lines.append("-" * 40)
         for model, model_recs in sorted(by_model.items()):
+            # Same all-layers construction as the headline above. This loop used to
+            # sum ``tokens_saved`` alone, so every row reported message compression
+            # only while the headline it sat under counted deferral too. The rows
+            # then failed to add up to the total printed inches above them — in the
+            # report that prompted this, four rows summing to 36,071 under a
+            # headline of 625,277, because 589,206 tokens of tool-schema deferral
+            # had no row to land in. A tool-heavy model read "0 tokens saved".
             m_saved = sum(r.tokens_saved for r in model_recs)
+            m_tool_saved = sum(r.tool_saved for r in model_recs)
+            m_headline_saved = m_saved + m_tool_saved
             m_before = sum(r.tokens_before for r in model_recs)
-            m_pct = (m_saved / m_before * 100) if m_before > 0 else 0
+            m_headline_before = m_before + m_tool_saved
+            m_pct = (m_headline_saved / m_headline_before * 100) if m_headline_before > 0 else 0
             list_price = _get_list_price(model)
             price_str = f"${list_price:.2f}/MTok" if list_price else "unknown"
             est_str = (
-                f"  ~${m_saved * list_price / 1_000_000:.2f} at list price" if list_price else ""
+                f"  ~${m_headline_saved * list_price / 1_000_000:.2f} at list price"
+                if list_price
+                else ""
             )
             lines.append(
                 f"  {model}: {len(model_recs)} reqs, "
-                f"{m_saved:,} tokens saved ({m_pct:.0f}%), "
+                f"{m_headline_saved:,} tokens saved ({m_pct:.0f}%), "
                 f"list price {price_str}{est_str}"
             )
+            # Only split the row when there is a split to show; a compression-only
+            # model keeps the single-line shape it has always had.
+            if m_tool_saved > 0:
+                lines.append(
+                    f"      · messages {max(0, m_saved):,}  · tool schemas {m_tool_saved:,}"
+                )
         lines.append("  * Actual bill savings depend on provider caching behavior")
         lines.append("")
 
