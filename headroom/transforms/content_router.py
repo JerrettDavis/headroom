@@ -1947,7 +1947,19 @@ class ContentRouter(Transform):
         # we match that posture with a dedicated lock rather than relying on
         # GIL atomicity (which would not protect the read-then-evict sequence).
         self._frozen_verdicts: dict[int, bool] = {}
-        self._frozen_verdicts_max = 4096
+        # The store is process-wide (one router per pipeline, shared by every
+        # session), so the cap must scale with the number of CONCURRENT
+        # sessions, not one user's workload: at org scale (many users behind
+        # one sidecar) 4096 churns in minutes and FIFO eviction lets tightened
+        # thresholds flip a still-cached block's verdict — a prefix bust.
+        # Read at construction so tests and multi-tenant deployments can size
+        # it via HEADROOM_FROZEN_VERDICTS_MAX without a module reload.
+        try:
+            self._frozen_verdicts_max = max(
+                256, int(os.environ.get("HEADROOM_FROZEN_VERDICTS_MAX", "4096"))
+            )
+        except ValueError:
+            self._frozen_verdicts_max = 4096
         self._frozen_lock = threading.Lock()
         # Reset verdicts whenever the shadowed cache is cleared.
         self._cache.register_on_clear(self._clear_frozen_verdicts)
