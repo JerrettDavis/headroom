@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,15 @@ def request_count(port: int) -> float:
     return float(match.group(1))
 
 
+def model_request_count(port: int, model: str) -> int:
+    with urlopen(f"http://127.0.0.1:{port}/stats", timeout=5) as response:  # noqa: S310
+        stats = json.load(response)
+    requests = stats.get("requests", {})
+    by_model = requests.get("by_model", {}) if isinstance(requests, dict) else {}
+    value = by_model.get(model, 0) if isinstance(by_model, dict) else 0
+    return int(value)
+
+
 def stop_process(process: subprocess.Popen[str]) -> str:
     if process.poll() is None:
         if os.name == "nt":
@@ -108,7 +118,7 @@ def assert_safe_settings(settings: str, proxy_url: str) -> None:
             raise AssertionError(f"VS Code settings unexpectedly contained {value}")
 
 
-def wait_for_settings(path: Path, proxy_url: str, timeout: float = 15) -> str:
+def wait_for_settings(path: Path, timeout: float = 15) -> tuple[str, str]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         settings = path.read_text(encoding="utf-8")
@@ -119,8 +129,14 @@ def wait_for_settings(path: Path, proxy_url: str, timeout: float = 15) -> str:
                 "github.copilot.advanced.debug.overrideCapiUrl",
             )
         ):
-            assert_safe_settings(settings, proxy_url)
-            return settings
+            urls = re.findall(
+                r'github\.copilot\.advanced\.debug\.override(?:Proxy|Capi)Url"\s*:\s*"([^"]+)',
+                settings,
+            )
+            if len(urls) != 2 or urls[0] != urls[1]:
+                raise AssertionError("VS Code proxy and CAPI settings did not use the same URL")
+            assert_safe_settings(settings, urls[0])
+            return settings, urls[0]
         time.sleep(0.1)
     raise TimeoutError("Headroom did not finish writing the VS Code Copilot settings block")
 
@@ -281,6 +297,9 @@ def main() -> int:
             str(settings_path),
         ]
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        occupied.bind(("127.0.0.1", args.port))
+        occupied.listen()
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -292,15 +311,21 @@ def main() -> int:
         )
         output = ""
         try:
-            health = wait_for_health(args.port)
+            _, proxy_url = wait_for_settings(settings_path)
+            expected_suffix = f"/p/{quote(Path.cwd().name, safe='')}"
+            if not proxy_url.endswith(expected_suffix):
+                raise AssertionError(f"unexpected project-scoped proxy URL: {proxy_url}")
+            actual_port = int(proxy_url.removesuffix(expected_suffix).rsplit(":", 1)[1])
+            if actual_port == args.port:
+                raise AssertionError("wrapper did not fall back from the occupied requested port")
+            health = wait_for_health(actual_port)
             upstream = str(health.get("config", {}).get("openai_api_url", ""))
             if "githubcopilot.com" not in upstream:
                 raise AssertionError(f"unexpected Copilot upstream host: {upstream}")
             project = Path.cwd().name
-            proxy_url = f"http://127.0.0.1:{args.port}/p/{quote(project, safe='')}"
-            wait_for_settings(settings_path, proxy_url)
             for model in models:
-                response = post_response(args.port, project, model)
+                before = model_request_count(actual_port, model)
+                response = post_response(actual_port, project, model)
                 returned_model = response.get("model")
                 if not model_matches_request(model, returned_model):
                     raise AssertionError(
@@ -308,9 +333,12 @@ def main() -> int:
                     )
                 if "HEADROOM_VSCODE_OK" not in response_text(response):
                     raise AssertionError(f"model {model!r} did not return the expected sentinel")
+                if model_request_count(actual_port, model) != before + 1:
+                    raise AssertionError(f"Headroom traffic accounting missed model {model!r}")
         finally:
             output = stop_process(process)
             run([args.headroom, "unwrap", "vscode", "--settings-file", str(settings_path)])
+            occupied.close()
         if settings_path.read_bytes() != original:
             raise AssertionError("VS Code settings were not restored byte-for-byte")
         if any(marker in output.lower() for marker in ("authorization: bearer", "github token")):
@@ -328,7 +356,8 @@ def main() -> int:
         )
 
     print(
-        "PASS: Copilot baseline, CLI wrap, VS Code routing, model preservation, restore"
+        "PASS: Copilot baseline, CLI wrap, port fallback, VS Code routing, "
+        "model swaps/accounting, restore"
         + (", and installed VS Code extension" if args.vscode_extension else "")
     )
     return 0

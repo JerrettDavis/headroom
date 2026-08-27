@@ -117,8 +117,12 @@ uv run --no-sync python e2e/copilot_live.py --vscode-extension `
 The live suite uses the official Copilot CLI, exercises subscription wrapping,
 sends requests through an isolated VS Code proxy configuration, and optionally
 drives the installed VS Code extension through `code chat`. It snapshots and
-restores real VS Code settings byte-for-byte and never reads or prints token
-values.
+restores real VS Code settings byte-for-byte, deliberately occupies the requested
+port to verify fallback-port propagation, and checks every selected model in both
+the Copilot response and Headroom's traffic accounting. The Docker-native wrap
+suite additionally captures an A-to-B-to-A model sequence at its mock upstream,
+proving the outbound request bodies change without stale model state. Neither
+suite reads or prints token values.
 
 Packaged-install alternatives:
 
