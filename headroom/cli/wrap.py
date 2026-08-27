@@ -4601,6 +4601,19 @@ def _make_cleanup(proxy_proc_holder: list, port: int | list[int] = 8787) -> Any:
             if _other_clients_exist():
                 # Other clients still using the proxy — leave it running.
                 return
+            # Snapshot the serving PID before terminating the launcher.  On
+            # Windows the detached serving child can briefly make /health
+            # unavailable while the launcher exits, causing the later safety
+            # probe to classify our own listener as "unidentified" and leave
+            # it orphaned.  We still verify it through Headroom's health
+            # payload before trusting the PID.
+            serving_pid: int | None = None
+            if sys.platform == "win32" and _check_proxy(p):
+                running_config = _query_proxy_config(p)
+                try:
+                    serving_pid = int(running_config["pid"]) if running_config else None
+                except (KeyError, TypeError, ValueError):
+                    serving_pid = None
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -4614,6 +4627,8 @@ def _make_cleanup(proxy_proc_holder: list, port: int | list[int] = 8787) -> Any:
             # Ctrl+C from the last wrapper must still stop the listener.
             if sys.platform == "win32" and _check_proxy(p):
                 stop_status = _stop_local_proxy_for_unwrap(p)
+                if stop_status == "unidentified" and serving_pid is not None:
+                    stop_status = "stopped" if _kill_proxy_by_pid(serving_pid, p) else "failed"
                 if stop_status not in {"stopped", "not_running"}:
                     click.echo(
                         f"  Warning: proxy on port {p} remained running "
