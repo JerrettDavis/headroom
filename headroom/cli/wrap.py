@@ -3620,6 +3620,27 @@ def _kill_proxy_by_pid(pid: int, port: int) -> bool:
     Sends SIGTERM first, falls back to SIGKILL after 5 seconds.
     Returns True if the port is free afterwards, False otherwise.
     """
+    if sys.platform == "win32":
+        # ``os.kill(..., SIGTERM)`` only targets one Windows process.  The
+        # native proxy launcher can own a serving child, so terminating the
+        # reported PID alone may leave that child bound to the port.  Walk the
+        # verified Headroom process tree, matching the existing Serena cleanup
+        # strategy used elsewhere in this module.
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            pass
+        for _ in range(50):
+            time.sleep(0.1)
+            if not _check_proxy(port):
+                return True
+        return False
+
     try:
         os.kill(pid, signal.SIGTERM)
     except PermissionError:

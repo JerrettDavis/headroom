@@ -594,6 +594,24 @@ class TestProxyClientRefCounting:
         assert not proc.terminated
         assert stopped == [self.PORT]
 
+    def test_kill_proxy_uses_taskkill_tree_on_windows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows cleanup must terminate the native launcher's whole tree."""
+        calls: list[list[str]] = []
+        checks = iter([True, False])
+        monkeypatch.setattr(wrap_mod.sys, "platform", "win32")
+        monkeypatch.setattr(wrap_mod.time, "sleep", lambda _seconds: None)
+        monkeypatch.setattr(wrap_mod, "_check_proxy", lambda _port: next(checks))
+        monkeypatch.setattr(
+            wrap_mod.subprocess,
+            "run",
+            lambda command, **_kwargs: calls.append(command),
+        )
+
+        assert wrap_mod._kill_proxy_by_pid(456, self.PORT)
+        assert calls == [["taskkill", "/F", "/T", "/PID", "456"]]
+
     def test_cleanup_uses_pre_shutdown_pid_when_health_probe_races(
         self, clients_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
