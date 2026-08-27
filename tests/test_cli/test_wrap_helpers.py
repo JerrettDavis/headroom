@@ -598,7 +598,7 @@ class TestProxyClientRefCounting:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Windows cleanup must terminate the native launcher's whole tree."""
-        calls: list[list[str]] = []
+        calls: list[tuple[list[str], dict[str, object]]] = []
         checks = iter([True, False])
         monkeypatch.setattr(wrap_mod.sys, "platform", "win32")
         monkeypatch.setattr(wrap_mod.time, "sleep", lambda _seconds: None)
@@ -606,11 +606,16 @@ class TestProxyClientRefCounting:
         monkeypatch.setattr(
             wrap_mod.subprocess,
             "run",
-            lambda command, **_kwargs: calls.append(command),
+            lambda command, **kwargs: calls.append((command, kwargs)),
         )
 
         assert wrap_mod._kill_proxy_by_pid(456, self.PORT)
-        assert calls == [["taskkill", "/F", "/T", "/PID", "456"]]
+        assert calls == [
+            (
+                ["taskkill", "/F", "/T", "/PID", "456"],
+                {"capture_output": True, "timeout": 10, "check": False},
+            )
+        ]
 
     def test_cleanup_uses_pre_shutdown_pid_when_health_probe_races(
         self, clients_dir: Path, monkeypatch: pytest.MonkeyPatch
