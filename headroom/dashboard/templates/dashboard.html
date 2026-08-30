@@ -240,6 +240,26 @@
                         </div>
                     </div>
 
+                    <!-- Cost Saved: single-pane dollars across every layer the
+                         session summary prices (compression, tool-schema
+                         deferral, prefix-cache net, extension-attributed
+                         dollars), split measured vs projected. -->
+                    <div class="bg-surface rounded-lg p-4 border border-border">
+                        <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Cost Saved</div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-3xl font-light tabular-nums text-emerald-400"
+                                  x-text="'$' + formatCurrency(stats.summary?.cost?.total_saved_usd || 0)"></span>
+                            <span class="text-sm text-emerald-400"
+                                  x-text="(stats.summary?.cost?.savings_pct || 0).toFixed(1) + '%'"
+                                  title="Total saved as a fraction of the without-Headroom baseline"></span>
+                        </div>
+                        <div class="mt-1 text-xs text-gray-500 leading-relaxed"
+                             x-text="'Measured $' + formatCurrency(stats.summary?.cost?.measured_saved_usd || 0) + ' · projected $' + formatCurrency(stats.summary?.cost?.projected_saved_usd || 0)"
+                             title="Measured: compression, tool-schema deferral, prefix-cache net. Projected: extension-attributed estimates such as model routing."></div>
+                        <div class="mt-1 text-xs text-gray-600 leading-relaxed"
+                             x-text="'$' + formatCurrency(stats.summary?.cost?.with_headroom_usd || 0) + ' spent vs $' + formatCurrency(stats.summary?.cost?.without_headroom_usd || 0) + ' baseline'"></div>
+                    </div>
+
                     <!-- Output Tokens Saved (counterfactual) -->
                     <div class="bg-surface rounded-lg p-4 border border-border">
                         <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Output Tokens Saved</div>
@@ -930,7 +950,8 @@
                                 <div class="px-4 py-3 font-medium">Model</div>
                                 <div class="px-4 py-3 font-medium text-right">Input</div>
                                 <div class="px-4 py-3 font-medium text-right">Output</div>
-                                <div class="px-4 py-3 font-medium text-right">Saved</div>
+                                <div class="px-4 py-3 font-medium text-right"
+                                     title="Message-compression share of this request only. Tool-schema deferral, cache discounts and routing savings are counted in the headline cards, not per row.">Msg&nbsp;Saved</div>
                                 <div class="px-4 py-3 font-medium text-right">Latency</div>
                             </div>
                             <!-- Data rows -->
