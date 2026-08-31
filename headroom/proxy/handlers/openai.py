@@ -104,6 +104,12 @@ _OPENAI_RESPONSES_UNIT_CACHE_INIT_LOCK = threading.RLock()
 _OPENAI_RESPONSES_UNIT_EXECUTOR_LOCK = threading.RLock()
 _OPENAI_RESPONSES_UNIT_EXECUTOR: ThreadPoolExecutor | None = None
 _CODEX_WS_COMPRESSION_TIMEOUT_SECONDS = 5.0
+# The WS->HTTP fallback streams SSE, so `read` is the gap BETWEEN events, not a
+# cap on the whole response: 120s of silence from a live Codex turn means the
+# upstream is gone, not thinking. That is this path's own bound and is
+# deliberately tighter than the generic request timeout. The other three phases
+# are not this path's business and come from ProxyConfig.
+_WS_HTTP_FALLBACK_READ_TIMEOUT_SECONDS = 120.0
 _CCR_HASH_RE = re.compile(
     r"(?:Retrieve (?:more|original): hash=|<<ccr:)([a-fA-F0-9]{12,24})(?=[^a-fA-F0-9]|$)"
 )
@@ -2104,6 +2110,7 @@ class OpenAIHandlerMixin:
         # original and lowercased name variants (see _parse_exclude_tools), but
         # we also test the lowercased name defensively for case-insensitivity.
         from headroom.config import (
+            DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS,
             DEFAULT_EXCLUDE_TOOLS,
             DEFAULT_VERBATIM_EXCLUDE_TOOLS,
             is_tool_excluded,
@@ -2122,6 +2129,16 @@ class OpenAIHandlerMixin:
             call_id
             for call_id, fn_name in function_name_by_call_id.items()
             if is_tool_excluded(fn_name, DEFAULT_VERBATIM_EXCLUDE_TOOLS)
+        }
+        # A file read is protected from the lossless FOLD only — its bytes come
+        # back as the model's `Edit(old_string=…)` anchor, so a rewrite costs a
+        # missed edit. Deliberately NOT folded into verbatim_excluded_call_ids:
+        # that set also gates the Responses cross-turn dedup below, and dedup
+        # leaves the true bytes in context (see DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS).
+        byte_exact_call_ids: set[str] = {
+            call_id
+            for call_id, fn_name in function_name_by_call_id.items()
+            if is_tool_excluded(fn_name, DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS)
         }
 
         # Read protection (HEADROOM_PROTECT_READS) — parity with the
@@ -2245,9 +2262,14 @@ class OpenAIHandlerMixin:
                     # Note: when output is a content-part array, fold each text part
                     # individually using ("output_part", index) slots to preserve the
                     # array structure (non-text parts like images are left untouched).
+                    # A file read skips the fold entirely: this is the Codex wire,
+                    # where `read` really does return raw file bytes, so a fold here
+                    # is exactly what breaks the next `Edit(old_string=…)`.
                     excluded_folded = False
                     raw_output = item.get("output")
-                    if isinstance(raw_output, list):
+                    if call_id in byte_exact_call_ids:
+                        pass  # byte-exact: no fold, fall through to the debug record
+                    elif isinstance(raw_output, list):
                         for pidx, part in enumerate(raw_output):
                             if (
                                 isinstance(part, dict)
@@ -9206,6 +9228,22 @@ class OpenAIHandlerMixin:
                 metrics=getattr(self, "metrics", None),
             )
 
+    def _ws_http_fallback_timeout(self) -> httpx.Timeout:
+        """Timeout for the WS->HTTP fallback POST.
+
+        This used to be a bare ``timeout=120.0``. httpx expands a float across
+        all four phases, so connecting and pooling silently got 120s instead of
+        the configured 10s, and the send ignored ``write_timeout_seconds``
+        entirely — an operator tightening either knob had no effect on this
+        path. Only ``read`` was ever meant to be 120s here (#3259 follow-up).
+        """
+        return httpx.Timeout(
+            connect=self.config.connect_timeout_seconds,
+            read=_WS_HTTP_FALLBACK_READ_TIMEOUT_SECONDS,
+            write=self.config.write_timeout_seconds,
+            pool=self.config.connect_timeout_seconds,
+        )
+
     async def _ws_http_fallback(
         self,
         websocket: WebSocket,
@@ -9319,7 +9357,7 @@ class OpenAIHandlerMixin:
                         http_url,
                         headers=http_headers,
                         content=outbound_bytes,
-                        timeout=120.0,
+                        timeout=self._ws_http_fallback_timeout(),
                     ) as response:
                         if response.status_code != 200:
                             error_body = b""
