@@ -51,6 +51,7 @@ from enum import Enum
 from typing import Any
 
 from ..config import (
+    DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS,
     DEFAULT_EXCLUDE_TOOLS,
     DEFAULT_VERBATIM_EXCLUDE_TOOLS,
     ReadLifecycleConfig,
@@ -5201,8 +5202,15 @@ class ContentRouter(Transform):
                         continue
                     if messages_from_end <= read_protection_window:
                         # Protected from lossy compression — but grep/log/json
-                        # output can still be losslessly compacted.
-                        compacted = self._lossless_compact_excluded(content)
+                        # output can still be losslessly compacted, UNLESS this is
+                        # a file read: every fold rewrites the bytes the model
+                        # copies into `Edit(old_string=…)`, and a missed edit costs
+                        # a whole turn (see DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS).
+                        compacted = (
+                            None
+                            if is_tool_excluded(tool_name, DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS)
+                            else self._lossless_compact_excluded(content)
+                        )
                         if compacted is not None:
                             folded, kind = compacted
                             result_slots[i] = {**message, "content": folded}
@@ -6174,8 +6182,15 @@ class ContentRouter(Transform):
                         continue
                     if messages_from_end <= read_protection_window:
                         # Protected from lossy compression — but grep/log/json
-                        # output can still be losslessly compacted.
-                        compacted = self._lossless_compact_excluded(block.get("content"))
+                        # output can still be losslessly compacted, UNLESS this is
+                        # a file read (see DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS). This
+                        # is the shape Claude Code's own `Read` arrives in, so it
+                        # has to carry the same guard as the OpenAI branch above.
+                        compacted = (
+                            None
+                            if is_tool_excluded(tool_name, DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS)
+                            else self._lossless_compact_excluded(block.get("content"))
+                        )
                         if compacted is not None:
                             folded, kind = compacted
                             new_blocks.append({**block, "content": folded})
