@@ -695,7 +695,16 @@ def build_session_summary(
     # provider terms (cache discount included on both sides, since it applies
     # either way).
     cost_without = cost_with + measured_saved + ext_projected_usd
-    savings_pct_cost = round(total_saved_usd / cost_without * 100, 1) if cost_without > 0 else 0.0
+    # `> 0` is not a sufficient guard. ext_projected_usd is SIGNED -- routing
+    # reports an upgrade as a negative saving -- so a session that routed up can
+    # drive the baseline arbitrarily close to zero while real money was spent:
+    # $1.59 spent + $0.63 measured - $2.21 projected left a $0.01 baseline, and
+    # the card read "-39666.1%". A baseline that small is a cancellation
+    # artifact, not a measurement, so report no percentage rather than one that
+    # is wrong by three orders of magnitude.
+    _baseline_is_meaningful = cost_without > max(0.01, 0.05 * cost_with)
+    savings_pct_cost = (round(total_saved_usd / cost_without * 100, 1)
+                        if _baseline_is_meaningful else 0.0)
 
     # Primary models used
     models = dict(metrics.requests_by_model)

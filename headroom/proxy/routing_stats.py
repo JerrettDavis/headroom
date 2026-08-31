@@ -24,7 +24,22 @@ Provider contract — return ``None`` (nothing to show) or::
          "savings_usd": float},  # signed; negative for upgrades
         ...
       ],
+
+      # Optional, and strongly preferred. Routing savings accrue ACROSS
+      # sessions, so a durable provider should report all time above -- scoping
+      # the table to one proxy process understates the layer badly. But a
+      # lifetime total moves ~0.1% per turn, so on its own it looks frozen while
+      # the router is in fact evaluating every request. Send ``session`` too and
+      # the dashboard renders a live counter beside the table.
+      "window": "lifetime" | "session",   # scope of the numbers above
+      "session": {"decisions": int, "downgrades": int, "upgrades": int,
+                  "unchanged": int, "since": float},   # this process only
     }
+
+Unknown keys are passed through untouched, so a provider may add fields ahead
+of the dashboard learning to render them. Absent ``window``, the dashboard
+labels the table "all decisions on record" rather than claiming a scope it
+cannot verify.
 
 The provider is called on ``/stats`` builds (the dashboard polls a cached
 snapshot), so it should be cheap — an aggregate query, not a table walk.

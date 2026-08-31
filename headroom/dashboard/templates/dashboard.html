@@ -895,11 +895,62 @@
                      registered (stats.routing; see headroom.proxy.routing_stats). -->
                 <template x-if="(stats.routing?.pairs || []).length > 0">
                     <div class="bg-surface rounded-lg p-4 border border-border mb-6">
-                        <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center justify-between mb-1">
                             <span class="text-sm font-medium text-gray-300">Model Routing</span>
                             <span class="text-xs text-gray-500 font-mono"
                                   x-text="(stats.routing.downgrades || 0) + ' downgraded · ' + (stats.routing.upgrades || 0) + ' upgraded · ' + (stats.routing.unchanged || 0) + ' unchanged · ' + formatNumber(stats.routing.decisions || 0) + ' decisions'"></span>
                         </div>
+                        <!-- Two windows, one box. Session answers "is this working for ME,
+                             right now"; lifetime answers "what has this layer been worth".
+                             Neither substitutes for the other: routing savings accrue across
+                             sessions, so session-only understates the layer badly, while a
+                             lifetime total moves ~0.1% per turn and looks frozen during a
+                             live demo. -->
+                        <div class="grid grid-cols-2 gap-3 mb-4">
+                            <!-- THIS SESSION -->
+                            <div class="bg-bg rounded px-3 py-2 border border-border">
+                                <div class="flex items-center gap-1.5 mb-1">
+                                    <span class="relative flex h-2 w-2" x-show="(stats.routing.session?.decisions || 0) > 0">
+                                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </span>
+                                    <span class="text-xs text-gray-400 uppercase tracking-wide">This session</span>
+                                </div>
+                                <div class="text-xl font-semibold tabular-nums"
+                                     :class="(stats.routing.session?.savings_usd || 0) > 0 ? 'text-emerald-400' : 'text-gray-500'"
+                                     x-text="'$' + formatCurrency(stats.routing.session?.savings_usd || 0)"></div>
+                                <div class="text-xs text-gray-500 font-mono mt-0.5"
+                                     x-text="formatNumber(stats.routing.session?.decisions || 0) + ' decisions · '
+                                             + (stats.routing.session?.downgrades || 0) + ' downgraded · '
+                                             + (stats.routing.session?.unchanged || 0) + ' kept'"></div>
+                                <!-- "Kept" is the router working, not idling: against a warm
+                                     prefix cache, switching costs a cold write on the target
+                                     that usually exceeds the cheaper per-token rate. Without
+                                     this the panel reads as broken during exactly the
+                                     sessions where the router is behaving correctly. -->
+                                <div class="text-xs text-gray-600 mt-1 leading-snug"
+                                     x-show="(stats.routing.session?.decisions || 0) > 0
+                                             && (stats.routing.session?.downgrades || 0) === 0"
+                                     title="Every turn was evaluated. Keeping the model is the correct call when the prefix cache is warm — switching would pay a cold write on the target.">
+                                    Evaluating every turn; cache is warm, so switching would cost more than it saves.
+                                </div>
+                            </div>
+                            <!-- ALL TIME -->
+                            <div class="bg-bg rounded px-3 py-2 border border-border">
+                                <div class="text-xs text-gray-400 uppercase tracking-wide mb-1">All time</div>
+                                <div class="text-xl font-semibold tabular-nums"
+                                     :class="(stats.routing.savings_usd || 0) > 0 ? 'text-emerald-400' : 'text-gray-500'"
+                                     x-text="'$' + formatCurrency(stats.routing.savings_usd || 0)"></div>
+                                <div class="text-xs text-gray-500 font-mono mt-0.5"
+                                     x-text="formatNumber(stats.routing.decisions || 0) + ' decisions · '
+                                             + (stats.routing.downgrades || 0) + ' downgraded · '
+                                             + (stats.routing.unchanged || 0) + ' kept'"></div>
+                                <div class="text-xs text-gray-600 mt-1 leading-snug">
+                                    Survives restarts — kept in routemegood's decision log, not proxy memory.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-500 mb-2">Every decision on record, by requested → served pair</div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-sm">
                                 <thead>
