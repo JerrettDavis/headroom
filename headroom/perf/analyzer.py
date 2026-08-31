@@ -14,9 +14,11 @@ import logging
 import math
 import os
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from headroom import paths as _paths
 from headroom.pricing.litellm_pricing import resolve_litellm_model
@@ -498,8 +500,7 @@ def parse_log_files(last_n_hours: float = 168.0) -> PerfReport:
     return report
 
 
-
-def _as_number(value: object, cast: type) -> "int | float":
+def _as_number(value: object, cast: Callable[[Any], int | float]) -> int | float:
     """Coerce a self-reported savings figure, or 0 if it is not a number.
 
     `savings=` is base64 JSON written by whatever plugin recorded it, and
@@ -806,9 +807,7 @@ def format_report(report: PerfReport) -> str:
         for item in getattr(record, "savings_breakdown", ()) or ():
             source = str(item.get("source") or "other")
             realized = bool(item.get("realized", True))
-            row = by_source.setdefault(
-                (source, realized), {"events": 0, "tokens": 0, "usd": 0.0}
-            )
+            row = by_source.setdefault((source, realized), {"events": 0, "tokens": 0, "usd": 0.0})
             row["events"] += 1
             row["tokens"] += max(0, _as_number(item.get("tokens"), int))
             row["usd"] += _as_number(item.get("usd"), float)
