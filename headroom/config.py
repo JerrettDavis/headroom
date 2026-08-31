@@ -231,6 +231,15 @@ DEFAULT_EXCLUDE_TOOLS: frozenset[str] = frozenset(
         # Copilot CLI's file-read tool (its `Read` equivalent): raw file bytes
         # the model byte-patches against.
         "view",
+        # Cursor's file-read tool, the same category as `Read` and `view`. Its
+        # absence here was not a decision: without it Cursor's raw source took
+        # the LOSSY path, which is strictly worse than the fold that
+        # DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS protects it from. Protecting a read
+        # tool needs both halves -- excluded here so it is never lossily
+        # compressed, and named below so it is never folded either -- and a
+        # plugin that supplies only the first half cannot be relied on to be
+        # installed.
+        "read_file",
         # Lowercase variants for case-insensitive matching
         "read",
         "glob",
