@@ -763,6 +763,52 @@ def format_report(report: PerfReport) -> str:
             )
         lines.append("")
 
+    # Savings attributed to a named source (extensions, plugins, hooks).
+    #
+    # The PERF line has carried this all along in `savings=` and the parser has
+    # decoded it into `savings_breakdown` since it was added -- but nothing ever
+    # RENDERED it, so an operator reading this report could not see that a paid
+    # extension had contributed anything at all.
+    #
+    # USD is reported next to tokens rather than folded into the headline because
+    # the two are different quantities and one source cannot produce both. A
+    # router that sends the SAME tokens to a cheaper model saves dollars and
+    # exactly zero tokens; every token-savings channel in the proxy would record
+    # it as nothing. Showing `$` beside a `0 tokens` row is the honest rendering
+    # of that, and collapsing them into one number would be an invented saving.
+    by_source: dict[tuple[str, bool], dict[str, float]] = {}
+    for record in report.perf_records:
+        for item in getattr(record, "savings_breakdown", ()) or ():
+            source = str(item.get("source") or "other")
+            realized = bool(item.get("realized", True))
+            row = by_source.setdefault(
+                (source, realized), {"events": 0, "tokens": 0, "usd": 0.0}
+            )
+            row["events"] += 1
+            raw_t, raw_u = item.get("tokens", 0), item.get("usd", 0.0)
+            row["tokens"] += max(0, int(raw_t) if isinstance(raw_t, (int, float, str)) else 0)
+            row["usd"] += float(raw_u) if isinstance(raw_u, (int, float, str)) else 0.0
+    if by_source:
+        lines.append("Savings by Source")
+        lines.append("-" * 40)
+        for (source, realized), row in sorted(
+            by_source.items(), key=lambda kv: (-kv[1]["usd"], -kv[1]["tokens"])
+        ):
+            usd = f"  ${row['usd']:,.2f}" if row["usd"] else ""
+            # "projected" is not a hedge: an unrealized row is a saving the
+            # source computed against a baseline that did not run, so it cannot
+            # be reconciled against the bill the way a realized one can.
+            tag = "" if realized else "  (projected)"
+            lines.append(
+                f"  {source}: {int(row['events']):,} events, "
+                f"{int(row['tokens']):,} tokens{usd}{tag}"
+            )
+        lines.append(
+            "  Sources self-report. A row with 0 tokens and a $ figure changed the "
+            "MODEL, not the payload — no tokens were removed."
+        )
+        lines.append("")
+
     # Router routing breakdown
     if report.router_records:
         lines.append("Content Router Routing")
