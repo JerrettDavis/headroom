@@ -11,6 +11,7 @@ Anthropic), not the full input price.  This prevents overstating dollar savings.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
@@ -497,6 +498,30 @@ def parse_log_files(last_n_hours: float = 168.0) -> PerfReport:
     return report
 
 
+
+def _as_number(value: object, cast: type) -> "int | float":
+    """Coerce a self-reported savings figure, or 0 if it is not a number.
+
+    `savings=` is base64 JSON written by whatever plugin recorded it, and
+    `decode()` validates only that each item is a dict -- so a source can put a
+    string like "lots" in `tokens`. An isinstance check does not save you here:
+    `str` passes it and `int("lots")` then raises, which took down the WHOLE
+    report rather than skipping one bad row. A report must not be crashable by
+    the data it reports on.
+    """
+    try:
+        out = cast(value)  # type: ignore[call-arg]
+    except (TypeError, ValueError, OverflowError):
+        return cast(0)  # type: ignore[call-arg]
+    # Finiteness only, matching what the WRITE side enforces (see MAX_STAGE_MS in
+    # savings_attribution): inf/nan survive a float() cast and render as "inf",
+    # which is not a measurement. A merely large finite value is left alone --
+    # capping it here would invent a limit the recording side does not have.
+    if isinstance(out, float) and not math.isfinite(out):
+        return cast(0)  # type: ignore[call-arg]
+    return out
+
+
 def format_report(report: PerfReport) -> str:
     """Format a PerfReport into a human-readable string."""
     lines: list[str] = []
@@ -785,9 +810,8 @@ def format_report(report: PerfReport) -> str:
                 (source, realized), {"events": 0, "tokens": 0, "usd": 0.0}
             )
             row["events"] += 1
-            raw_t, raw_u = item.get("tokens", 0), item.get("usd", 0.0)
-            row["tokens"] += max(0, int(raw_t) if isinstance(raw_t, (int, float, str)) else 0)
-            row["usd"] += float(raw_u) if isinstance(raw_u, (int, float, str)) else 0.0
+            row["tokens"] += max(0, _as_number(item.get("tokens"), int))
+            row["usd"] += _as_number(item.get("usd"), float)
     if by_source:
         lines.append("Savings by Source")
         lines.append("-" * 40)
