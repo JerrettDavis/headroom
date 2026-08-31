@@ -303,6 +303,18 @@ DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS: frozenset[str] = frozenset(
     {
         "Read",
         "read",
+        # Cursor's `Read` equivalent. Named here for a reason worth stating,
+        # because it is counter-intuitive: adding a read tool to the proxy's
+        # EXCLUDE set to keep it away from lossy compression makes things WORSE
+        # on its own. Exclusion is exactly what routes a tool INTO the
+        # excluded-tool fold, and the pluggable provider on that path is handed
+        # content with no tool name, so it cannot tell a file read from a grep
+        # and will happily rewrite raw source. Protecting a read tool takes
+        # both halves: excluded from the lossy path, and named here to stay out
+        # of the fold. Caught by scripts/verify-lossless-coverage.py in the
+        # partner-trial repo, which reported `read_file` reaching the provider
+        # seam once the plugin started excluding it.
+        "read_file",
     }
 )
 
