@@ -5768,13 +5768,22 @@ class ContentRouter(Transform):
         * LOG (build/test/app logs) -> ANSI strip + run-collapse. Recoverable
           modulo non-semantic ANSI color (``expand_runs`` restores the lines).
         * JSON -> whitespace-minify. **Data-lossless** (``json.loads`` equals the
-          original object) — same information, fewer tokens. NOT byte-exact, so a
-          read-then-``Edit(old_string=…)`` on the *same* JSON file could miss; the
-          data is fully preserved.
+          original object) — same information, fewer tokens. NOT byte-exact.
+
+        "Information-preserving" is the guarantee, and it is weaker than it looks
+        from in here: recoverability is OURS, but the string the model copies into
+        the next ``Edit(old_string=…)`` is the one we SHOWED it. All three folds
+        show something the file does not contain — minified JSON, ``... (repeated
+        N times)``, a hoisted path heading — so all three break a read-then-edit.
+        Callers must therefore NOT route a file read here: every call site gates
+        on ``DEFAULT_BYTE_EXACT_EXCLUDE_TOOLS`` (and the stricter
+        ``DEFAULT_VERBATIM_EXCLUDE_TOOLS``, which covers Copilot's ``view``) first.
+        This function takes only ``content`` and cannot make that call itself —
+        which is also why the pluggable provider below, being content-only, is
+        never handed a read.
 
         Returns ``(compacted, kind)`` when a recognized shape actually shrinks,
         else ``None``. Source code and glob path-lists match nothing -> verbatim.
-        Always safe to run (information-preserving) so there is no feature gate.
         Never raises.
         """
         if not isinstance(content, str):
