@@ -112,7 +112,10 @@ def test_disabled_persistence_never_writes_manifests(
     assert not (tmp_path / "sessions").exists()
 
 
-@pytest.mark.parametrize("cluster_id", ["../outside", "../../outside", ".", "..", "a/b", "a\\b"])
+@pytest.mark.parametrize(
+    "cluster_id",
+    ["../outside", "../../outside", ".", "..", "a/b", "a\\b", "a" * 129],
+)
 def test_cluster_id_rejects_path_traversal(cluster_id: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="single path-safe component"):
         ClusterConfig(enabled=True, cluster_id=cluster_id, cluster_dir=tmp_path)
@@ -194,7 +197,10 @@ def test_list_active_sessions_prunes_stale_manifests(
     stale_dir = tmp_path / "sessions" / "stale"
     stale_dir.mkdir(parents=True)
     stale_payload = {
+        "schema_version": sr.SESSION_SCHEMA_VERSION,
         "session_id": "stale",
+        "instance_id": "inst",
+        "agent_type": "proxy",
         "last_heartbeat_at": (now - timedelta(seconds=300)).isoformat().replace("+00:00", "Z"),
         "metrics": {"requests": 99},
     }
@@ -218,7 +224,10 @@ def test_stale_pruning_is_best_effort(tmp_path: Path, monkeypatch: pytest.Monkey
     stale_manifest.write_text(
         json.dumps(
             {
+                "schema_version": sr.SESSION_SCHEMA_VERSION,
                 "session_id": "stale",
+                "instance_id": "inst",
+                "agent_type": "proxy",
                 "last_heartbeat_at": (now - timedelta(seconds=300)).isoformat(),
             }
         ),
@@ -258,3 +267,38 @@ def test_aggregate_sessions_ignores_malformed_shared_metrics() -> None:
         "input_tokens": 0,
         "output_tokens": 2.5,
     }
+
+
+def test_shared_manifest_reader_drops_unknown_fields_and_invalid_metrics(tmp_path: Path) -> None:
+    registry = ActiveSessionRegistry(
+        session_id="safe-session",
+        instance_id="safe-instance",
+        local_sessions_dir=tmp_path / "sessions",
+    )
+    payload = registry.heartbeat({"requests": 3})
+    payload["secret"] = "must-not-escape"
+    payload["metrics"] = {
+        "requests": 4,
+        "tokens_saved": float("nan"),
+        "prompt": "private",
+    }
+    registry.local_manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    sessions = sr.list_active_sessions(tmp_path / "sessions")
+
+    assert len(sessions) == 1
+    assert "secret" not in sessions[0]
+    assert sessions[0]["metrics"] == {"requests": 4}
+
+
+def test_shared_manifest_reader_rejects_invalid_identity(tmp_path: Path) -> None:
+    registry = ActiveSessionRegistry(
+        session_id="safe-session",
+        instance_id="safe-instance",
+        local_sessions_dir=tmp_path / "sessions",
+    )
+    payload = registry.heartbeat({"requests": 3})
+    payload["agent_type"] = "../../private"
+    registry.local_manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert sr.list_active_sessions(tmp_path / "sessions") == []

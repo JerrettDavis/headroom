@@ -22,6 +22,7 @@ SESSION_SCHEMA_VERSION = 1
 DEFAULT_STALE_AFTER_SECONDS = 120
 logger = logging.getLogger(__name__)
 _SAFE_CLUSTER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_MAX_COMPONENT_LENGTH = 128
 _AGGREGATE_METRIC_KEYS = frozenset(
     {
         "requests",
@@ -56,12 +57,29 @@ def _parse_iso(value: Any) -> datetime | None:
 
 
 def _validate_path_component(value: str, *, label: str) -> str:
-    if value in {".", ".."} or not _SAFE_CLUSTER_ID.fullmatch(value):
+    if (
+        value in {".", ".."}
+        or len(value) > _MAX_COMPONENT_LENGTH
+        or not _SAFE_CLUSTER_ID.fullmatch(value)
+    ):
         raise ValueError(
             f"{label} must be a single path-safe component containing only "
             "letters, numbers, dots, underscores, and hyphens"
         )
     return value
+
+
+def _aggregate_metrics(metrics: Any) -> dict[str, int | float]:
+    if not isinstance(metrics, dict):
+        return {}
+    return {
+        key: value
+        for key, value in metrics.items()
+        if key in _AGGREGATE_METRIC_KEYS
+        and isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    }
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -159,14 +177,7 @@ class ActiveSessionRegistry:
 
     def heartbeat(self, metrics: dict[str, Any] | None = None) -> dict[str, Any]:
         now = _utc_now()
-        aggregate_metrics = {
-            key: value
-            for key, value in (metrics or {}).items()
-            if key in _AGGREGATE_METRIC_KEYS
-            and isinstance(value, int | float)
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-        }
+        aggregate_metrics = _aggregate_metrics(metrics)
         payload = {
             "schema_version": SESSION_SCHEMA_VERSION,
             "session_id": self.session_id,
@@ -249,13 +260,55 @@ def _read_manifest(path: Path, *, now: datetime, stale_after_seconds: int) -> di
         return None
     if not isinstance(payload, dict):
         return None
+    if payload.get("schema_version") != SESSION_SCHEMA_VERSION:
+        return None
+    try:
+        session_id = _validate_path_component(
+            str(payload.get("session_id") or ""), label="session_id"
+        )
+        instance_id = _validate_path_component(
+            str(payload.get("instance_id") or ""), label="instance_id"
+        )
+        agent_type = _validate_path_component(
+            str(payload.get("agent_type") or "unknown"), label="agent_type"
+        )
+    except ValueError:
+        return None
     heartbeat = _parse_iso(payload.get("last_heartbeat_at"))
     if heartbeat is None:
         return None
+    started_at = _parse_iso(payload.get("started_at")) or heartbeat
     stale = (now - heartbeat).total_seconds() > stale_after_seconds
-    payload["stale"] = stale
-    payload["age_seconds"] = max(0, round((now - heartbeat).total_seconds(), 3))
-    return payload
+    cluster_payload = payload.get("cluster")
+    cluster: dict[str, Any] = {"enabled": False, "cluster_id": "default"}
+    if isinstance(cluster_payload, dict):
+        try:
+            cluster_id = _validate_path_component(
+                str(cluster_payload.get("cluster_id") or "default"),
+                label="cluster_id",
+            )
+        except ValueError:
+            return None
+        cluster = {
+            "enabled": bool(cluster_payload.get("enabled", False)),
+            "cluster_id": cluster_id,
+        }
+    sanitized: dict[str, Any] = {
+        "schema_version": SESSION_SCHEMA_VERSION,
+        "session_id": session_id,
+        "instance_id": instance_id,
+        "agent_type": agent_type,
+        "started_at": _to_iso(started_at),
+        "last_heartbeat_at": _to_iso(heartbeat),
+        "cluster": cluster,
+        "metrics": _aggregate_metrics(payload.get("metrics")),
+        "stale": stale,
+        "age_seconds": max(0, round((now - heartbeat).total_seconds(), 3)),
+    }
+    pid = payload.get("pid")
+    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+        sanitized["pid"] = pid
+    return sanitized
 
 
 def list_active_sessions(
