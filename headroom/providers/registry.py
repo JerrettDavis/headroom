@@ -209,7 +209,7 @@ def model_matches_provider(provider: str, model_name: str) -> bool:
     normalized = model_name.lower()
     openai_prefixes = ("gpt", "o1", "o3", "o4")
     return (
-        (provider == "anthropic" and "claude" in normalized)
+        (provider in {"anthropic", "vertex:anthropic"} and "claude" in normalized)
         or (provider == "openai" and normalized.startswith(openai_prefixes))
         or (provider == "gemini" and "gemini" in normalized)
         or (provider == "bedrock" and "claude" in normalized)

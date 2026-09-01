@@ -14,8 +14,24 @@ from headroom.providers.registry import (
     create_proxy_backend,
     format_backend_status,
     format_backend_usage_section,
+    model_matches_provider,
 )
 from headroom.proxy import upstream_guard
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        ("anthropic", "claude-sonnet-4-6", True),
+        ("vertex:anthropic", "claude-sonnet-4-6", True),
+        ("openai", "gpt-5.4", True),
+        ("openai", "claude-sonnet-4-6", False),
+        ("gemini", "gemini-3.1-pro", True),
+        ("bedrock", "anthropic.claude-sonnet-4-6-v1", True),
+    ],
+)
+def test_model_matches_provider(provider: str, model: str, expected: bool) -> None:
+    assert model_matches_provider(provider, model) is expected
 
 
 class DummyStorage:
