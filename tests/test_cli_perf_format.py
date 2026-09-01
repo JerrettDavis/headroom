@@ -431,6 +431,7 @@ def test_throughput_empty_and_percentiles():
 # nothing rendered it, so a paid extension's contribution was invisible in the
 # report operators actually read.
 
+
 def _savings_perf_line(encoded: str, req: int = 1) -> str:
     return (
         f"2026-08-31 16:00:0{req},000 - headroom.proxy - INFO - [hr_1_00000{req}] PERF "
@@ -467,9 +468,13 @@ def test_dollar_only_source_is_reported_with_zero_tokens(tmp_path, monkeypatch):
     from headroom.proxy.savings_attribution import encode
 
     out = _report_for(
-        [_savings_perf_line(encode([{"source": "routemegood", "tokens": 0,
-                             "usd": 0.1257, "realized": True}]))],
-        tmp_path, monkeypatch,
+        [
+            _savings_perf_line(
+                encode([{"source": "routemegood", "tokens": 0, "usd": 0.1257, "realized": True}])
+            )
+        ],
+        tmp_path,
+        monkeypatch,
     )
     assert "Savings by Source" in out
     assert "routemegood" in out
@@ -481,11 +486,18 @@ def test_token_source_and_dollar_source_coexist(tmp_path, monkeypatch):
     from headroom.proxy.savings_attribution import encode
 
     out = _report_for(
-        [_savings_perf_line(encode([
-            {"source": "routemegood", "tokens": 0, "usd": 0.0431, "realized": True},
-            {"source": "lossless_guard", "tokens": 2233, "usd": 0.0, "realized": True},
-        ]))],
-        tmp_path, monkeypatch,
+        [
+            _savings_perf_line(
+                encode(
+                    [
+                        {"source": "routemegood", "tokens": 0, "usd": 0.0431, "realized": True},
+                        {"source": "lossless_guard", "tokens": 2233, "usd": 0.0, "realized": True},
+                    ]
+                )
+            )
+        ],
+        tmp_path,
+        monkeypatch,
     )
     assert "routemegood" in out and "lossless_guard" in out
     assert "2,233 tokens" in out
