@@ -703,8 +703,9 @@ def build_session_summary(
     # artifact, not a measurement, so report no percentage rather than one that
     # is wrong by three orders of magnitude.
     _baseline_is_meaningful = cost_without > max(0.01, 0.05 * cost_with)
-    savings_pct_cost = (round(total_saved_usd / cost_without * 100, 1)
-                        if _baseline_is_meaningful else 0.0)
+    savings_pct_cost = (
+        round(total_saved_usd / cost_without * 100, 1) if _baseline_is_meaningful else 0.0
+    )
 
     # Primary models used
     models = dict(metrics.requests_by_model)

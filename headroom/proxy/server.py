@@ -4295,12 +4295,34 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         output_reduction: dict[str, Any] = {"available": False}
         try:
             from headroom.proxy.output_savings import get_recorder
+            from headroom.proxy.output_shaper import (
+                OutputShaperSettings,
+                resolve_verbosity_level,
+                shaper_enabled_for,
+            )
 
-            _oest = get_recorder().estimate()
+            # The active steering level enables the modelled fallback, which is
+            # what a deployment with no holdout and no learned baseline has --
+            # i.e. every fresh install, since `learn --verbosity` needs history
+            # that predates the shaper.
+            _olevel: int | None = None
+            try:
+                _osettings = OutputShaperSettings.from_env(
+                    enabled=shaper_enabled_for(getattr(proxy, "config", None))
+                )
+                if _osettings.enabled:
+                    _olevel = resolve_verbosity_level(_osettings)[0]
+            except Exception:  # pragma: no cover - defensive
+                _olevel = None
+
+            _oest = get_recorder().estimate(_olevel)
             if _oest.n_requests > 0:
                 output_reduction = {
                     "available": True,
-                    "method": _oest.kind,  # "measured" | "estimated"
+                    "method": _oest.kind,  # "measured" | "estimated" | "modelled"
+                    # A modelled band is the spread between the two benchmarked
+                    # models, not a sampling CI. The UI must not call it one.
+                    "band_is_ci": _oest.kind != "modelled",
                     "tokens_saved": round(_oest.tokens_saved),
                     "baseline_tokens": round(_oest.baseline_tokens),
                     "reduction_percent": round(_oest.pct, 1),
@@ -4347,9 +4369,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                         **output_reduction,
                         "description": (
                             "OUTPUT tokens the model didn't emit because the shaper "
-                            "steered verbosity / routed effort down. Counterfactual — "
-                            "shown as an estimate (vs a learned baseline) or measured "
-                            "(A/B holdout), always with a confidence band."
+                            "steered verbosity down. Counterfactual — measured "
+                            "(A/B holdout), estimated (vs a learned baseline), or "
+                            "modelled (a benchmark factor, when this deployment has "
+                            "produced neither). Always labelled with which."
                         ),
                     },
                     "tool_search": {
