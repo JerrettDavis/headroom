@@ -14,11 +14,9 @@ import logging
 import math
 import os
 import re
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 from headroom import paths as _paths
 from headroom.pricing.litellm_pricing import resolve_litellm_model
@@ -500,7 +498,7 @@ def parse_log_files(last_n_hours: float = 168.0) -> PerfReport:
     return report
 
 
-def _as_number(value: object, cast: Callable[[Any], int | float]) -> int | float:
+def _as_number(value: object, cast: type) -> int | float:
     """Coerce a self-reported savings figure, or 0 if it is not a number.
 
     `savings=` is base64 JSON written by whatever plugin recorded it, and
@@ -513,14 +511,14 @@ def _as_number(value: object, cast: Callable[[Any], int | float]) -> int | float
     try:
         out = cast(value)  # type: ignore[call-arg]
     except (TypeError, ValueError, OverflowError):
-        return cast(0)  # type: ignore[call-arg]
+        return cast(0)  # type: ignore[call-arg,no-any-return]
     # Finiteness only, matching what the WRITE side enforces (see MAX_STAGE_MS in
     # savings_attribution): inf/nan survive a float() cast and render as "inf",
     # which is not a measurement. A merely large finite value is left alone --
     # capping it here would invent a limit the recording side does not have.
     if isinstance(out, float) and not math.isfinite(out):
-        return cast(0)  # type: ignore[call-arg]
-    return out
+        return cast(0)  # type: ignore[call-arg,no-any-return]
+    return out  # type: ignore[no-any-return]
 
 
 def format_report(report: PerfReport) -> str:

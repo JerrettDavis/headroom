@@ -30,9 +30,18 @@ def _matrix(**over):
         "downgrades": 1,
         "upgrades": 0,
         "unchanged": 2,
-        "pairs": [{"requested": "claude-opus-5", "served": "claude-sonnet-5",
-                   "direction": "downgrade", "count": 1, "enforced": 1,
-                   "holdout": 0, "measured": 1, "savings_usd": 0.42}],
+        "pairs": [
+            {
+                "requested": "claude-opus-5",
+                "served": "claude-sonnet-5",
+                "direction": "downgrade",
+                "count": 1,
+                "enforced": 1,
+                "holdout": 0,
+                "measured": 1,
+                "savings_usd": 0.42,
+            }
+        ],
     }
     base.update(over)
     return base
@@ -65,11 +74,18 @@ def test_a_broken_provider_never_breaks_stats():
 
 def test_unknown_keys_survive_so_providers_can_lead_the_dashboard():
     """`window` and `session` reach the template even on an older core."""
-    set_routing_stats_provider(lambda: _matrix(
-        window="lifetime",
-        session={"decisions": 4, "downgrades": 3, "upgrades": 0,
-                 "unchanged": 1, "since": 1788140194.8},
-    ))
+    set_routing_stats_provider(
+        lambda: _matrix(
+            window="lifetime",
+            session={
+                "decisions": 4,
+                "downgrades": 3,
+                "upgrades": 0,
+                "unchanged": 1,
+                "since": 1788140194.8,
+            },
+        )
+    )
     out = get_routing_stats()
     assert out["window"] == "lifetime"
     assert out["session"]["downgrades"] == 3
@@ -83,11 +99,18 @@ def test_live_session_counter_can_be_zero_while_the_panel_still_renders():
     that has only just started. Reporting the SESSION in ``pairs`` instead
     emptied it and took the whole section down.
     """
-    set_routing_stats_provider(lambda: _matrix(
-        window="lifetime",
-        session={"decisions": 0, "downgrades": 0, "upgrades": 0,
-                 "unchanged": 0, "since": 1788140194.8},
-    ))
+    set_routing_stats_provider(
+        lambda: _matrix(
+            window="lifetime",
+            session={
+                "decisions": 0,
+                "downgrades": 0,
+                "upgrades": 0,
+                "unchanged": 0,
+                "since": 1788140194.8,
+            },
+        )
+    )
     out = get_routing_stats()
     assert out is not None, "panel must survive a session with no decisions yet"
     assert out["pairs"], "lifetime pairs keep the section on screen"
