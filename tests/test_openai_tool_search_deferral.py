@@ -211,7 +211,8 @@ def test_noop_for_non_list():
     assert inject_tool_search_deferral_openai(None, "gpt-5.5") is None
 
 
-def test_resident_names_match_case_insensitively():
+def test_resident_names_match_case_insensitively(monkeypatch):
+    monkeypatch.setenv("HEADROOM_OPENAI_TOOL_SEARCH", "1")
     # The resident-name sets are lowercase; clients are not required to be. An
     # exact match deferred every tool for a PascalCase client, including its own
     # tool-search tool. Mirrors the Anthropic-side fix.
@@ -228,7 +229,8 @@ def test_resident_names_match_case_insensitively():
 # --- client-harness exclusion (GH #2660) -------------------------------------
 
 
-def test_noop_for_a_client_that_cannot_execute_the_search_tool():
+def test_noop_for_a_client_that_cannot_execute_the_search_tool(monkeypatch):
+    monkeypatch.setenv("HEADROOM_OPENAI_TOOL_SEARCH", "1")
     # GH #2660 reports opencode resolving tool calls against its own registry
     # and rejecting the injected tool as unavailable, so its tools stay resident
     # and untouched.
@@ -243,7 +245,8 @@ def test_noop_for_a_client_that_cannot_execute_the_search_tool():
     assert not any(t.get("defer_loading") for t in out)
 
 
-def test_supported_clients_keep_the_existing_deferral():
+def test_supported_clients_keep_the_existing_deferral(monkeypatch):
+    monkeypatch.setenv("HEADROOM_OPENAI_TOOL_SEARCH", "1")
     # The exclusion is per-client, not a global default flip: anything that can
     # search still gets the same payload it got before.
     tools = _tools()
