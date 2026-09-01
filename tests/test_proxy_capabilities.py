@@ -71,6 +71,18 @@ def test_strict_detached_profile_refuses_enabled_memory_without_state() -> None:
     assert violations == ["memory"]
 
 
+def test_embedded_startup_honors_saved_detached_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from headroom import settings_store
+
+    monkeypatch.setattr(settings_store, "load", lambda: {"detached_profile": "silent"})
+
+    app = create_app()
+
+    assert app.state.capabilities["profile"] == "silent"
+
+
 def test_capabilities_endpoint_health_stats_and_metrics_share_report() -> None:
     app = create_app(_minimal_config(stateless=True))
 

@@ -120,6 +120,7 @@ from headroom.proxy.buffered_ccr_response import DEFAULT_BUFFERED_CCR_GRACE_SECO
 from headroom.proxy.capabilities import (
     build_capability_report,
     enforce_detached_profile,
+    normalize_detached_profile,
     render_capability_matrix,
 )
 
@@ -2727,13 +2728,8 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
     from contextlib import asynccontextmanager
 
+    config_was_provided = config is not None
     config = config or ProxyConfig()
-    capability_report = build_capability_report(config)
-    enforce_detached_profile(capability_report)
-    if capability_report.detached and capability_report.profile != "silent":
-        logger.info(
-            "event=detached_capability_matrix\n%s", render_capability_matrix(capability_report)
-        )
 
     # Always-on file logging to ~/.headroom/logs/ for `headroom perf` analysis.
     # Installed here (not at module import) so importing headroom.proxy.server
@@ -2752,6 +2748,20 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         settings_store.apply_to_environ(settings_store.load())
     except Exception:  # noqa: BLE001 — settings load must never break startup
         pass
+
+    if not config_was_provided:
+        config.detached_profile = normalize_detached_profile()
+
+    # Capability policy reads HEADROOM_DETACHED_PROFILE as a fallback, so it
+    # must run after file-backed settings hydrate the environment. Otherwise an
+    # embedded ``create_app()`` silently treats a saved strict profile as the
+    # default lenient profile.
+    capability_report = build_capability_report(config)
+    enforce_detached_profile(capability_report)
+    if capability_report.detached and capability_report.profile != "silent":
+        logger.info(
+            "event=detached_capability_matrix\n%s", render_capability_matrix(capability_report)
+        )
 
     # Air-gap master switch. Propagate config.offline to the env so the
     # env-based egress predicates (telemetry, update check, license) all honor
