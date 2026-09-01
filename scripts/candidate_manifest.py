@@ -92,6 +92,36 @@ def _rollout_identity(path: Path) -> dict[str, Any]:
     return rollout
 
 
+def inventory(args: argparse.Namespace) -> None:
+    directory = args.directory.resolve(strict=True)
+    if not directory.is_dir():
+        raise ValueError(f"runtime payload path is not a directory: {directory}")
+    files: list[dict[str, object]] = []
+    for path in sorted(directory.rglob("*"), key=lambda item: item.as_posix()):
+        if path.is_symlink():
+            raise ValueError(f"runtime payload must not contain symlinks: {path}")
+        if path.is_file():
+            relative = path.relative_to(directory).as_posix()
+            files.append(
+                {
+                    "filename": relative,
+                    "sha256": _sha256(path),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+    if not files:
+        raise ValueError("runtime payload directory contains no files")
+    args.output.write_text(
+        json.dumps(
+            {"schema_version": 1, "files": files},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def create(args: argparse.Namespace) -> None:
     artifact = args.artifact.resolve(strict=True)
     if not artifact.is_file() or artifact.stat().st_size < 1:
@@ -124,6 +154,11 @@ def create(args: argparse.Namespace) -> None:
         },
         "rollout": _rollout_identity(args.rollout),
     }
+    if args.runtime_payload:
+        runtime_payload = args.runtime_payload.resolve(strict=True)
+        if not runtime_payload.is_file() or runtime_payload.stat().st_size < 1:
+            raise ValueError(f"runtime payload identity is not a non-empty file: {runtime_payload}")
+        manifest["runtime_payload_sha256"] = _sha256(runtime_payload)
     _validator().validate(manifest)
     args.output.write_text(
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
@@ -143,10 +178,31 @@ def verify(args: argparse.Namespace) -> None:
         mismatches.append("artifact size")
     if _sha256(artifact) != expected["sha256"]:
         mismatches.append("artifact digest")
+    if "runtime_payload_sha256" in manifest:
+        if args.runtime_payload is None:
+            mismatches.append("runtime payload missing")
+        elif (
+            _sha256(args.runtime_payload.resolve(strict=True)) != manifest["runtime_payload_sha256"]
+        ):
+            mismatches.append("runtime payload digest")
+    elif args.runtime_payload is not None:
+        mismatches.append("unexpected runtime payload")
     if args.source_sha and manifest["source"]["sha"] != args.source_sha:
         mismatches.append("source SHA")
     if args.producer_sha and manifest["build"]["commit_sha"] != args.producer_sha:
         mismatches.append("producer SHA")
+    if args.repository and manifest["source"]["repository"] != args.repository:
+        mismatches.append("source repository")
+    if args.package and expected["name"] != args.package:
+        mismatches.append("package name")
+    if args.version and expected["version"] != args.version:
+        mismatches.append("package version")
+    if args.workflow and manifest["build"]["workflow"] != args.workflow:
+        mismatches.append("producer workflow")
+    if args.run_id and manifest["build"]["run_id"] != args.run_id:
+        mismatches.append("producer run ID")
+    if args.run_attempt and manifest["build"]["run_attempt"] != args.run_attempt:
+        mismatches.append("producer run attempt")
     if mismatches:
         raise ValueError("candidate verification failed: " + ", ".join(mismatches))
 
@@ -154,6 +210,11 @@ def verify(args: argparse.Namespace) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
+    payload = commands.add_parser("inventory")
+    payload.add_argument("--directory", type=Path, required=True)
+    payload.add_argument("--output", type=Path, required=True)
+    payload.set_defaults(handler=inventory)
+
     make = commands.add_parser("create")
     make.add_argument("--artifact", type=Path, required=True)
     make.add_argument("--output", type=Path, required=True)
@@ -166,6 +227,7 @@ def parser() -> argparse.ArgumentParser:
     make.add_argument("--run-id", type=_positive, required=True)
     make.add_argument("--run-attempt", type=_positive, required=True)
     make.add_argument("--rollout", type=Path, required=True)
+    make.add_argument("--runtime-payload", type=Path)
     make.add_argument("--candidate-id")
     make.add_argument("--created-at")
     make.add_argument("--media-type", default="application/octet-stream")
@@ -174,8 +236,15 @@ def parser() -> argparse.ArgumentParser:
     check = commands.add_parser("verify")
     check.add_argument("--manifest", type=Path, required=True)
     check.add_argument("--artifact", type=Path, required=True)
+    check.add_argument("--runtime-payload", type=Path)
     check.add_argument("--source-sha", type=_full_sha)
     check.add_argument("--producer-sha", type=_full_sha)
+    check.add_argument("--repository", type=_repository)
+    check.add_argument("--package")
+    check.add_argument("--version")
+    check.add_argument("--workflow")
+    check.add_argument("--run-id", type=_positive)
+    check.add_argument("--run-attempt", type=_positive)
     check.set_defaults(handler=verify)
     return result
 

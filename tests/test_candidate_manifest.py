@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import ValidationError
 
 from scripts.candidate_manifest import main
 
@@ -36,9 +37,11 @@ def _rollout(path: Path, *, eligible: bool = True) -> Path:
     return path
 
 
-def _create(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+def _create(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path, Path]:
     artifact = tmp_path / "headroom-candidate.tar"
     artifact.write_bytes(b"immutable candidate bytes")
+    runtime_payload = tmp_path / "candidate-runtime-payload.json"
+    runtime_payload.write_bytes(b'{"files":[]}\n')
     manifest = tmp_path / "candidate-manifest.json"
     monkeypatch.setattr(
         "sys.argv",
@@ -67,18 +70,47 @@ def _create(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path
             "1",
             "--rollout",
             str(_rollout(tmp_path / "rollout.json")),
+            "--runtime-payload",
+            str(runtime_payload),
             "--created-at",
             "2026-09-01T12:00:00Z",
         ],
     )
     main()
-    return artifact, manifest
+    return artifact, manifest, runtime_payload
+
+
+def test_inventory_is_sorted_canonical_and_binds_each_payload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "z.whl").write_bytes(b"z")
+    (dist / "a.whl").write_bytes(b"alpha")
+    output = tmp_path / "inventory.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "inventory",
+            "--directory",
+            str(dist),
+            "--output",
+            str(output),
+        ],
+    )
+    main()
+    value = json.loads(output.read_text(encoding="utf-8"))
+    assert [item["filename"] for item in value["files"]] == ["a.whl", "z.whl"]
+    assert value["files"][0]["size_bytes"] == 5
+    assert value["files"][0]["sha256"].startswith("sha256:")
+    assert output.read_bytes().endswith(b"\n")
 
 
 def test_create_is_canonical_and_verify_accepts_exact_bytes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    artifact, manifest = _create(monkeypatch, tmp_path)
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
     first = manifest.read_bytes()
     assert first.endswith(b"\n")
     assert b" " not in first
@@ -92,6 +124,8 @@ def test_create_is_canonical_and_verify_accepts_exact_bytes(
             str(artifact),
             "--manifest",
             str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
             "--source-sha",
             SHA,
             "--producer-sha",
@@ -105,7 +139,7 @@ def test_create_is_canonical_and_verify_accepts_exact_bytes(
 def test_verify_rejects_changed_artifact(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
 ) -> None:
-    artifact, manifest = _create(monkeypatch, tmp_path)
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
     if mutation == "bytes":
         artifact.write_bytes(b"mutable candidate bytes!!")
     elif mutation == "filename":
@@ -121,9 +155,80 @@ def test_verify_rejects_changed_artifact(
             str(artifact),
             "--manifest",
             str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
         ],
     )
     with pytest.raises(ValueError, match="candidate verification failed"):
+        main()
+
+
+def test_verify_rejects_changed_runtime_payload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
+    runtime_payload.write_bytes(b'{"files":["changed"]}\n')
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "verify",
+            "--artifact",
+            str(artifact),
+            "--manifest",
+            str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
+        ],
+    )
+    with pytest.raises(ValueError, match="runtime payload digest"):
+        main()
+
+
+def test_verify_rejects_wrong_expected_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "verify",
+            "--artifact",
+            str(artifact),
+            "--manifest",
+            str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
+            "--version",
+            "99.0.0",
+        ],
+    )
+    with pytest.raises(ValueError, match="package version"):
+        main()
+
+
+def test_verify_rejects_unknown_schema_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    value["schema_version"] = 2
+    manifest.write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "verify",
+            "--artifact",
+            str(artifact),
+            "--manifest",
+            str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
+        ],
+    )
+    with pytest.raises(ValidationError, match="1 was expected"):
         main()
 
 
