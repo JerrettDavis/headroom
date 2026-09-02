@@ -3627,7 +3627,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     # only names listed in config.proxy_extensions (CLI: --proxy-extension,
     # env: HEADROOM_PROXY_EXTENSIONS) actually get installed. Discovery alone
     # never runs third-party code. An extension that raises from its install()
-    # is a deliberate fail-closed signal and aborts startup.
+    # disables *itself*: `install_all` logs it, prints a SKIPPED line to stderr
+    # and the proxy keeps serving without that extension (extensions.py:169-183).
+    # One bad plugin must not brick the proxy. Note the consequence: a plugin
+    # whose licence gate raises is absent, not fatal — the feature fails closed,
+    # the process does not.
     from headroom.proxy.extensions import install_all as _install_extensions
 
     _install_extensions(app, config, enabled=getattr(config, "proxy_extensions", None))
