@@ -392,6 +392,27 @@ and the **prefix** itself once its prompt cache has lapsed. All flags below are
   conservative default until the learner (`HEADROOM_CACHE_TTL_LEARN` + the
   `headroom-cache-ttl` plugin) fills in the real value from observed hits/misses.
 
+**Running the estimator.** With `HEADROOM_CACHE_TTL_LEARN=1` set on the proxy,
+run the batch estimator periodically (cron / launchd — it is deliberately
+out-of-process so it can never touch the request path):
+
+```bash
+headroom-cache-ttl            # reads cache_ttl_observations.jsonl, writes cache_ttl_learned.json
+headroom-cache-ttl --dry-run  # print the estimate table without writing
+```
+
+It emits a TTL for a `provider/model` only when the observations bound it on
+both sides — hits at some idle prove the cache was still alive (lower bound),
+`ttl_expiry` misses at a larger idle prove it was dead (upper bound) — and it
+writes the upper end of that interval: overestimating a TTL only skips a
+recompaction, while underestimating one would bust a warm cache. Estimates are
+never pooled across models: one model's expiry says nothing about another's
+TTL, so a cross-model aggregate could close one model's interval with another's
+death evidence. Keys without death-evidence beyond their last observed hit are
+skipped, as is any model with no estimate of its own; both keep the
+conservative static default. The proxy picks up a rewritten table by mtime; no
+restart needed.
+
 **Can these be on by default?**
 
 - `HEADROOM_THINKING_COMPACT` — **stays opt-in.** It rewrites model inputs

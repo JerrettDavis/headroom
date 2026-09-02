@@ -332,6 +332,7 @@ sandbox = [
 
 [project.scripts]
 headroom = "headroom.cli:main"
+headroom-cache-ttl = "headroom.cache.ttl_estimator:main"
 
 [project.urls]
 Homepage = "https://docs.headroomlabs.ai"
