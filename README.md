@@ -11,19 +11,19 @@
 <p align="center"><strong>60–95% fewer tokens (for JSON data), 15-20% fewer tokens (for coding agents) · library · proxy · MCP · content-aware compressors · local-first · reversible</strong></p>
 
 <p align="center">
-  <a href="https://github.com/chopratejas/headroom/actions/workflows/ci.yml"><img src="https://github.com/chopratejas/headroom/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://app.codecov.io/gh/chopratejas/headroom"><img src="https://codecov.io/gh/chopratejas/headroom/graph/badge.svg" alt="codecov"></a>
+  <a href="https://github.com/headroomlabs-ai/headroom/actions/workflows/ci.yml"><img src="https://github.com/headroomlabs-ai/headroom/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://app.codecov.io/gh/headroomlabs-ai/headroom"><img src="https://codecov.io/gh/headroomlabs-ai/headroom/graph/badge.svg" alt="codecov"></a>
   <a href="https://pypi.org/project/headroom-ai/"><img src="https://img.shields.io/pypi/v/headroom-ai.svg" alt="PyPI"></a>
   <a href="https://www.npmjs.com/package/headroom-ai"><img src="https://img.shields.io/npm/v/headroom-ai.svg" alt="npm"></a>
   <a href="https://huggingface.co/chopratejas/kompress-v2-base"><img src="https://img.shields.io/badge/model-Kompress--v2--base-yellow.svg" alt="Model: Kompress-v2-base"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
-  <a href="https://headroom-docs.vercel.app/docs"><img src="https://img.shields.io/badge/docs-online-blue.svg" alt="Docs"></a>
+  <a href="https://docs.headroomlabs.ai/docs"><img src="https://img.shields.io/badge/docs-online-blue.svg" alt="Docs"></a>
 </p>
 
 <!-- mcp-name: io.github.headroomlabs-ai/headroom -->
 
 <p align="center">
-  <a href="https://headroom-docs.vercel.app/docs">Docs</a> ·
+  <a href="https://docs.headroomlabs.ai/docs">Docs</a> ·
   <a href="#get-started-60-seconds">Install</a> ·
   <a href="#proof">Proof</a> ·
   <a href="#agent-compatibility-matrix">Agents</a> ·
@@ -32,7 +32,7 @@
 </p>
 
 <p align="center"><sub>
-  <b>AI agents / LLMs:</b> read <a href="llms.txt"><code>/llms.txt</code></a> here, or fetch <a href="https://headroom-docs.vercel.app/llms.txt">the live index</a> / <a href="https://headroom-docs.vercel.app/llms-full.txt">full docs blob</a>.
+  <b>AI agents / LLMs:</b> read <a href="llms.txt"><code>/llms.txt</code></a> here, or fetch <a href="https://docs.headroomlabs.ai/llms.txt">the live index</a> / <a href="https://docs.headroomlabs.ai/llms-full.txt">full docs blob</a>.
 </sub></p>
 
 ---
@@ -83,7 +83,7 @@ Headroom compresses everything your AI agent reads — tool outputs, logs, RAG c
 - **CacheAligner** - detects and warns about volatile content that can bust provider KV cache prefixes; never rewrites prompts
 - **CCR** — stores originals locally; LLM calls `headroom_retrieve` if it needs them
 
-→ [Architecture](https://headroom-docs.vercel.app/docs/architecture) · [CCR reversible compression](https://headroom-docs.vercel.app/docs/ccr) · [Kompress-v2-base model card](https://huggingface.co/chopratejas/kompress-v2-base)
+→ [Architecture](https://docs.headroomlabs.ai/docs/architecture) · [CCR reversible compression](https://docs.headroomlabs.ai/docs/ccr) · [Kompress-v2-base model card](https://huggingface.co/chopratejas/kompress-v2-base)
 
 ## Get started (60 seconds)
 
@@ -152,7 +152,7 @@ args = ["mcp", "serve"]
 | SQuAD v2   | QA       | 100 |        — |  **97%** | 19% compression |
 | BFCL       | Tools    | 100 |        — |  **97%** | 32% compression |
 
-Reproduce: `python -m headroom.evals suite --tier 1` · [Full benchmarks & methodology](https://headroom-docs.vercel.app/docs/benchmarks)
+Reproduce: `python -m headroom.evals suite --tier 1` · [Full benchmarks & methodology](https://docs.headroomlabs.ai/docs/benchmarks)
 
 ## Output token reduction (cut what the model writes back)
 
@@ -215,11 +215,11 @@ unshaped as a control group: `export HEADROOM_OUTPUT_HOLDOUT=0.1`. The dashboard
 shows an **Output Tokens Saved** card next to input compression, labelled
 `measured` or `estimated` with the confidence band.
 
-→ Full write-up incl. the measurement methodology: [Output token reduction](https://headroom-docs.vercel.app/docs/savings)
+→ Full write-up incl. the measurement methodology: [Output token reduction](https://docs.headroomlabs.ai/docs/savings)
 
 <a href="https://www.star-history.com/?repos=chopratejas%2Fheadroom&type=date&legend=top-left">
  <picture>
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=chopratejas/headroom&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=headroomlabs-ai/headroom&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -306,7 +306,7 @@ headroom wrap vscode
 
 Keep the command running and use Copilot normally. Headroom holds the short-lived
 upstream Copilot token only in the proxy process.
-See the [cross-platform VS Code Copilot guide](https://headroom-docs.vercel.app/docs/vscode-copilot)
+See the [cross-platform VS Code Copilot guide](https://docs.headroomlabs.ai/docs/vscode-copilot)
 for paths, credential flow, remote-development notes, undo steps, and troubleshooting.
 
 ### Claude Code in Visual Studio Code
@@ -333,7 +333,7 @@ headroom unwrap vscode-claude
 ```
 
 See the
-[VS Code Claude Code guide](https://headroom-docs.vercel.app/docs/vscode-claude-code)
+[VS Code Claude Code guide](https://docs.headroomlabs.ai/docs/vscode-claude-code)
 for verification, configuration paths, custom profiles, remote development, and
 troubleshooting.
 
@@ -360,7 +360,7 @@ troubleshooting.
 | LiteLLM                | `litellm.callbacks = [HeadroomCallback()]`                       |
 | LangChain              | `HeadroomChatModel(your_llm)`                                    |
 | Agno                   | `HeadroomAgnoModel(your_model)`                                  |
-| Strands                | [Strands guide](https://headroom-docs.vercel.app/docs/strands)  |
+| Strands                | [Strands guide](https://docs.headroomlabs.ai/docs/strands)  |
 | ASGI apps              | `app.add_middleware(CompressionMiddleware)`                      |
 | Multi-agent            | `SharedContext().put / .get`                                     |
 | MCP clients            | `headroom mcp install`                                           |
@@ -455,7 +455,7 @@ pipx install --python python3.13 "headroom-ai[all]"
 
 > **Pick 3.13 if you want dollar savings.** The dashboard's *Proxy $ Saved* tile prices compression with [LiteLLM](https://github.com/BerriAI/litellm), and LiteLLM can't be installed on Python 3.14+. On 3.14 token savings still track, but the dollar figure stays `$0.00`. If you already installed on 3.14, switch with `pipx reinstall headroom-ai --python python3.13` and restart the proxy.
 
-→ [Installation guide](https://headroom-docs.vercel.app/docs/installation) — Docker tags, persistent service, PowerShell, devcontainers.
+→ [Installation guide](https://docs.headroomlabs.ai/docs/installation) — Docker tags, persistent service, PowerShell, devcontainers.
 
 > **CPU requirement (x86/x86_64):** the ONNX-backed features — Magika content
 > detection and embedding relevance — use a precompiled ONNX Runtime that needs
@@ -573,13 +573,13 @@ download entirely.
 
 | Start here                                                                    | Go deeper                                                                          |
 |-------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-| [Quickstart](https://headroom-docs.vercel.app/docs/quickstart)                | [Architecture](https://headroom-docs.vercel.app/docs/architecture)                 |
-| [Proxy](https://headroom-docs.vercel.app/docs/proxy)                          | [How compression works](https://headroom-docs.vercel.app/docs/how-compression-works) |
-| [MCP tools](https://headroom-docs.vercel.app/docs/mcp)                        | [CCR — reversible compression](https://headroom-docs.vercel.app/docs/ccr)          |
-| [Memory](https://headroom-docs.vercel.app/docs/memory)                        | [Cache optimization](https://headroom-docs.vercel.app/docs/cache-optimization)     |
-| [Failure learning](https://headroom-docs.vercel.app/docs/failure-learning)    | [Benchmarks](https://headroom-docs.vercel.app/docs/benchmarks)                    |
-| [Configuration](https://headroom-docs.vercel.app/docs/configuration)          | [Limitations](https://headroom-docs.vercel.app/docs/limitations)                  |
-| [Persistent installs](https://headroom-docs.vercel.app/docs/persistent-installs) (`headroom init` / `headroom install apply`) | [Savings analytics](https://headroom-docs.vercel.app/docs/savings) (`headroom savings` / `headroom perf` / `headroom doctor`) |
+| [Quickstart](https://docs.headroomlabs.ai/docs/quickstart)                | [Architecture](https://docs.headroomlabs.ai/docs/architecture)                 |
+| [Proxy](https://docs.headroomlabs.ai/docs/proxy)                          | [How compression works](https://docs.headroomlabs.ai/docs/how-compression-works) |
+| [MCP tools](https://docs.headroomlabs.ai/docs/mcp)                        | [CCR — reversible compression](https://docs.headroomlabs.ai/docs/ccr)          |
+| [Memory](https://docs.headroomlabs.ai/docs/memory)                        | [Cache optimization](https://docs.headroomlabs.ai/docs/cache-optimization)     |
+| [Failure learning](https://docs.headroomlabs.ai/docs/failure-learning)    | [Benchmarks](https://docs.headroomlabs.ai/docs/benchmarks)                    |
+| [Configuration](https://docs.headroomlabs.ai/docs/configuration)          | [Limitations](https://docs.headroomlabs.ai/docs/limitations)                  |
+| [Persistent installs](https://docs.headroomlabs.ai/docs/persistent-installs) (`headroom init` / `headroom install apply`) | [Savings analytics](https://docs.headroomlabs.ai/docs/savings) (`headroom savings` / `headroom perf` / `headroom doctor`) |
 
 ## Compared to
 
@@ -596,7 +596,7 @@ Headroom runs **locally**, covers **every** content type, works with every major
 ## Contributing
 
 ```bash
-git clone https://github.com/chopratejas/headroom.git && cd headroom
+git clone https://github.com/headroomlabs-ai/headroom.git && cd headroom
 uv sync --extra dev && uv run pytest
 ```
 
