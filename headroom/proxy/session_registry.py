@@ -69,16 +69,23 @@ def _validate_path_component(value: str, *, label: str) -> str:
     return value
 
 
+def _finite_metric(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # JSON integers are unbounded; isfinite converts them to a float.
+        return False
+
+
 def _aggregate_metrics(metrics: Any) -> dict[str, int | float]:
     if not isinstance(metrics, dict):
         return {}
     return {
         key: value
         for key, value in metrics.items()
-        if key in _AGGREGATE_METRIC_KEYS
-        and isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
+        if key in _AGGREGATE_METRIC_KEYS and _finite_metric(value)
     }
 
 
@@ -256,7 +263,7 @@ class ActiveSessionRegistry:
 def _read_manifest(path: Path, *, now: datetime, stale_after_seconds: int) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return None
     if not isinstance(payload, dict):
         return None
@@ -354,9 +361,7 @@ def aggregate_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
 
     def metric_value(metrics: dict[str, Any], key: str) -> int | float:
         value = metrics.get(key, 0)
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            return 0
-        return value if math.isfinite(value) else 0
+        return value if _finite_metric(value) else 0
 
     for session in sessions:
         raw_metrics = session.get("metrics")

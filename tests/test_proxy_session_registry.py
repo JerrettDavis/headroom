@@ -302,3 +302,26 @@ def test_shared_manifest_reader_rejects_invalid_identity(tmp_path: Path) -> None
     registry.local_manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     assert sr.list_active_sessions(tmp_path / "sessions") == []
+
+
+def test_malformed_neighbor_does_not_hide_healthy_sessions(tmp_path: Path) -> None:
+    registry = ActiveSessionRegistry(
+        session_id="healthy", instance_id="instance", local_sessions_dir=tmp_path
+    )
+    payload = registry.heartbeat({"requests": 3})
+    payload["session_id"] = "oversized"
+    payload["metrics"] = {"requests": 10**400, "tokens_saved": 5}
+    oversized = tmp_path / "oversized" / "session.json"
+    oversized.parent.mkdir()
+    oversized.write_text(json.dumps(payload), encoding="utf-8")
+    corrupt = tmp_path / "corrupt" / "session.json"
+    corrupt.parent.mkdir()
+    corrupt.write_bytes(b"\xff")
+
+    sessions = sr.list_active_sessions(tmp_path)
+
+    assert {s["session_id"] for s in sessions} == {"healthy", "oversized"}
+    assert sr.aggregate_sessions(sessions)["totals"]["requests"] == 3
+    assert sr.aggregate_sessions(sessions)["totals"]["tokens_saved"] == 5
+    # The public aggregation path must also tolerate unsanitized callers.
+    assert sr.aggregate_sessions([payload])["totals"]["requests"] == 0
