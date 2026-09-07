@@ -366,10 +366,13 @@ def aggregate_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     for session in sessions:
         raw_metrics = session.get("metrics")
         metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
-        totals["requests"] += metric_value(metrics, "requests")
-        totals["tokens_saved"] += metric_value(metrics, "tokens_saved")
-        totals["input_tokens"] += metric_value(metrics, "input_tokens")
-        totals["output_tokens"] += metric_value(metrics, "output_tokens")
+        for key, total in totals.items():
+            candidate = total + metric_value(metrics, key)
+            # Individually finite shared-manifest values can still overflow
+            # when summed. Ignore that contribution, preserving a JSON-safe
+            # total and continuing to aggregate the remaining metrics.
+            if _finite_metric(candidate):
+                totals[key] = candidate
         agent = str(session.get("agent_type") or "unknown")
         instance = str(session.get("instance_id") or "unknown")
         by_agent[agent] = by_agent.get(agent, 0) + 1

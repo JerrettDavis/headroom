@@ -325,3 +325,19 @@ def test_malformed_neighbor_does_not_hide_healthy_sessions(tmp_path: Path) -> No
     assert sr.aggregate_sessions(sessions)["totals"]["tokens_saved"] == 5
     # The public aggregation path must also tolerate unsanitized callers.
     assert sr.aggregate_sessions([payload])["totals"]["requests"] == 0
+
+
+@pytest.mark.parametrize("large", [1e308, 10**308])
+def test_aggregate_overflow_keeps_summary_json_safe(large: int | float) -> None:
+    sessions = [
+        {"metrics": {"requests": large, "tokens_saved": 2}},
+        {"metrics": {"requests": large, "tokens_saved": 3}},
+        {"metrics": {"requests": 1.0, "tokens_saved": 4}},
+    ]
+
+    summary = sr.aggregate_sessions(sessions)
+
+    assert summary["count"] == 3
+    assert summary["totals"]["tokens_saved"] == 9
+    assert summary["totals"]["requests"] == pytest.approx(float(large))
+    json.dumps(summary, allow_nan=False)
