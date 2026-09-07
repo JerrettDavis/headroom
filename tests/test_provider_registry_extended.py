@@ -34,6 +34,26 @@ def test_model_matches_provider(provider: str, model: str, expected: bool) -> No
     assert model_matches_provider(provider, model) is expected
 
 
+@pytest.mark.parametrize("model", ["azure/gpt-4o", "openrouter/openai/gpt-4o", "chatgpt-4o-latest"])
+def test_prefix_cache_pricing_retains_qualified_openai_models(model: str) -> None:
+    from headroom.proxy.cost import CostTracker, build_prefix_cache_stats
+    from headroom.proxy.prometheus_metrics import PrometheusMetrics
+
+    tracker = CostTracker()
+    tracker._tokens_sent_by_model = {model: 1_000_000}
+    metrics = PrometheusMetrics()
+    metrics.cache_by_provider["openai"].update(requests=1, cache_read_tokens=1_000_000)
+    with (
+        patch.object(tracker, "_get_list_price", return_value=2.5) as price,
+        patch.object(tracker, "_get_cache_prices", return_value=(1.25e-6, 2.5e-6, 2.5e-6)),
+    ):
+        result = build_prefix_cache_stats(metrics, tracker)["by_provider"]["openai"]
+
+    price.assert_called_once_with(model)
+    assert result["cache_pricing_source"] == "catalog"
+    assert result["savings_usd"] == pytest.approx(1.25)
+
+
 class DummyStorage:
     def __init__(self) -> None:
         self.saved: list[Any] = []

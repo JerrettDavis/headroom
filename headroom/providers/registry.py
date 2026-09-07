@@ -210,7 +210,9 @@ def model_matches_provider(provider: str, model_name: str) -> bool:
     openai_prefixes = ("gpt", "o1", "o3", "o4")
     return (
         (provider in {"anthropic", "vertex:anthropic"} and "claude" in normalized)
-        or (provider == "openai" and normalized.startswith(openai_prefixes))
+        # Preserve the pricing bucket's accepted provider-qualified and alias
+        # names (for example azure/gpt-4o and chatgpt-4o-latest).
+        or (provider == "openai" and any(prefix in normalized for prefix in openai_prefixes))
         or (provider == "gemini" and "gemini" in normalized)
         or (provider == "bedrock" and "claude" in normalized)
     )
