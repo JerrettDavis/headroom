@@ -107,6 +107,32 @@ def test_inventory_is_sorted_canonical_and_binds_each_payload(
     assert output.read_bytes().endswith(b"\n")
 
 
+def test_verify_rejects_wrong_producer_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
+    document = json.loads(manifest.read_text())
+    document["build"]["repository"] = "unrelated/producer"
+    manifest.write_text(json.dumps(document))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "verify",
+            "--artifact",
+            str(artifact),
+            "--manifest",
+            str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
+            "--repository",
+            "headroomlabs-ai/headroom",
+        ],
+    )
+    with pytest.raises(ValueError, match="producer repository"):
+        main()
+
+
 def test_create_is_canonical_and_verify_accepts_exact_bytes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

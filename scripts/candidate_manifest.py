@@ -193,6 +193,8 @@ def verify(args: argparse.Namespace) -> None:
         mismatches.append("producer SHA")
     if args.repository and manifest["source"]["repository"] != args.repository:
         mismatches.append("source repository")
+    if args.repository and manifest["build"]["repository"] != args.repository:
+        mismatches.append("producer repository")
     if args.package and expected["name"] != args.package:
         mismatches.append("package name")
     if args.version and expected["version"] != args.version:
