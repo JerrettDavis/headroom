@@ -48,3 +48,5 @@ headroom_feature_enabled{feature="compression",state="full",degradation="full",d
 Alert when a feature expected to be `full` reports `degraded` or `disabled`.
 
 CCR capability reporting uses the initialized store: the normal SQLite default reports `full`, while explicit memory storage or fallback after a backend initialization failure reports `degraded`. Stateless mode selects memory storage. Successfully loaded third-party adapters report `custom`; their persistence guarantees belong to the adapter. Persistent memory is disabled for every backend under `--stateless`, and strict mode refuses startup when memory was explicitly requested.
+
+The proxy initializes CCR during capability resolution at startup. Configure its backend and TTL environment variables, or install an explicit process-wide store, before calling `create_app()`. Later calls to the singleton getter retain the initialized store and its options.
