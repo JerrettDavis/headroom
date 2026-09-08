@@ -18,6 +18,11 @@ from headroom.proxy.server import create_app
 
 @pytest.fixture(autouse=True)
 def _isolated_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from headroom import paths
+    from headroom.cache import compression_store
+
+    monkeypatch.setattr(paths, "_PROCESS_STATELESS", False)
+    monkeypatch.setattr(compression_store, "_compression_store", None)
     monkeypatch.setenv("HEADROOM_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("HEADROOM_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("HEADROOM_REQUIRE_RUST_CORE", "false")
@@ -177,7 +182,7 @@ def test_capabilities_do_not_expose_backend_url_credentials(
     assert "cache.internal" not in serialized
     assert "ccr.internal" not in serialized
     assert features["toin_tagging"]["backend"] == "redis"
-    assert features["ccr_retrieval"]["backend"] == "https"
+    assert features["ccr_retrieval"]["backend"] == "memory"
 
 
 def test_stateless_startup_skips_file_logging(
@@ -199,3 +204,137 @@ def test_stateless_startup_skips_file_logging(
 
     assert response.status_code == 200
     assert calls == []
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "qdrant-neo4j"])
+def test_strict_stateless_refuses_memory_for_every_backend(backend: str) -> None:
+    with pytest.raises(DetachedModeError) as exc:
+        create_app(
+            _minimal_config(
+                stateless=True,
+                detached_profile="strict",
+                memory_enabled=True,
+                memory_backend=backend,
+            )
+        )
+    assert [item.feature for item in exc.value.report.strict_violations] == ["memory"]
+
+
+def test_lenient_stateless_memory_report_matches_runtime() -> None:
+    app = create_app(
+        _minimal_config(stateless=True, memory_enabled=True, memory_backend="qdrant-neo4j")
+    )
+    memory = next(f for f in app.state.capabilities["features"] if f["feature"] == "memory")
+    assert memory["state"] == "disabled"
+    assert memory["enabled"] is False
+    assert app.state.proxy.memory_handler is None
+
+
+def _ccr_feature(config: ProxyConfig) -> dict[str, Any]:
+    report = build_capability_report(config)
+    return next(f.to_dict() for f in report.features if f.feature == "ccr_retrieval")
+
+
+def test_ccr_report_uses_initialized_sqlite_default() -> None:
+    from headroom.cache.compression_store import get_compression_store
+
+    feature = _ccr_feature(_minimal_config())
+    assert feature["backend"] == "sqlite"
+    assert feature["state"] == "full"
+    assert get_compression_store().get_stats()["backend"]["backend_type"] == "sqlite"
+
+
+def test_ccr_report_respects_explicit_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEADROOM_CCR_BACKEND", "memory")
+    feature = _ccr_feature(_minimal_config())
+    assert feature["backend"] == "memory"
+    assert feature["state"] == "degraded"
+
+
+@pytest.mark.parametrize("failure", ["missing", "load", "factory"])
+def test_ccr_report_does_not_promote_failed_remote_adapter(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    import importlib.metadata
+
+    class EntryPoint:
+        name = "redis"
+
+        def load(self):
+            if failure == "load":
+                raise ImportError("adapter unavailable")
+
+            def factory(**kwargs):
+                raise OSError("backend unavailable")
+
+            return factory
+
+    monkeypatch.setenv("HEADROOM_CCR_BACKEND", "redis")
+    monkeypatch.setattr(
+        importlib.metadata,
+        "entry_points",
+        lambda **kwargs: [] if failure == "missing" else [EntryPoint()],
+    )
+    feature = _ccr_feature(_minimal_config())
+    assert feature["backend"] == "memory"
+    assert feature["state"] == "degraded"
+
+
+def test_ccr_report_reflects_sqlite_initialization_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from headroom.cache.backends import sqlite
+
+    # Patch initialization rather than replacing the type: backend identification
+    # must still distinguish a fallback InMemoryBackend from SQLiteBackend.
+    def fail_init(self, *args, **kwargs):
+        raise OSError("read-only database")
+
+    monkeypatch.setattr(sqlite.SQLiteBackend, "__init__", fail_init)
+    feature = _ccr_feature(_minimal_config())
+    assert feature["backend"] == "memory"
+    assert feature["state"] == "degraded"
+
+
+def test_resolving_stateless_ccr_does_not_create_workspace() -> None:
+    feature = _ccr_feature(_minimal_config(stateless=True))
+    assert feature["backend"] == "memory"
+    assert not Path(os.environ["HEADROOM_WORKSPACE_DIR"]).exists()
+
+
+def test_ccr_report_uses_successfully_initialized_custom_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.metadata
+
+    from headroom.cache.backends.memory import InMemoryBackend
+
+    class Adapter:
+        def __init__(self):
+            self.storage = InMemoryBackend()
+
+        def __getattr__(self, name):
+            return getattr(self.storage, name)
+
+    class EntryPoint:
+        name = "redis"
+
+        def load(self):
+            return lambda **kwargs: Adapter()
+
+    monkeypatch.setenv("HEADROOM_CCR_BACKEND", "redis")
+    monkeypatch.setattr(importlib.metadata, "entry_points", lambda **kwargs: [EntryPoint()])
+    feature = _ccr_feature(_minimal_config())
+    assert feature["backend"] == "custom"
+    assert feature["state"] == "full"
+
+
+def test_ccr_report_describes_existing_store_even_if_env_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from headroom.cache.compression_store import get_compression_store
+
+    monkeypatch.setenv("HEADROOM_CCR_BACKEND", "memory")
+    store = get_compression_store()
+    monkeypatch.setenv("HEADROOM_CCR_BACKEND", "sqlite")
+    feature = _ccr_feature(_minimal_config())
+    assert feature["backend"] == "memory"
+    assert get_compression_store() is store

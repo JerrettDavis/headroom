@@ -28,7 +28,7 @@ Set `HEADROOM_DETACHED_PROFILE` or pass `--detached-profile`:
 | Profile | Behavior |
 |---|---|
 | `lenient` | Default. Start the proxy and log the capability matrix when detached. |
-| `strict` | Refuse startup when an explicitly enabled required local-state feature would degrade, such as `--memory` without available local state or a remote backend. |
+| `strict` | Refuse startup when an explicitly enabled required local-state feature would degrade, such as `--memory` together with `--stateless` (including remote memory backends). |
 | `silent` | Start the proxy without startup degradation logs. `/capabilities`, `/stats`, `/health`, and `/metrics` still expose the matrix. |
 
 ```bash
@@ -55,3 +55,5 @@ headroom_feature_enabled{feature="session_aggregation",state="disabled",degradat
 ```
 
 Use this to alert on degraded or disabled capabilities in managed deployments.
+
+CCR capability reporting uses the initialized store: the normal SQLite default reports `full`, while explicit memory storage or fallback after a backend initialization failure reports `degraded`. Stateless mode selects memory storage. Successfully loaded third-party adapters report `custom`; their persistence guarantees belong to the adapter. Persistent memory is disabled for every backend under `--stateless`, and strict mode refuses startup when memory was explicitly requested.

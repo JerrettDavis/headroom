@@ -151,12 +151,16 @@ def _backend_label(value: str) -> str:
 
 
 def build_capability_report(config: ProxyConfig) -> CapabilityReport:
+    from headroom.cache.compression_store import get_compression_store
+
+    # Resolve the same process-wide store that request handling will use.
+    paths.set_process_stateless(config.stateless)
     profile = normalize_detached_profile(config.detached_profile)
     local_state_available, local_state_reason = _probe_local_state(config)
     detached = config.stateless or not local_state_available
     workspace_dir = str(paths.workspace_dir())
     toin_backend = _backend_from_env("HEADROOM_TOIN_BACKEND", "filesystem")
-    ccr_backend = _backend_from_env("HEADROOM_CCR_BACKEND", "memory")
+    ccr_backend = get_compression_store().backend_kind
     toin_backend_label = _backend_label(toin_backend)
     ccr_backend_label = _backend_label(ccr_backend)
 
@@ -271,13 +275,17 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
             feature="ccr_retrieval",
             label="CCR retrieval",
             local_state_dependency="optional",
-            state="full" if _is_remote_backend(ccr_backend) else "degraded",
+            state="degraded" if ccr_backend == "memory" else "full",
             enabled=True,
-            degradation_mode="remote-backed" if _is_remote_backend(ccr_backend) else "memory-only",
+            degradation_mode="memory-only" if ccr_backend == "memory" else "full",
             reason=(
-                f"remote CCR backend configured: {ccr_backend_label}"
-                if _is_remote_backend(ccr_backend)
-                else "CCR store is process-local and will not survive restart"
+                "CCR store is process-local and will not survive restart"
+                if ccr_backend == "memory"
+                else (
+                    "SQLite CCR store initialized; retrieval survives restart"
+                    if ccr_backend == "sqlite"
+                    else "custom CCR adapter initialized; persistence is provided by the adapter"
+                )
             ),
             backend=ccr_backend_label,
         )
@@ -285,20 +293,23 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
 
     if config.memory_enabled:
         remote_memory = config.memory_backend == "qdrant-neo4j"
+        memory_available = not config.stateless and (remote_memory or local_state_available)
         features.append(
             FeatureCapability(
                 feature="memory",
                 label="Persistent memory",
                 local_state_dependency="optional",
-                state="full" if (remote_memory or local_state_available) else "disabled",
-                enabled=remote_memory or local_state_available,
+                state="full" if memory_available else "disabled",
+                enabled=memory_available,
                 degradation_mode=(
-                    "remote-backed"
-                    if remote_memory
-                    else ("full" if local_state_available else "disabled")
+                    ("remote-backed" if remote_memory else "full")
+                    if memory_available
+                    else "disabled"
                 ),
                 reason=(
-                    "remote memory backend configured"
+                    "persistent memory is disabled by stateless mode for all backends"
+                    if config.stateless
+                    else "remote memory backend configured"
                     if remote_memory
                     else (
                         "local memory store is available"

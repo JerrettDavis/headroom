@@ -2769,17 +2769,6 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     if not config_was_provided:
         config.detached_profile = normalize_detached_profile()
 
-    # Capability policy reads HEADROOM_DETACHED_PROFILE as a fallback, so it
-    # must run after file-backed settings hydrate the environment. Otherwise an
-    # embedded ``create_app()`` silently treats a saved strict profile as the
-    # default lenient profile.
-    capability_report = build_capability_report(config)
-    enforce_detached_profile(capability_report)
-    if capability_report.detached and capability_report.profile != "silent":
-        logger.info(
-            "event=detached_capability_matrix\n%s", render_capability_matrix(capability_report)
-        )
-
     # Air-gap master switch. Propagate config.offline to the env so the
     # env-based egress predicates (telemetry, update check, license) all honor
     # it, force HF/transformers offline before any model code loads, and
@@ -2791,6 +2780,17 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         logger.warning(
             "event=proxy_offline_mode air-gap active — all outbound egress disabled "
             "(telemetry, update check, license reporter, HuggingFace downloads)"
+        )
+
+    # Capability policy reads HEADROOM_DETACHED_PROFILE as a fallback, so it
+    # must run after file-backed settings hydrate the environment. Otherwise an
+    # embedded ``create_app()`` silently treats a saved strict profile as the
+    # default lenient profile.
+    capability_report = build_capability_report(config)
+    enforce_detached_profile(capability_report)
+    if capability_report.detached and capability_report.profile != "silent":
+        logger.info(
+            "event=detached_capability_matrix\n%s", render_capability_matrix(capability_report)
         )
 
     proxy = HeadroomProxy(config)
