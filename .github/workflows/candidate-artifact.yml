@@ -1,12 +1,9 @@
 name: Immutable candidate artifact
 
+# TEMPORARY FORK VALIDATION ONLY. Do not merge this branch.
 on:
-  workflow_dispatch:
-    inputs:
-      source_sha:
-        description: "Full commit SHA reachable from authoritative main"
-        required: true
-        type: string
+  push:
+    branches: [codex/validate-candidate-3382-20260910]
 
 # This entry point can only read repository contents and workflow artifacts.
 # It has no package, release, branch, or OIDC publication authority.
@@ -14,11 +11,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: candidate-${{ inputs.source_sha }}
+  group: candidate-validation-3382-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   validate-source:
+    if: github.repository == 'JerrettDavis/headroom' && github.ref == 'refs/heads/codex/validate-candidate-3382-20260910'
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
@@ -31,29 +29,33 @@ jobs:
         id: source
         shell: bash
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: 04cdf79ab0a8423d88148ba63e960ac6b4007b9c
           PRODUCER_SHA: ${{ github.sha }}
           WORKFLOW_REF: ${{ github.ref }}
+          REVIEWED_PRODUCER: 64602a435528dca557849ba5cb18e3cc1de40cb9
         run: |
           set -euo pipefail
-          if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
-            echo "candidate workflow must be dispatched from authoritative main" >&2
+          if [ "$WORKFLOW_REF" != "refs/heads/codex/validate-candidate-3382-20260910" ]; then
+            echo "validation workflow must run only on its isolated fork branch" >&2
             exit 1
           fi
           if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "source_sha must be a lowercase full 40-character Git SHA" >&2
             exit 1
           fi
-          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          git fetch --no-tags https://github.com/headroomlabs-ai/headroom.git "+refs/heads/main:refs/remotes/validation-upstream/main"
           git cat-file -e "$SOURCE_SHA^{commit}"
-          if ! git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main; then
-            echo "source_sha is not reachable from authoritative origin/main" >&2
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/validation-upstream/main; then
+            echo "source_sha is not reachable from authoritative upstream main" >&2
             exit 1
           fi
-          if ! git merge-base --is-ancestor "$PRODUCER_SHA" refs/remotes/origin/main; then
-            echo "candidate producer is not reachable from authoritative origin/main" >&2
-            exit 1
-          fi
+          # The producer is this fork validation commit, not an upstream release.
+          # Source is in its ancestry, so all source-SHA checkouts are available
+          # from the same fork repository named truthfully in the manifest.
+          git merge-base --is-ancestor "$SOURCE_SHA" "$PRODUCER_SHA"
+          git merge-base --is-ancestor "$REVIEWED_PRODUCER" "$PRODUCER_SHA"
+          git diff --exit-code "$REVIEWED_PRODUCER" "$PRODUCER_SHA" -- \
+            .github/workflows/release-build.yml scripts/candidate_manifest.py release/contracts
           printf 'source_sha=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
   build-and-smoke:
