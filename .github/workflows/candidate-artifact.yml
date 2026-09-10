@@ -60,10 +60,9 @@ jobs:
     needs: validate-source
     permissions:
       contents: read
-    uses: ./.github/workflows/release.yml
+    uses: ./.github/workflows/release-build.yml
     with:
       source_sha: ${{ needs.validate-source.outputs.source_sha }}
-      candidate_mode: true
 
   emit-candidate:
     needs: [validate-source, build-and-smoke]
