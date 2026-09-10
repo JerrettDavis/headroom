@@ -141,7 +141,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ">=24.16.0 <25"
 
       - name: Sync version to package files
         run: |
@@ -807,7 +807,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ">=24.16.0 <25"
           registry-url: ${{ env.NPM_REGISTRY_URL }}
 
       # No artifact download required: the publish steps below pack and
@@ -899,7 +899,7 @@ jobs:
       - name: Set up Node.js for GitHub Package Registry
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ">=24.16.0 <25"
           registry-url: ${{ env.GITHUB_PACKAGES_REGISTRY_URL }}
 
       # No artifact download required: the publish-github-packages flow
