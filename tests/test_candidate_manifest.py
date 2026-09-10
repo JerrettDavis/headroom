@@ -258,6 +258,59 @@ def test_verify_rejects_unknown_schema_version(
         main()
 
 
+@pytest.mark.parametrize("unsafe", [False, True])
+def test_verify_rejects_ineligible_rollout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unsafe: bool
+) -> None:
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
+    document = json.loads(manifest.read_text())
+    document["rollout"].update(
+        unsafe_override=unsafe,
+        qualification_eligible=False,
+        qualification_ineligible_reason="unsafe_rollout_override_active",
+    )
+    manifest.write_text(json.dumps(document))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "verify",
+            "--artifact",
+            str(artifact),
+            "--manifest",
+            str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
+        ],
+    )
+    with pytest.raises(ValueError, match="qualification eligible"):
+        main()
+
+
+def test_verify_rejects_unknown_rollout_schema_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifact, manifest, runtime_payload = _create(monkeypatch, tmp_path)
+    document = json.loads(manifest.read_text())
+    document["rollout"]["schema_version"] = 999
+    manifest.write_text(json.dumps(document))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "candidate_manifest.py",
+            "verify",
+            "--artifact",
+            str(artifact),
+            "--manifest",
+            str(manifest),
+            "--runtime-payload",
+            str(runtime_payload),
+        ],
+    )
+    with pytest.raises(ValidationError, match="1 was expected"):
+        main()
+
+
 def test_create_rejects_ineligible_rollout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     artifact = tmp_path / "candidate.tar"
     artifact.write_bytes(b"candidate")

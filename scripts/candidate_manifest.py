@@ -69,8 +69,7 @@ def _repository(value: str) -> str:
     return value
 
 
-def _rollout_identity(path: Path) -> dict[str, Any]:
-    rollout = _load_json(path)
+def _validate_rollout_identity(rollout: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "schema_version",
         "policy_version",
@@ -152,7 +151,7 @@ def create(args: argparse.Namespace) -> None:
             "run_attempt": args.run_attempt,
             "commit_sha": args.producer_sha,
         },
-        "rollout": _rollout_identity(args.rollout),
+        "rollout": _validate_rollout_identity(_load_json(args.rollout)),
     }
     if args.runtime_payload:
         runtime_payload = args.runtime_payload.resolve(strict=True)
@@ -169,6 +168,7 @@ def create(args: argparse.Namespace) -> None:
 def verify(args: argparse.Namespace) -> None:
     manifest = _load_json(args.manifest)
     _validator().validate(manifest)
+    _validate_rollout_identity(manifest["rollout"])
     artifact = args.artifact.resolve(strict=True)
     expected = manifest["artifact"]
     mismatches: list[str] = []

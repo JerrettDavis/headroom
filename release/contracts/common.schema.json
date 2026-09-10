@@ -103,7 +103,7 @@
         "qualification_eligible"
       ],
       "properties": {
-        "schema_version": { "type": "integer", "minimum": 1 },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" },
         "policy_version": { "$ref": "#/$defs/nonEmptyString" },
         "channel": { "$ref": "#/$defs/rolloutChannel" },
         "registry_digest": { "$ref": "#/$defs/sha256" },
