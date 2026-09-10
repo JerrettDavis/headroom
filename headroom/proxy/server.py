@@ -790,17 +790,18 @@ class HeadroomProxy(
     CLOUDCODE_API_URL = DEFAULT_CLOUDCODE_API_URL
     VERTEX_API_URL = DEFAULT_VERTEX_API_URL
 
-    def __init__(self, config: ProxyConfig):
+    def __init__(self, config: ProxyConfig, *, capability_report: CapabilityReport | None = None):
         self.config = config
         self.config.mode = normalize_proxy_mode(self.config.mode)
-        self.capabilities: CapabilityReport | None = None
+        self.capabilities = capability_report
         # Record process-wide stateless mode so module-level persisters
         # (output-savings recorder, etc.) can skip workspace writes.
         from headroom import paths as _hr_paths
 
         _hr_paths.set_process_stateless(config.stateless)
         # Stateless: keep TOIN learning in-memory; never touch toin.json.
-        _apply_stateless_persistence(self.config)
+        if capability_report is None:
+            _apply_stateless_persistence(self.config)
         pipeline_extensions = list(config.pipeline_extensions or [])
         probe_recorder = probe_recorder_from_env()
         if probe_recorder is not None:
@@ -1373,7 +1374,10 @@ class HeadroomProxy(
         # Only activates with --learn flag; requires --memory for backend
         self.traffic_learner: TrafficLearner | None = None
         self.traffic_learning_agent_type: str = config.traffic_learning_agent_type
-        if config.traffic_learning_enabled:
+        learning_available = not config.stateless and (
+            capability_report is None or capability_report.local_state_available
+        )
+        if config.traffic_learning_enabled and learning_available:
             from headroom.memory.traffic_learner import TrafficLearner
 
             self.traffic_learner = TrafficLearner(
@@ -2793,8 +2797,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             "event=detached_capability_matrix\n%s", render_capability_matrix(capability_report)
         )
 
-    proxy = HeadroomProxy(config)
-    proxy.capabilities = capability_report
+    proxy = HeadroomProxy(config, capability_report=capability_report)
     proxy.metrics.set_feature_capabilities(capability_report.features)
 
     # cc-switch reconciler (opt-in: HEADROOM_CC_SWITCH_RECONCILE=1).

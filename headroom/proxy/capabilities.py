@@ -6,7 +6,6 @@ import os
 import tempfile
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 from headroom import paths
 from headroom.proxy.models import ProxyConfig
@@ -17,7 +16,6 @@ FeatureState = Literal["full", "degraded", "disabled"]
 
 DETACHED_PROFILE_ENV = "HEADROOM_DETACHED_PROFILE"
 _VALID_PROFILES: set[str] = {"strict", "lenient", "silent"}
-_REMOTE_BACKENDS = {"redis", "http", "https"}
 
 
 @dataclass(frozen=True)
@@ -134,24 +132,9 @@ def _probe_local_state(config: ProxyConfig) -> tuple[bool, str]:
     return True, "workspace state is writable"
 
 
-def _backend_from_env(name: str, default: str) -> str:
-    return os.environ.get(name, default).strip().lower() or default
-
-
-def _is_remote_backend(value: str) -> bool:
-    return value in _REMOTE_BACKENDS or value.startswith(("redis://", "http://", "https://"))
-
-
-def _backend_label(value: str) -> str:
-    """Return a capability-safe backend kind without URL credentials or topology."""
-
-    if "://" in value:
-        return urlsplit(value).scheme.lower() or "remote"
-    return value
-
-
 def build_capability_report(config: ProxyConfig) -> CapabilityReport:
     from headroom.cache.compression_store import get_compression_store
+    from headroom.telemetry.toin import TOINConfig, get_toin, reset_toin
 
     # Resolve the same process-wide store that request handling will use.
     paths.set_process_stateless(config.stateless)
@@ -159,10 +142,15 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
     local_state_available, local_state_reason = _probe_local_state(config)
     detached = config.stateless or not local_state_available
     workspace_dir = str(paths.workspace_dir())
-    toin_backend = _backend_from_env("HEADROOM_TOIN_BACKEND", "filesystem")
+    # Match the runtime's stateless initialization, including adapter fallback.
+    # The proxy consumes this initialized state when passed the report below.
+    if config.stateless:
+        reset_toin()
+        toin = get_toin(TOINConfig(storage_path=""))
+    else:
+        toin = get_toin()
+    toin_backend = toin.backend_kind
     ccr_backend = get_compression_store().backend_kind
-    toin_backend_label = _backend_label(toin_backend)
-    ccr_backend_label = _backend_label(ccr_backend)
 
     def local_optional(
         *,
@@ -244,31 +232,32 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
         ),
     ]
 
-    if _is_remote_backend(toin_backend):
-        features.append(
-            FeatureCapability(
-                feature="toin_tagging",
-                label="TOIN tagging",
-                local_state_dependency="optional",
-                state="full",
-                enabled=True,
-                degradation_mode="remote-backed",
-                reason=f"remote TOIN backend configured: {toin_backend_label}",
-                backend=toin_backend_label,
-            )
+    features.append(
+        FeatureCapability(
+            feature="toin_tagging",
+            label="TOIN tagging",
+            local_state_dependency="optional",
+            state="degraded"
+            if toin_backend == "memory"
+            or (toin_backend == "filesystem" and not local_state_available)
+            else "full",
+            enabled=True,
+            degradation_mode="memory-only"
+            if toin_backend == "memory"
+            or (toin_backend == "filesystem" and not local_state_available)
+            else "full",
+            reason=(
+                "TOIN observations are process-local and will not survive restart"
+                if toin_backend == "memory"
+                else local_state_reason
+                if toin_backend == "filesystem" and not local_state_available
+                else "filesystem TOIN backend initialized"
+                if toin_backend == "filesystem"
+                else "custom TOIN adapter initialized"
+            ),
+            backend=toin_backend,
         )
-    else:
-        features.append(
-            local_optional(
-                feature="toin_tagging",
-                label="TOIN tagging",
-                enabled=toin_backend != "none",
-                full_reason="filesystem TOIN backend is available",
-                degraded_mode="disabled",
-                disabled_reason="TOIN backend disabled",
-                backend=toin_backend_label,
-            )
-        )
+    )
 
     features.append(
         FeatureCapability(
@@ -287,7 +276,7 @@ def build_capability_report(config: ProxyConfig) -> CapabilityReport:
                     else "custom CCR adapter initialized; persistence is provided by the adapter"
                 )
             ),
-            backend=ccr_backend_label,
+            backend=ccr_backend,
         )
     )
 

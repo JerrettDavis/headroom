@@ -20,9 +20,11 @@ from headroom.proxy.server import create_app
 def _isolated_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from headroom import paths
     from headroom.cache import compression_store
+    from headroom.telemetry import toin
 
     monkeypatch.setattr(paths, "_PROCESS_STATELESS", False)
     monkeypatch.setattr(compression_store, "_compression_store", None)
+    monkeypatch.setattr(toin, "_toin_instance", None)
     monkeypatch.setenv("HEADROOM_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("HEADROOM_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("HEADROOM_REQUIRE_RUST_CORE", "false")
@@ -181,7 +183,7 @@ def test_capabilities_do_not_expose_backend_url_credentials(
     assert "ccr-secret" not in serialized
     assert "cache.internal" not in serialized
     assert "ccr.internal" not in serialized
-    assert features["toin_tagging"]["backend"] == "redis"
+    assert features["toin_tagging"]["backend"] == "memory"
     assert features["ccr_retrieval"]["backend"] == "memory"
 
 
@@ -338,3 +340,111 @@ def test_ccr_report_describes_existing_store_even_if_env_changes(
     feature = _ccr_feature(_minimal_config())
     assert feature["backend"] == "memory"
     assert get_compression_store() is store
+
+
+@pytest.mark.parametrize("stateless", [False, True])
+def test_unavailable_local_state_disables_runtime_learning(
+    monkeypatch: pytest.MonkeyPatch, stateless: bool
+) -> None:
+    import headroom.proxy.capabilities as capabilities_module
+
+    monkeypatch.setattr(
+        capabilities_module, "_probe_local_state", lambda config: (False, "read-only workspace")
+    )
+    app = create_app(
+        _minimal_config(
+            stateless=stateless, traffic_learning_enabled=True, detached_profile="lenient"
+        )
+    )
+    feature = next(f for f in app.state.capabilities["features"] if f["feature"] == "learn_plugins")
+    assert feature["enabled"] is False
+    assert app.state.proxy.traffic_learner is None
+
+
+@pytest.mark.parametrize("failure", ["missing", "load", "factory"])
+def test_toin_report_uses_actual_fallback_backend(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    import importlib.metadata
+
+    from headroom.telemetry.toin import get_toin
+
+    class EntryPoint:
+        name = "redis"
+
+        def load(self):
+            if failure == "load":
+                raise ImportError("adapter unavailable")
+
+            def factory(**kwargs):
+                raise OSError("backend unavailable")
+
+            return factory
+
+    monkeypatch.setenv("HEADROOM_TOIN_BACKEND", "redis")
+    monkeypatch.setattr(
+        importlib.metadata,
+        "entry_points",
+        lambda **kwargs: (
+            [EntryPoint()]
+            if kwargs.get("group") == "headroom.toin_backend" and failure != "missing"
+            else []
+        ),
+    )
+    app = create_app(_minimal_config(stateless=True))
+    feature = next(f for f in app.state.capabilities["features"] if f["feature"] == "toin_tagging")
+    assert get_toin()._backend is None
+    assert feature["backend"] == "memory"
+    assert feature["state"] == "degraded"
+    assert feature["enabled"] is True  # observations still accumulate in memory
+
+
+def test_toin_report_keeps_the_initialized_custom_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.metadata
+
+    from headroom.telemetry.toin import get_toin
+
+    class Adapter:
+        def load(self):
+            return {}
+
+        def save(self, data):
+            pass
+
+    adapter = Adapter()
+    calls = []
+
+    class EntryPoint:
+        name = "redis"
+
+        def load(self):
+            def factory(**kwargs):
+                calls.append("initialized")
+                return adapter
+
+            return factory
+
+    monkeypatch.setenv("HEADROOM_TOIN_BACKEND", "redis")
+    monkeypatch.setattr(
+        importlib.metadata,
+        "entry_points",
+        lambda **kwargs: [EntryPoint()] if kwargs.get("group") == "headroom.toin_backend" else [],
+    )
+    app = create_app(_minimal_config(stateless=True))
+    feature = next(f for f in app.state.capabilities["features"] if f["feature"] == "toin_tagging")
+    assert calls == ["initialized"]
+    assert get_toin()._backend is adapter
+    assert feature["backend"] == "custom"
+    assert feature["state"] == "full"
+
+
+def test_stateful_learning_remains_enabled_and_strict_stateless_refuses_it() -> None:
+    app = create_app(_minimal_config(traffic_learning_enabled=True))
+    assert app.state.proxy.traffic_learner is not None
+    with pytest.raises(DetachedModeError) as exc:
+        create_app(
+            _minimal_config(
+                stateless=True, traffic_learning_enabled=True, detached_profile="strict"
+            )
+        )
+    assert [f.feature for f in exc.value.report.strict_violations] == ["learn_plugins"]
