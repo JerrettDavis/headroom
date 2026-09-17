@@ -241,4 +241,3 @@ The split is complete only when:
 5. The cumulative PR 6 tree is reconciled against PR #3382 and every difference
    is documented and intentional.
 6. PR #3382 is a draft with a supersession notice linking the complete stack.
-
