@@ -9,10 +9,7 @@ from tests.unified_gateway.scenario_coverage import load_scenario_coverage
 def test_every_scenario_has_an_executable_or_explicit_external_cell() -> None:
     coverage = load_scenario_coverage()
     assert set(coverage) == {f"T{index:03d}" for index in range(1, 101)}
-    assert all(
-        cell.status in {"local_test", "external_not_run"}
-        for cell in coverage.values()
-    )
+    assert all(cell.status in {"local_test", "external_not_run"} for cell in coverage.values())
     assert all(cell.test_nodes for cell in coverage.values() if cell.status == "local_test")
 
 

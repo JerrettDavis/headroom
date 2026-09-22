@@ -383,9 +383,7 @@ def register_provider_routes(app: FastAPI, proxy: Any) -> None:
         if proxy.config.gateway is not None:
             from headroom.proxy.gateway.dispatch import dispatch_native_http
 
-            return await dispatch_native_http(
-                request, proxy, "vertex-generate", public_model=model
-            )
+            return await dispatch_native_http(request, proxy, "vertex-generate", public_model=model)
         if is_vertex_google_publisher(publisher):
             return await proxy.handle_gemini_generate_content(
                 request,
@@ -410,9 +408,7 @@ def register_provider_routes(app: FastAPI, proxy: Any) -> None:
         if proxy.config.gateway is not None:
             from headroom.proxy.gateway.dispatch import dispatch_native_http
 
-            return await dispatch_native_http(
-                request, proxy, "vertex-generate", public_model=model
-            )
+            return await dispatch_native_http(request, proxy, "vertex-generate", public_model=model)
         if is_vertex_google_publisher(publisher):
             return await proxy.handle_gemini_generate_content(
                 request,

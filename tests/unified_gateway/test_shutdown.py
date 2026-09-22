@@ -26,9 +26,7 @@ async def test_shutdown_stops_new_admission_and_releases_runtime_state() -> None
     )
 
     await runtime.shutdown()
-    result = await runtime.admission.try_reserve(
-        AdmissionRequest("local-app", estimated_cost=None)
-    )
+    result = await runtime.admission.try_reserve(AdmissionRequest("local-app", estimated_cost=None))
 
     assert result.allowed is False
     assert result.reason == "shutdown"

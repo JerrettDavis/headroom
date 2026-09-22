@@ -58,7 +58,9 @@ def start_gateway_process(tmp_path: Path) -> GatewayProcess:
         "TMP",
         "WINDIR",
     }
-    environment = {name: value for name, value in os.environ.items() if name.upper() in allowed_names}
+    environment = {
+        name: value for name, value in os.environ.items() if name.upper() in allowed_names
+    }
     environment.update(
         {
             "HOME": str(private_home),

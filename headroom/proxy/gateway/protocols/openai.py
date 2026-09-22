@@ -148,12 +148,17 @@ def _decode_content(value: object) -> tuple[ContentBlock, ...]:
                     _unsupported("remote image")
                 header, separator, data = url.partition(",")
                 media_type = header.removeprefix("data:").removesuffix(";base64")
-                if not separator or not header.endswith(";base64") or media_type not in {
-                    "image/png",
-                    "image/jpeg",
-                    "image/gif",
-                    "image/webp",
-                }:
+                if (
+                    not separator
+                    or not header.endswith(";base64")
+                    or media_type
+                    not in {
+                        "image/png",
+                        "image/jpeg",
+                        "image/gif",
+                        "image/webp",
+                    }
+                ):
                     _unsupported("image")
                 try:
                     base64.b64decode(data, validate=True)
@@ -163,9 +168,7 @@ def _decode_content(value: object) -> tuple[ContentBlock, ...]:
                         code="gateway_request_invalid",
                         message="Inline image is not valid base64",
                     ) from exc
-                blocks.append(
-                    ContentBlock(kind="image", media_type=media_type, data=data)
-                )
+                blocks.append(ContentBlock(kind="image", media_type=media_type, data=data))
                 continue
             _unsupported("content block")
         return tuple(blocks)
@@ -196,7 +199,9 @@ def _decode_tool_calls(value: object) -> tuple[ToolCall, ...]:
             ) from exc
         if not isinstance(arguments, dict):
             _unsupported("tool arguments")
-        calls.append(ToolCall(id=call["id"], name=function["name"], arguments=function["arguments"]))
+        calls.append(
+            ToolCall(id=call["id"], name=function["name"], arguments=function["arguments"])
+        )
     return tuple(calls)
 
 

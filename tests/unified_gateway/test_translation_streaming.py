@@ -104,8 +104,7 @@ def test_gateway_dispatch_uses_incremental_translated_stream(
     snapshot = snapshot.model_copy(
         update={
             "routes": tuple(
-                translated_route if route.id == anthropic.id else route
-                for route in snapshot.routes
+                translated_route if route.id == anthropic.id else route for route in snapshot.routes
             )
         }
     )

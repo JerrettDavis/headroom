@@ -34,13 +34,9 @@ def status() -> None:
 @click.option("--product-class", default="subscription", show_default=True)
 def login(provider: str, identity_kind: str, product_class: str) -> None:
     """Begin an admitted interactive flow (none are enabled in gateway v1)."""
-    decision = ProviderAdmissionCatalog().check(
-        provider, identity_kind, product_class, "inference"
-    )
+    decision = ProviderAdmissionCatalog().check(provider, identity_kind, product_class, "inference")
     if not decision.admitted:
-        raise click.ClickException(
-            f"Provider identity is not admitted: {decision.reason}"
-        )
+        raise click.ClickException(f"Provider identity is not admitted: {decision.reason}")
     raise click.ClickException(
         "Interactive login is unavailable; configure an admitted API or workload identity"
     )

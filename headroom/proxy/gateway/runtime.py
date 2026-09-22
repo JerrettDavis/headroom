@@ -45,7 +45,9 @@ class GatewayRuntime:
         self._reload_lock = asyncio.Lock()
         self._generation = self._build_generation(snapshot, 1)
         self.admission = AdmissionController(
-            budget_limit=None, max_concurrency=128, queue_limit=128,
+            budget_limit=None,
+            max_concurrency=128,
+            queue_limit=128,
             unknown_cost_policy="allow",
         )
         self.observability = GatewayObservability()
@@ -97,8 +99,11 @@ class GatewayRuntime:
     def status(self) -> RedactedGatewayStatus:
         generation = self._generation
         return RedactedGatewayStatus(
-            service="headroom", profile="gateway", generation=generation.number,
-            ready=True, route_count=len(generation.snapshot.routes),
+            service="headroom",
+            profile="gateway",
+            generation=generation.number,
+            ready=True,
+            route_count=len(generation.snapshot.routes),
             credential_count=len(generation.snapshot.credentials),
         )
 

@@ -71,9 +71,7 @@ async def test_strict_budget_rejects_unknown_estimate() -> None:
         unknown_cost_policy="block",
     )
 
-    result = await controller.try_reserve(
-        AdmissionRequest("principal-a", estimated_cost=None)
-    )
+    result = await controller.try_reserve(AdmissionRequest("principal-a", estimated_cost=None))
 
     assert result.allowed is False
     assert result.reason == "unknown_cost"

@@ -20,9 +20,7 @@ from headroom.proxy.gateway.protocols.openai import (
     _unsupported,
 )
 
-_FIELDS = frozenset(
-    {"model", "system", "messages", "max_tokens", "temperature", "stream", "tools"}
-)
+_FIELDS = frozenset({"model", "system", "messages", "max_tokens", "temperature", "stream", "tools"})
 
 
 def decode_anthropic(payload: dict[str, Any]) -> Conversation:
@@ -39,9 +37,7 @@ def decode_anthropic(payload: dict[str, Any]) -> Conversation:
         if role not in ("user", "assistant"):
             _unsupported("message role")
         content, calls, results = _message_blocks(item["content"])
-        messages.append(
-            Message(role=role, content=content, tool_calls=calls, tool_results=results)
-        )
+        messages.append(Message(role=role, content=content, tool_calls=calls, tool_results=results))
     return Conversation(
         model=payload.get("model") if isinstance(payload.get("model"), str) else None,
         system=system,
@@ -96,9 +92,7 @@ def encode_anthropic(conversation: Conversation) -> dict[str, Any]:
     if conversation.model is not None:
         result["model"] = conversation.model
     if conversation.system:
-        result["system"] = [
-            {"type": "text", "text": block.text} for block in conversation.system
-        ]
+        result["system"] = [{"type": "text", "text": block.text} for block in conversation.system]
     if conversation.max_tokens is not None:
         result["max_tokens"] = conversation.max_tokens
     if conversation.temperature is not None:
@@ -180,9 +174,7 @@ def _message_blocks(
                 ToolCall(
                     id=block["id"],
                     name=block["name"],
-                    arguments=json.dumps(
-                        block["input"], ensure_ascii=False, separators=(",", ":")
-                    ),
+                    arguments=json.dumps(block["input"], ensure_ascii=False, separators=(",", ":")),
                 )
             )
         elif block["type"] == "tool_result" and set(block) == {
@@ -190,9 +182,7 @@ def _message_blocks(
             "tool_use_id",
             "content",
         }:
-            if not isinstance(block["tool_use_id"], str) or not isinstance(
-                block["content"], str
-            ):
+            if not isinstance(block["tool_use_id"], str) or not isinstance(block["content"], str):
                 _unsupported("tool result")
             results.append(
                 ToolResult(

@@ -99,9 +99,11 @@ async def translate_sse_stream(
                             }
                         ],
                     }
-                    yield b"data: " + json.dumps(
-                        payload, ensure_ascii=False, separators=(",", ":")
-                    ).encode() + b"\n\n"
+                    yield (
+                        b"data: "
+                        + json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+                        + b"\n\n"
+                    )
             elif event.get("type") == "message_stop":
                 yield b"data: [DONE]\n\n"
     if buffer.strip():

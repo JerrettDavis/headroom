@@ -80,9 +80,11 @@ class BrowserAuthorizationTransaction:
 
     @property
     def authorization_url(self) -> str:
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(self.code_verifier.encode("ascii")).digest()
-        ).rstrip(b"=").decode("ascii")
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(self.code_verifier.encode("ascii")).digest())
+            .rstrip(b"=")
+            .decode("ascii")
+        )
         query = urlencode(
             {
                 "response_type": "code",
@@ -123,9 +125,7 @@ class BrowserAuthorizationTransaction:
         if codes is None or len(codes) != 1 or not codes[0]:
             raise OAuthValidationError("OAuth authorization code missing")
         self._consumed = True
-        return OAuthCredential(
-            account_ref=self.allowed_account, authorization_code=codes[0]
-        )
+        return OAuthCredential(account_ref=self.allowed_account, authorization_code=codes[0])
 
     @staticmethod
     def _validate_loopback_redirect(redirect_uri: str) -> None:

@@ -19,9 +19,7 @@ from headroom.proxy.gateway.admission_catalog import ProviderAdmissionCatalog
     ],
 )
 def test_unadmitted_native_provider_is_not_advertised(provider: str) -> None:
-    decision = ProviderAdmissionCatalog().check(
-        provider, "native", "subscription", "inference"
-    )
+    decision = ProviderAdmissionCatalog().check(provider, "native", "subscription", "inference")
     assert decision.admitted is False
     assert decision.public_capabilities == ()
 
@@ -40,9 +38,7 @@ def test_unadmitted_native_provider_is_not_advertised(provider: str) -> None:
 def test_only_explicit_public_api_and_workload_identities_are_admitted(
     provider: str, identity_kind: str
 ) -> None:
-    decision = ProviderAdmissionCatalog().check(
-        provider, identity_kind, "public-api", "inference"
-    )
+    decision = ProviderAdmissionCatalog().check(provider, identity_kind, "public-api", "inference")
     assert decision.admitted is True
     assert decision.public_capabilities == ("inference",)
 

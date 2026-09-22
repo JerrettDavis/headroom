@@ -40,9 +40,7 @@ EXAMPLE = (
             {
                 "model": "public-model",
                 "system": [{"type": "text", "text": "Be exact."}],
-                "messages": [
-                    {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
-                ],
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
                 "max_tokens": 64,
             },
         ),
@@ -52,9 +50,7 @@ EXAMPLE = (
             {
                 "model": "public-model",
                 "system": "Be exact.",
-                "messages": [
-                    {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
-                ],
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
                 "max_tokens": 64,
             },
             {
@@ -230,9 +226,7 @@ def test_anthropic_tool_use_and_result_translate_to_openai_messages() -> None:
             },
             {
                 "role": "user",
-                "content": [
-                    {"type": "tool_result", "tool_use_id": "call_a", "content": "3 C"}
-                ],
+                "content": [{"type": "tool_result", "tool_use_id": "call_a", "content": "3 C"}],
             },
         ],
         "tools": [
@@ -352,6 +346,7 @@ def test_response_translation_matches_literal_finish_and_usage_oracle(
         == expected
     )
 
+
 @pytest.mark.parametrize("unsupported_field", ["thinking", "mcp_servers", "unknown_extension"])
 def test_unrepresentable_fields_are_rejected(unsupported_field: str) -> None:
     source = {
@@ -404,8 +399,7 @@ def test_openai_chat_to_anthropic_route_translates_request_and_response(
     snapshot = snapshot.model_copy(
         update={
             "routes": tuple(
-                translated_route if route.id == anthropic.id else route
-                for route in snapshot.routes
+                translated_route if route.id == anthropic.id else route for route in snapshot.routes
             )
         }
     )

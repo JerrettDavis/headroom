@@ -8,14 +8,20 @@ from types import MappingProxyType
 from typing import Literal, TypeAlias
 
 IngressProtocol: TypeAlias = Literal[
-    "openai-chat", "openai-responses", "anthropic-messages", "gemini-generate",
-    "vertex-generate", "bedrock-invoke",
+    "openai-chat",
+    "openai-responses",
+    "anthropic-messages",
+    "gemini-generate",
+    "vertex-generate",
+    "bedrock-invoke",
 ]
 RouteClass: TypeAlias = Literal["public-api", "private-compatible", "cloud-workload"]
 Adapter: TypeAlias = Literal["strict-native", "routed-native", "translated"]
 CredentialSource: TypeAlias = Literal["env", "gcp-adc", "aws-chain", "none"]
 FailureOrigin: TypeAlias = Literal["none", "client", "gateway", "identity", "network", "upstream"]
-RetryReason: TypeAlias = Literal["none", "connect", "rate-limit", "unavailable", "credential-refresh"]
+RetryReason: TypeAlias = Literal[
+    "none", "connect", "rate-limit", "unavailable", "credential-refresh"
+]
 TerminalResult: TypeAlias = Literal["success", "rejected", "cancelled", "failed", "unknown"]
 GatewayDimensions: TypeAlias = tuple[str, str, str, str, str, str, str]
 
@@ -32,8 +38,12 @@ class GatewayEvent:
 
     def dimensions(self) -> GatewayDimensions:
         return (
-            self.ingress_protocol, self.route_class, self.adapter,
-            self.credential_source, self.failure_origin, self.retry_reason,
+            self.ingress_protocol,
+            self.route_class,
+            self.adapter,
+            self.credential_source,
+            self.failure_origin,
+            self.retry_reason,
             self.terminal_result,
         )
 

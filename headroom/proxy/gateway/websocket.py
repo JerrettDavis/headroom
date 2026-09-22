@@ -242,9 +242,7 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
             upstream_task = asyncio.create_task(upstream_to_client())
             tasks = {client_task, upstream_task}
             try:
-                done, _pending = await asyncio.wait(
-                    tasks, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     task.result()
             finally:

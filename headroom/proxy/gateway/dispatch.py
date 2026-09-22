@@ -272,7 +272,11 @@ async def dispatch_native_http(
             "gemini-generate": f"/v1beta/models/{route.upstream_model}:generateContent",
         }
         upstream_path = upstream_paths.get(target_protocol, request.url.path)
-        if not translated and public_model is not None and route.public_model != route.upstream_model:
+        if (
+            not translated
+            and public_model is not None
+            and route.public_model != route.upstream_model
+        ):
             upstream_path = upstream_path.replace(route.public_model, route.upstream_model, 1)
         target = route.upstream_origin.rstrip("/") + upstream_path
         safe_query = [

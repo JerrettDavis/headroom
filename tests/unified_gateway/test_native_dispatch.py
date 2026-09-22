@@ -162,9 +162,11 @@ async def test_native_sse_response_releases_first_chunk_before_completion(
             "client": ("127.0.0.1", 1234),
             "server": ("127.0.0.1", 8787),
             "app": app,
-            "state": {"gateway_principal": app.state.gateway_authenticator.authenticate(
-                {"authorization": "Bearer client-secret"}
-            )},
+            "state": {
+                "gateway_principal": app.state.gateway_authenticator.authenticate(
+                    {"authorization": "Bearer client-secret"}
+                )
+            },
         },
         receive,
     )
@@ -211,9 +213,7 @@ def test_cloud_native_routes_use_gateway_identity_and_exact_target(
         return httpx.Response(200, content=b'{"ok":true}')
 
     class Broker:
-        async def acquire(
-            self, route: Any, account_ref: str | None = None
-        ) -> CredentialLease:
+        async def acquire(self, route: Any, account_ref: str | None = None) -> CredentialLease:
             assert account_ref == route.credentials[0]
             secret: object = "vertex-token"
             if route.provider == "bedrock":
@@ -274,8 +274,7 @@ def test_openai_responses_uses_provider_key_and_preserves_entity_bytes(monkeypat
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
     app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
     request_bytes = (
-        '{ "model" : "REPLACE_WITH_ENABLED_OPENAI_MODEL", '
-        '"input" : "héllo", "unknown" : 1.00 }'
+        '{ "model" : "REPLACE_WITH_ENABLED_OPENAI_MODEL", "input" : "héllo", "unknown" : 1.00 }'
     ).encode()
 
     response = TestClient(app).post(

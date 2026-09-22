@@ -42,7 +42,9 @@ class RetryDecision:
             return False
         if failure.kind not in provider_contract.retryable_failures:
             return False
-        return failure.retry_after is None or failure.retry_after <= provider_contract.max_retry_after
+        return (
+            failure.retry_after is None or failure.retry_after <= provider_contract.max_retry_after
+        )
 
 
 class AccountRouter:

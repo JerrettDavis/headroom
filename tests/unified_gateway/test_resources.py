@@ -64,9 +64,7 @@ async def test_expired_or_deleted_binding_is_never_reused() -> None:
 
     assert await registry.expire(now=11.0) == 1
     with pytest.raises(GatewayAuthorizationError, match="not found"):
-        await registry.authorize(
-            "resp_1", principal_id="principal-a", route_id="route-a", now=11.0
-        )
+        await registry.authorize("resp_1", principal_id="principal-a", route_id="route-a", now=11.0)
 
     await registry.bind(
         ResourceBinding(
@@ -78,13 +76,9 @@ async def test_expired_or_deleted_binding_is_never_reused() -> None:
             expires_at=None,
         )
     )
-    assert await registry.delete(
-        "resp_2", principal_id="principal-a", route_id="route-a"
-    )
+    assert await registry.delete("resp_2", principal_id="principal-a", route_id="route-a")
     with pytest.raises(GatewayAuthorizationError, match="not found"):
-        await registry.authorize(
-            "resp_2", principal_id="principal-a", route_id="route-a", now=11.0
-        )
+        await registry.authorize("resp_2", principal_id="principal-a", route_id="route-a", now=11.0)
 
 
 @pytest.mark.asyncio
@@ -113,9 +107,7 @@ async def test_registry_capacity_fails_closed_without_evicting_live_owners() -> 
         )
 
     assert (
-        await registry.authorize(
-            "resp_1", principal_id="principal-a", route_id="route-a", now=0.0
-        )
+        await registry.authorize("resp_1", principal_id="principal-a", route_id="route-a", now=0.0)
         == first
     )
 
@@ -187,7 +179,10 @@ def test_cross_principal_response_lookup_never_reaches_upstream(
     assert denied_continuation.status_code == 404
     assert owner.status_code == 200
     assert len(upstream_requests) == 2
-    assert all(request.headers["authorization"] == "Bearer provider-secret" for request in upstream_requests)
+    assert all(
+        request.headers["authorization"] == "Bearer provider-secret"
+        for request in upstream_requests
+    )
 
 
 def test_streamed_response_id_is_bound_before_later_lookup(

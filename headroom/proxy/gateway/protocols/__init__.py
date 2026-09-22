@@ -106,8 +106,10 @@ def translate_response(
             _unsupported_response()
         gemini_text_parts: list[str] = []
         for part in parts:
-            if not isinstance(part, dict) or set(part) != {"text"} or not isinstance(
-                part["text"], str
+            if (
+                not isinstance(part, dict)
+                or set(part) != {"text"}
+                or not isinstance(part["text"], str)
             ):
                 _unsupported_response()
             gemini_text_parts.append(part["text"])
@@ -115,9 +117,7 @@ def translate_response(
         if raw_finish is not None and not isinstance(raw_finish, str):
             _unsupported_response()
         finish = (
-            None
-            if raw_finish is None
-            else {"STOP": "stop", "MAX_TOKENS": "length"}.get(raw_finish)
+            None if raw_finish is None else {"STOP": "stop", "MAX_TOKENS": "length"}.get(raw_finish)
         )
         if raw_finish is not None and finish is None:
             _unsupported_response()
