@@ -28,6 +28,11 @@ class ResourceRegistry:
         self._bindings: dict[str, ResourceBinding] = {}
         self._lock = asyncio.Lock()
 
+    async def clear(self) -> None:
+        """Release all gateway-owned metadata during shutdown."""
+        async with self._lock:
+            self._bindings.clear()
+
     async def bind(self, binding: ResourceBinding) -> None:
         async with self._lock:
             existing = self._bindings.get(binding.provider_id)

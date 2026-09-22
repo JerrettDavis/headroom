@@ -3144,6 +3144,12 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             proxy._background_compression_executor.shutdown(wait=False)
             if proxy.code_graph_watcher:
                 proxy.code_graph_watcher.stop()
+            if config.gateway is not None:
+                await _timed(
+                    app.state.gateway_runtime.shutdown(),
+                    label="gateway_runtime.shutdown",
+                    timeout=5.0,
+                )
             await _timed(proxy.shutdown(), label="proxy.shutdown", timeout=5.0)
             shutdown_headroom_tracing()
             shutdown_otel_metrics()
@@ -3155,14 +3161,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     if config.gateway is not None:
-        from headroom.proxy.gateway.credentials import CredentialBroker
         from headroom.proxy.gateway.middleware import install_gateway_auth_middleware
 
         install_gateway_auth_middleware(app, config.gateway, os.environ)
-        app.state.gateway_credential_broker = CredentialBroker.from_snapshot(
-            config.gateway,
-            environ=os.environ,
-        )
     app.add_middleware(WebSocketProjectPrefixMiddleware)
     loop_health_state: LoopHealthState = {
         "status": "healthy",
@@ -3858,6 +3859,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
     @app.get("/readyz")
     async def readyz():
+        if config.gateway is not None:
+            runtime = app.state.gateway_runtime
+            return JSONResponse(status_code=200, content=runtime.status().as_dict())
         await _check_upstream()
         payload = _health_payload(include_config=False)
         return JSONResponse(status_code=200 if payload["ready"] else 503, content=payload)

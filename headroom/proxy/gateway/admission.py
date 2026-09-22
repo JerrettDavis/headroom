@@ -90,6 +90,7 @@ class AdmissionController:
         self._committed_cost = 0.0
         self._waiting = 0
         self._condition = asyncio.Condition()
+        self._shutdown = False
 
     @property
     def active_count(self) -> int:
@@ -101,6 +102,8 @@ class AdmissionController:
 
     async def try_reserve(self, request: AdmissionRequest) -> AdmissionResult:
         async with self._condition:
+            if self._shutdown:
+                return AdmissionResult(False, "shutdown", None)
             reason = self._denial_reason(request)
             if reason is not None:
                 return AdmissionResult(False, reason, None)
@@ -131,7 +134,17 @@ class AdmissionController:
             finally:
                 self._waiting -= 1
 
+    async def shutdown(self) -> None:
+        """Reject new work, wake queued callers, and release reservations."""
+        async with self._condition:
+            self._shutdown = True
+            self._active.clear()
+            self._reserved_cost = 0.0
+            self._condition.notify_all()
+
     def _denial_reason(self, request: AdmissionRequest) -> str | None:
+        if self._shutdown:
+            return "shutdown"
         if request.estimated_cost is None and self._unknown_cost_policy == "block":
             return "unknown_cost"
         if len(self._active) >= self._max_concurrency:
@@ -170,7 +183,13 @@ class AdmissionController:
     @staticmethod
     def _raise_denied(reason: str | None) -> NoReturn:
         raise GatewayAuthorizationError(
-            status_code=429 if reason in {"concurrency", "queue_full", "queue_timeout"} else 403,
+            status_code=(
+                429
+                if reason in {"concurrency", "queue_full", "queue_timeout"}
+                else 503
+                if reason == "shutdown"
+                else 403
+            ),
             code=f"gateway_admission_{reason or 'denied'}",
             message=f"Gateway admission denied: {reason or 'unknown'}",
         )
