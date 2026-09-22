@@ -3155,9 +3155,14 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     if config.gateway is not None:
+        from headroom.proxy.gateway.credentials import CredentialBroker
         from headroom.proxy.gateway.middleware import install_gateway_auth_middleware
 
         install_gateway_auth_middleware(app, config.gateway, os.environ)
+        app.state.gateway_credential_broker = CredentialBroker.from_snapshot(
+            config.gateway,
+            environ=os.environ,
+        )
     app.add_middleware(WebSocketProjectPrefixMiddleware)
     loop_health_state: LoopHealthState = {
         "status": "healthy",

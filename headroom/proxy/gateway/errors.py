@@ -21,3 +21,11 @@ class GatewayAuthError(GatewayPublicError):
 
 class GatewayAuthorizationError(GatewayPublicError):
     """Authenticated caller lacks the requested scope, route, or capability."""
+
+
+class GatewayCredentialUnavailable(GatewayPublicError):
+    """A configured credential source cannot currently issue a lease."""
+
+
+class GatewayEgressDenied(GatewayPublicError):
+    """The final upstream destination is outside a credential's audience."""
