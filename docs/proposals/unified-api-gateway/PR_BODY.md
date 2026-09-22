@@ -8,9 +8,9 @@ admission.
 ## Local qualification
 
 - Base: `94206e265203acfd72a3b939e9a964e29175ad50`
-- Implementation source: `5968b2739`
+- Qualified source: `e45c97fd5`
 - Wheel: `headroom_ai-0.38.0-cp310-abi3-win_amd64.whl`
-- SHA-256: `c9060f9c25ecea381c3fadfda1903783b8be8475c906e1552abfedac5b0254a3`
+- SHA-256: `f9982fd52df59f03a1f376b6db038d1adf928ed1df74038b132cb43aa3ae02eb`
 - Gateway suite: 134 passed
 - Ruff check/format, gateway mypy, Cargo fmt/tests: passed
 - Exact installed-wheel smoke: passed

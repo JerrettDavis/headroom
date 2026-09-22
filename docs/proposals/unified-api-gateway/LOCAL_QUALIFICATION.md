@@ -4,10 +4,10 @@ Status: draft, local evidence only. No paid or live-provider request was run.
 
 ## Qualified source and artifact
 
-- Implementation source commit: `5968b2739`
+- Qualified source commit: `e45c97fd5`
 - Base commit: `94206e265203acfd72a3b939e9a964e29175ad50`
 - Wheel: `headroom_ai-0.38.0-cp310-abi3-win_amd64.whl`
-- Wheel SHA-256: `c9060f9c25ecea381c3fadfda1903783b8be8475c906e1552abfedac5b0254a3`
+- Wheel SHA-256: `f9982fd52df59f03a1f376b6db038d1adf928ed1df74038b132cb43aa3ae02eb`
 - Platform: Windows amd64, CPython 3.13; wheel ABI is CPython 3.10+ abi3
 
 ## Evidence
