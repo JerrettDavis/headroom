@@ -1,0 +1,448 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:headroom:proposal:gateway-config:1",
+  "title": "Proposed local native gateway configuration — first-slice subset",
+  "description": "A proposal contract, not a runtime schema shipped by Headroom. Native subscription auth, translation, pooling, remote operation and optimization need later explicit contract extensions. No secret values are stored here.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "const": "gateway"
+        },
+        "engine": {
+          "const": "python"
+        },
+        "bind": {
+          "const": "127.0.0.1"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "workers": {
+          "const": 1
+        },
+        "remote_enabled": {
+          "const": false
+        },
+        "stateless": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "profile",
+        "engine",
+        "bind",
+        "port",
+        "workers",
+        "remote_enabled",
+        "stateless"
+      ]
+    },
+    "transforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "off"
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "beacon": {
+          "const": false
+        },
+        "payload_logging": {
+          "const": false
+        },
+        "metrics": {
+          "enum": [
+            "off",
+            "local"
+          ]
+        }
+      },
+      "required": [
+        "beacon",
+        "payload_logging",
+        "metrics"
+      ]
+    },
+    "client_auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "const": true
+        },
+        "principals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              },
+              "secret_ref": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^env:[A-Z][A-Z0-9_]*$"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "inference",
+                    "models"
+                  ]
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "routes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "id",
+              "secret_ref",
+              "scopes",
+              "routes"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "required",
+        "principals"
+      ]
+    },
+    "credentials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "provider": {
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini",
+              "vertex",
+              "bedrock",
+              "compatible"
+            ]
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "env"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Z][A-Z0-9_]*$"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ref"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "gcp-adc"
+                  },
+                  "project": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "project"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "aws-chain"
+                  },
+                  "region": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "region"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            ]
+          },
+          "refresh_owner": {
+            "enum": [
+              "none",
+              "sdk"
+            ]
+          },
+          "allowed_origins": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^https://"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "allowed_path_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^/"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "source",
+          "refresh_owner",
+          "allowed_origins",
+          "allowed_path_prefixes",
+          "enabled"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "public_model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "upstream_model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider": {
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini",
+              "vertex",
+              "bedrock",
+              "compatible"
+            ]
+          },
+          "upstream_origin": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^https://"
+          },
+          "upstream_path_prefix": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "ingress_protocols": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "openai-chat",
+                "openai-responses",
+                "anthropic-messages",
+                "gemini-generate",
+                "vertex-generate",
+                "bedrock-invoke"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "native_protocols": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "openai-chat",
+                "openai-responses",
+                "anthropic-messages",
+                "gemini-generate",
+                "vertex-generate",
+                "bedrock-invoke"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "translation": {
+            "const": "disabled"
+          },
+          "body_contract": {
+            "enum": [
+              "strict-native",
+              "routed-native"
+            ]
+          },
+          "private_network": {
+            "type": "boolean"
+          },
+          "retry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "max_attempts": {
+                "const": 1
+              },
+              "ambiguous_commit": {
+                "const": "never"
+              },
+              "after_output": {
+                "const": "never"
+              }
+            },
+            "required": [
+              "max_attempts",
+              "ambiguous_commit",
+              "after_output"
+            ]
+          },
+          "billing": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "allow_paid_fallback": {
+                "const": false
+              }
+            },
+            "required": [
+              "allow_paid_fallback"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "public_model",
+          "upstream_model",
+          "provider",
+          "upstream_origin",
+          "upstream_path_prefix",
+          "credentials",
+          "ingress_protocols",
+          "native_protocols",
+          "translation",
+          "body_contract",
+          "private_network",
+          "retry",
+          "billing"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ca_bundle": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": []
+    }
+  },
+  "required": [
+    "version",
+    "runtime",
+    "transforms",
+    "privacy",
+    "client_auth",
+    "credentials",
+    "routes"
+  ]
+}
+
