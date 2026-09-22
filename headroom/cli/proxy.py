@@ -21,20 +21,17 @@ from headroom.proxy.modes import PROXY_MODE_CACHE, normalize_proxy_mode
 from .main import main
 
 
-def ensure_proxy_dependencies() -> None:
+def ensure_proxy_dependencies(*, gateway: bool = False) -> None:
     """Verify optional proxy extras are installed before starting or wrapping."""
     required_modules: list[str] = [
         "fastapi",
         "uvicorn",
         "httpx",
         "openai",
-        "mcp",
-        "magika",
-        "zstandard",
         "websockets",
-        "onnxruntime",
-        "transformers",
     ]
+    if not gateway:
+        required_modules.extend(["mcp", "magika", "zstandard", "onnxruntime", "transformers"])
     if sys.implementation.name != "pypy":
         required_modules.append("orjson")
 
@@ -1147,7 +1144,7 @@ def proxy(
         OPENAI_BASE_URL=http://localhost:8787/v1 your-app
     """
     _reexec_with_malloc_tuning()
-    ensure_proxy_dependencies()
+    ensure_proxy_dependencies(gateway=gateway)
 
     if (gateway or check_config) and gateway_config is None:
         raise click.UsageError("--gateway-config is required with --gateway or --check-config")

@@ -28,7 +28,7 @@ def test_proxy_help_advertises_gateway_profile() -> None:
 
 def test_check_config_exits_before_server_start(monkeypatch) -> None:
     monkeypatch.setattr("headroom.cli.proxy._reexec_with_malloc_tuning", lambda: None)
-    monkeypatch.setattr("headroom.cli.proxy.ensure_proxy_dependencies", lambda: None)
+    monkeypatch.setattr("headroom.cli.proxy.ensure_proxy_dependencies", lambda **_kwargs: None)
     monkeypatch.setattr(
         "headroom.proxy.server.run_server",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("server started")),
@@ -54,7 +54,7 @@ def test_gateway_requires_config() -> None:
 @pytest.mark.parametrize("flag", ["--memory", "--code-graph", "--lossless"])
 def test_gateway_rejects_transforming_flags(monkeypatch, flag: str) -> None:
     monkeypatch.setattr("headroom.cli.proxy._reexec_with_malloc_tuning", lambda: None)
-    monkeypatch.setattr("headroom.cli.proxy.ensure_proxy_dependencies", lambda: None)
+    monkeypatch.setattr("headroom.cli.proxy.ensure_proxy_dependencies", lambda **_kwargs: None)
 
     result = CliRunner().invoke(
         proxy,
