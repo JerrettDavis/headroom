@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -188,12 +188,12 @@ class GatewayConfigSnapshot(FrozenModel):
     @classmethod
     def load(cls, path: Path) -> GatewayConfigSnapshot:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return cls.model_validate(raw)
+        return cast("GatewayConfigSnapshot", cls.model_validate(raw))
 
     def redacted_dict(self) -> dict[str, object]:
         # Version 1 stores references only. Credential values are deliberately not
         # accepted by any model, so a regular dump is already secret-free.
-        return self.model_dump(mode="json")
+        return cast("dict[str, object]", self.model_dump(mode="json"))
 
     @model_validator(mode="after")
     def validate_references(self) -> GatewayConfigSnapshot:
