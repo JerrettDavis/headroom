@@ -2796,22 +2796,49 @@ class WebSocketAuthMiddleware:
     logs and browser history.
     """
 
-    def __init__(self, app: Any, *, proxy_token: str | None = None) -> None:
+    def __init__(
+        self,
+        app: Any,
+        *,
+        proxy_token: str | None = None,
+        gateway_authenticator: Any | None = None,
+    ) -> None:
         self.app = app
         self.proxy_token = proxy_token
+        self.gateway_authenticator = gateway_authenticator
         # Pre-encoded for constant-time comparison, mirroring the HTTP gate:
         # compare_digest on str raises TypeError for non-ASCII input, which
         # would turn a rejected handshake into a 500.
         self.token_bytes = proxy_token.encode("utf-8") if proxy_token else b""
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] != "websocket" or not self.proxy_token:
+        if scope["type"] != "websocket" or (
+            not self.proxy_token and self.gateway_authenticator is None
+        ):
             await self.app(scope, receive, send)
             return
 
         client = scope.get("client")
         client_host = client[0] if client else None
-        if is_loopback_host(client_host):
+        if self.gateway_authenticator is None and is_loopback_host(client_host):
+            await self.app(scope, receive, send)
+            return
+
+        if self.gateway_authenticator is not None:
+            from starlette.datastructures import Headers as StarletteHeaders
+
+            from headroom.proxy.gateway.auth import validate_gateway_browser_request
+            from headroom.proxy.gateway.errors import GatewayPublicError
+
+            headers = StarletteHeaders(scope=scope)
+            try:
+                validate_gateway_browser_request(headers)
+                scope["gateway_principal"] = self.gateway_authenticator.authenticate(headers)
+            except GatewayPublicError:
+                message = await receive()
+                if message["type"] == "websocket.connect":
+                    await send({"type": "websocket.close", "code": 1008})
+                return
             await self.app(scope, receive, send)
             return
 
@@ -3127,6 +3154,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+    if config.gateway is not None:
+        from headroom.proxy.gateway.middleware import install_gateway_auth_middleware
+
+        install_gateway_auth_middleware(app, config.gateway, os.environ)
     app.add_middleware(WebSocketProjectPrefixMiddleware)
     loop_health_state: LoopHealthState = {
         "status": "healthy",
@@ -3782,7 +3813,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     # scope), so the same token rule is applied to the `websocket` scope here.
     # Added after it, which makes it the outermost layer — an unauthenticated
     # handshake is refused before any project-prefix or routing work happens.
-    app.add_middleware(WebSocketAuthMiddleware, proxy_token=_proxy_token)
+    app.add_middleware(
+        WebSocketAuthMiddleware,
+        proxy_token=_proxy_token,
+        gateway_authenticator=getattr(app.state, "gateway_authenticator", None),
+    )
 
     # Third-party proxy extensions (Enterprise, custom plugins). Discovered via
     # the `headroom.proxy_extension` entry-point group, but **opt-in only**:
