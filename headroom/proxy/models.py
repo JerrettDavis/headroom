@@ -137,6 +137,9 @@ class RateLimitState:
 class ProxyConfig:
     """Proxy configuration."""
 
+    # Immutable unified-gateway snapshot. ``None`` preserves every legacy path.
+    gateway: Any | None = None
+
     # Server
     host: str = "127.0.0.1"
     port: int = 8787
@@ -546,6 +549,11 @@ class ProxyConfig:
     worker_processes: int = 1
 
     def __post_init__(self, smart_routing: bool | None = None) -> None:
+        if self.gateway is not None:
+            from headroom.proxy.gateway.config import gateway_proxy_overrides
+
+            for field_name, value in gateway_proxy_overrides(self.gateway).items():
+                setattr(self, field_name, value)
         if self.rollout is None:
             self.rollout = resolve_rollout()
         # ``read_maturation`` remains a concrete, already-resolved runtime
