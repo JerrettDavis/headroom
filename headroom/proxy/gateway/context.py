@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from headroom.proxy.gateway.config import Protocol, RouteConfig
+
+if TYPE_CHECKING:
+    from headroom.proxy.gateway.routing import AccountSelection
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,3 +25,4 @@ class GatewayRequestContext:
     ingress_protocol: Protocol
     request_id: str
     snapshot_generation: int = 1
+    account_selection: AccountSelection | None = None

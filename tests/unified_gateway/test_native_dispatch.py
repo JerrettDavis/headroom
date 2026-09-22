@@ -211,7 +211,10 @@ def test_cloud_native_routes_use_gateway_identity_and_exact_target(
         return httpx.Response(200, content=b'{"ok":true}')
 
     class Broker:
-        async def acquire(self, route: Any) -> CredentialLease:
+        async def acquire(
+            self, route: Any, account_ref: str | None = None
+        ) -> CredentialLease:
+            assert account_ref == route.credentials[0]
             secret: object = "vertex-token"
             if route.provider == "bedrock":
                 secret = type(

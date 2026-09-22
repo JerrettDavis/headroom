@@ -14,6 +14,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
+from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
 from headroom.proxy.gateway.config import Protocol
 from headroom.proxy.gateway.context import GatewayRequestContext
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
@@ -145,6 +146,22 @@ async def _bind_response_stream(
         yield chunk
 
 
+async def _finalize_stream(
+    chunks: AsyncIterator[bytes],
+    reservation: AdmissionReservation,
+) -> AsyncIterator[bytes]:
+    completed = False
+    try:
+        async for chunk in chunks:
+            yield chunk
+        completed = True
+    finally:
+        if completed:
+            await reservation.finalize(actual_cost=None)
+        else:
+            await reservation.release()
+
+
 def rewrite_routed_native_model(
     body: bytes,
     *,
@@ -182,6 +199,8 @@ async def dispatch_native_http(
 ) -> Response:
     """Authorize, lease, and forward one native HTTP entity without optimization."""
 
+    reservation: AdmissionReservation | None = None
+    handed_off = False
     try:
         body = await request.body()
         payload = json.loads(body)
@@ -271,12 +290,18 @@ async def dispatch_native_http(
                 declared_contract=route.body_contract,
             )
             outbound_body = plan.body
-        if resource_binding is None:
-            lease = await request.app.state.gateway_credential_broker.acquire(route)
-        else:
-            lease = await request.app.state.gateway_credential_broker.acquire(
-                route, account_ref=resource_binding.account_ref
-            )
+        reservation = await request.app.state.gateway_admission.reserve(
+            AdmissionRequest(principal.id, estimated_cost=None)
+        )
+        selection = request.app.state.gateway_account_router.select(
+            route,
+            principal,
+            resource_binding=resource_binding,
+        )
+        lease = await request.app.state.gateway_credential_broker.acquire(
+            route,
+            account_ref=selection.account_ref,
+        )
         client_headers = {
             name: value
             for name, value in request.headers.items()
@@ -294,6 +319,7 @@ async def dispatch_native_http(
             route=route,
             ingress_protocol=protocol,
             request_id=request.headers.get("x-request-id", ""),
+            account_selection=selection,
         )
         if proxy.http_client is None:
             raise RuntimeError("gateway HTTP transport is not initialized")
@@ -316,12 +342,16 @@ async def dispatch_native_http(
         if translated and translated_stream:
             from headroom.proxy.gateway.protocols.events import translate_sse_stream
 
+            handed_off = True
             return StreamingResponse(
-                translate_sse_stream(
-                    target_protocol,
-                    protocol,
-                    _iter_upstream_bytes(upstream),
-                    public_model=route.public_model,
+                _finalize_stream(
+                    translate_sse_stream(
+                        target_protocol,
+                        protocol,
+                        _iter_upstream_bytes(upstream),
+                        public_model=route.public_model,
+                    ),
+                    reservation,
                 ),
                 status_code=upstream.status_code,
                 headers=response_headers,
@@ -346,6 +376,7 @@ async def dispatch_native_http(
                 public_model=route.public_model,
             )
             await upstream.aclose()
+            await reservation.finalize(actual_cost=None)
             return JSONResponse(
                 translated_response,
                 status_code=upstream.status_code,
@@ -373,6 +404,7 @@ async def dispatch_native_http(
                         )
                     )
             await upstream.aclose()
+            await reservation.finalize(actual_cost=None)
             return Response(
                 content=upstream_body,
                 status_code=upstream.status_code,
@@ -388,8 +420,9 @@ async def dispatch_native_http(
                 route_id=route.id,
                 account_ref=lease.account_ref,
             )
+        handed_off = True
         return StreamingResponse(
-            response_chunks,
+            _finalize_stream(response_chunks, reservation),
             status_code=upstream.status_code,
             headers=response_headers,
             media_type=None,
@@ -406,6 +439,9 @@ async def dispatch_native_http(
                 }
             },
         )
+    finally:
+        if reservation is not None and not handed_off:
+            await reservation.release()
 
 
 def gateway_model_catalog(request: Request) -> JSONResponse:
@@ -438,6 +474,7 @@ async def dispatch_stateful_response_http(
 ) -> Response:
     """Authorize an existing Responses resource before any credential or I/O."""
 
+    reservation: AdmissionReservation | None = None
     try:
         response_id = sub_path.split("/", 1)[0]
         principal = request.state.gateway_principal
@@ -461,7 +498,18 @@ async def dispatch_stateful_response_http(
                 code="gateway_resource_not_found",
                 message="Stateful resource not found",
             )
-        lease = await request.app.state.gateway_credential_broker.acquire(route)
+        reservation = await request.app.state.gateway_admission.reserve(
+            AdmissionRequest(principal.id, estimated_cost=None)
+        )
+        selection = request.app.state.gateway_account_router.select(
+            route,
+            principal,
+            resource_binding=binding,
+        )
+        lease = await request.app.state.gateway_credential_broker.acquire(
+            route,
+            account_ref=selection.account_ref,
+        )
         target = route.upstream_origin.rstrip("/") + request.url.path
         client_headers = {
             name: value
@@ -497,6 +545,7 @@ async def dispatch_stateful_response_http(
                 principal_id=principal.id,
                 route_id=route.id,
             )
+        await reservation.finalize(actual_cost=None)
         return Response(
             content=upstream_body,
             status_code=upstream.status_code,
@@ -514,3 +563,6 @@ async def dispatch_stateful_response_http(
                 }
             },
         )
+    finally:
+        if reservation is not None:
+            await reservation.release()

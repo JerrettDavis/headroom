@@ -416,9 +416,9 @@ def test_openai_chat_to_anthropic_route_translates_request_and_response(
     class CountingBroker:
         acquisitions = 0
 
-        async def acquire(self, route):
+        async def acquire(self, route, account_ref=None):
             self.acquisitions += 1
-            return await real_broker.acquire(route)
+            return await real_broker.acquire(route, account_ref=account_ref)
 
     broker = CountingBroker()
     app.state.gateway_credential_broker = broker

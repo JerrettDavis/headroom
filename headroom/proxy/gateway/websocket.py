@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
 from headroom.proxy.gateway.auth import GatewayAuthorizer
 from headroom.proxy.gateway.context import GatewayPrincipal
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
@@ -78,6 +79,7 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
         await websocket.close(code=1008, reason="gateway authentication required")
         return
     await websocket.accept()
+    reservation: AdmissionReservation | None = None
     try:
         first_frame = await websocket.receive_text()
         route, first_payload = authorize_response_create_frame(
@@ -100,11 +102,18 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                 route_id=route.id,
                 now=time.time(),
             )
+        reservation = await websocket.app.state.gateway_admission.reserve(
+            AdmissionRequest(principal.id, estimated_cost=None)
+        )
+        selection = websocket.app.state.gateway_account_router.select(
+            route,
+            principal,
+            resource_binding=binding,
+        )
         broker = websocket.app.state.gateway_credential_broker
-        lease = (
-            await broker.acquire(route)
-            if binding is None
-            else await broker.acquire(route, account_ref=binding.account_ref)
+        lease = await broker.acquire(
+            route,
+            account_ref=selection.account_ref,
         )
         https_target = route.upstream_origin.rstrip("/") + "/v1/responses"
         headers = build_managed_upstream_headers(
@@ -128,6 +137,7 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
             await upstream.send(first_frame)
 
             async def client_to_upstream() -> None:
+                nonlocal reservation
                 while True:
                     frame = await websocket.receive_text()
                     try:
@@ -145,6 +155,12 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                             websocket.app.state.gateway_authorizer,
                             expected_route_id=route.id,
                         )
+                        if reservation is not None:
+                            raise GatewayAuthorizationError(
+                                status_code=409,
+                                code="gateway_generation_in_progress",
+                                message="A WebSocket generation is already in progress",
+                            )
                         previous_id = turn_payload.get("previous_response_id")
                         if previous_id is not None:
                             if not isinstance(previous_id, str):
@@ -165,6 +181,9 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                                     code="gateway_websocket_affinity",
                                     message="Stateful resource account does not match session affinity",
                                 )
+                        reservation = await websocket.app.state.gateway_admission.reserve(
+                            AdmissionRequest(principal.id, estimated_cost=None)
+                        )
                     elif not isinstance(parsed, dict) or parsed.get("type") != "response.cancel":
                         raise GatewayAuthorizationError(
                             status_code=400,
@@ -174,6 +193,7 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                     await upstream.send(frame)
 
             async def upstream_to_client() -> None:
+                nonlocal reservation
                 async for frame in upstream:
                     if isinstance(frame, bytes):
                         if len(frame) > _MAX_FRAME_BYTES:
@@ -208,6 +228,14 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                                     expires_at=None,
                                 )
                             )
+                        if (
+                            isinstance(event, dict)
+                            and event.get("type")
+                            in {"response.completed", "response.failed", "response.cancelled"}
+                            and reservation is not None
+                        ):
+                            await reservation.finalize(actual_cost=None)
+                            reservation = None
                     await websocket.send_text(frame)
 
             client_task = asyncio.create_task(client_to_upstream())
@@ -232,3 +260,6 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                 {"type": "error", "error": {"code": exc.code, "message": exc.message}}
             )
             await websocket.close(code=1008, reason=exc.code)
+    finally:
+        if reservation is not None:
+            await reservation.release()
