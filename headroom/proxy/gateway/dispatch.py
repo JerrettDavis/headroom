@@ -155,14 +155,38 @@ async def dispatch_native_http(
             protocol=protocol,
             public_model=requested_model,
         )
-        lease = await request.app.state.gateway_credential_broker.acquire(route)
-        upstream_path = request.url.path
-        if public_model is not None and route.public_model != route.upstream_model:
-            upstream_path = upstream_path.replace(
-                route.public_model,
-                route.upstream_model,
-                1,
-            )
+        target_protocol = protocol
+        translated = protocol not in route.native_protocols
+        translated_stream = False
+        if translated:
+            if route.translation != "qualified" or len(route.native_protocols) != 1:
+                raise GatewayAuthorizationError(
+                    status_code=400,
+                    code="gateway_unsupported_capability",
+                    message="Route does not qualify this protocol translation",
+                )
+            target_protocol = route.native_protocols[0]
+            from headroom.proxy.gateway.protocols import translate
+
+            translated_payload = translate(protocol, target_protocol, payload)
+            translated_stream = translated_payload.get("stream") is True
+            if target_protocol in ("openai-chat", "anthropic-messages"):
+                translated_payload["model"] = route.upstream_model
+            outbound_body = json.dumps(
+                translated_payload, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+        else:
+            outbound_body = body
+
+        upstream_paths = {
+            "openai-chat": "/v1/chat/completions",
+            "openai-responses": "/v1/responses",
+            "anthropic-messages": "/v1/messages",
+            "gemini-generate": f"/v1beta/models/{route.upstream_model}:generateContent",
+        }
+        upstream_path = upstream_paths.get(target_protocol, request.url.path)
+        if not translated and public_model is not None and route.public_model != route.upstream_model:
+            upstream_path = upstream_path.replace(route.public_model, route.upstream_model, 1)
         target = route.upstream_origin.rstrip("/") + upstream_path
         safe_query = [
             (name, value)
@@ -171,8 +195,7 @@ async def dispatch_native_http(
         ]
         if safe_query:
             target += "?" + urlencode(safe_query)
-        outbound_body = body
-        if public_model is None:
+        if not translated and public_model is None:
             plan = GatewayDispatcher.resolve_body(
                 body,
                 public_model=route.public_model,
@@ -180,6 +203,7 @@ async def dispatch_native_http(
                 declared_contract=route.body_contract,
             )
             outbound_body = plan.body
+        lease = await request.app.state.gateway_credential_broker.acquire(route)
         client_headers = {
             name: value
             for name, value in request.headers.items()
@@ -216,6 +240,44 @@ async def dispatch_native_http(
             for name, value in upstream.headers.items()
             if name.lower() not in _RESPONSE_HEADER_DENYLIST
         }
+        if translated and translated_stream:
+            from headroom.proxy.gateway.protocols.events import translate_sse_stream
+
+            return StreamingResponse(
+                translate_sse_stream(
+                    target_protocol,
+                    protocol,
+                    _iter_upstream_bytes(upstream),
+                    public_model=route.public_model,
+                ),
+                status_code=upstream.status_code,
+                headers=response_headers,
+                media_type="text/event-stream",
+                background=BackgroundTask(upstream.aclose),
+            )
+        if translated:
+            from headroom.proxy.gateway.protocols import translate_response
+
+            upstream_body = await upstream.aread()
+            upstream_payload = json.loads(upstream_body)
+            if not isinstance(upstream_payload, dict):
+                raise GatewayAuthorizationError(
+                    status_code=502,
+                    code="gateway_upstream_invalid",
+                    message="Upstream response must be a JSON object",
+                )
+            translated_response = translate_response(
+                target_protocol,
+                protocol,
+                upstream_payload,
+                public_model=route.public_model,
+            )
+            await upstream.aclose()
+            return JSONResponse(
+                translated_response,
+                status_code=upstream.status_code,
+                headers=response_headers,
+            )
         return StreamingResponse(
             _iter_upstream_bytes(upstream),
             status_code=upstream.status_code,

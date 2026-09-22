@@ -11,6 +11,19 @@ from headroom.proxy.gateway.config import GatewayConfigSnapshot
 PROPOSAL = Path(__file__).parents[2] / "docs" / "proposals" / "unified-api-gateway"
 
 
+def test_non_native_ingress_requires_a_qualified_translation_pair() -> None:
+    raw = _example()
+    anthropic = raw["routes"][1]  # type: ignore[index]
+    anthropic["ingress_protocols"] = ["openai-chat", "anthropic-messages"]
+
+    with pytest.raises(ValidationError, match="translation"):
+        GatewayConfigSnapshot.model_validate(raw)
+
+    anthropic["translation"] = "qualified"
+    snapshot = GatewayConfigSnapshot.model_validate(raw)
+    assert snapshot.routes[1].translation == "qualified"
+
+
 def _example() -> dict[str, object]:
     return json.loads((PROPOSAL / "examples" / "gateway.api-keys.json").read_text())
 

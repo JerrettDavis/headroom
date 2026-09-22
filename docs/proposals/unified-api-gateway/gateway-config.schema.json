@@ -359,7 +359,10 @@
             "uniqueItems": true
           },
           "translation": {
-            "const": "disabled"
+            "enum": [
+              "disabled",
+              "qualified"
+            ]
           },
           "body_contract": {
             "enum": [
@@ -445,4 +448,3 @@
     "routes"
   ]
 }
-

@@ -141,7 +141,7 @@ class RouteConfig(FrozenModel):
     credentials: tuple[Identifier, ...] = Field(min_length=1)
     ingress_protocols: tuple[Protocol, ...] = Field(min_length=1)
     native_protocols: tuple[Protocol, ...] = Field(min_length=1)
-    translation: Literal["disabled"]
+    translation: Literal["disabled", "qualified"]
     body_contract: Literal["strict-native", "routed-native"]
     private_network: bool
     retry: RetryConfig
@@ -152,6 +152,20 @@ class RouteConfig(FrozenModel):
         _require_unique("route credentials", self.credentials)
         _require_unique("ingress protocols", self.ingress_protocols)
         _require_unique("native protocols", self.native_protocols)
+        non_native = set(self.ingress_protocols) - set(self.native_protocols)
+        if non_native and self.translation == "disabled":
+            raise ValueError("non-native ingress requires qualified translation")
+        if self.translation == "qualified":
+            supported_pairs = {
+                ("openai-chat", "anthropic-messages"),
+                ("anthropic-messages", "openai-chat"),
+                ("gemini-generate", "openai-chat"),
+            }
+            if len(self.native_protocols) != 1 or not non_native:
+                raise ValueError("qualified translation requires one native target")
+            target = self.native_protocols[0]
+            if any((source, target) not in supported_pairs for source in non_native):
+                raise ValueError("translation direction is not qualified")
         return self
 
 
