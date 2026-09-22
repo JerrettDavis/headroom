@@ -108,9 +108,7 @@ def test_all_examples_validate_against_runtime_schema() -> None:
 def test_every_requirement_has_five_stable_scenarios() -> None:
     scenarios = json.loads(SCENARIOS.read_text(encoding="utf-8"))["scenarios"]
     by_requirement = Counter(item["requirement"] for item in scenarios)
-    assert by_requirement == {f"R{index:02d}": 5 for index in range(1, 19)} | {
-        "R19": 10
-    }
+    assert by_requirement == {f"R{index:02d}": 5 for index in range(1, 19)} | {"R19": 10}
 ```
 
 - [ ] **Step 2: Verify the tests fail because proposal artifacts are absent**
@@ -194,14 +192,18 @@ def test_check_config_has_no_secret_or_network_side_effects(
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sentinel-must-not-be-read")
     monkeypatch.setattr(socket, "getaddrinfo", fail_if_called)
-    result = runner.invoke(proxy, ["--gateway", "--gateway-config", str(config_path), "--check-config"])
+    result = runner.invoke(
+        proxy, ["--gateway", "--gateway-config", str(config_path), "--check-config"]
+    )
     assert result.exit_code == 0
     assert "configuration valid" in result.output.lower()
     assert "sentinel-must-not-be-read" not in result.output
 
 
 @pytest.mark.parametrize("flag", ["--memory", "--code-graph", "--compress-user-messages"])
-def test_gateway_rejects_transforming_flags(runner: CliRunner, config_path: Path, flag: str) -> None:
+def test_gateway_rejects_transforming_flags(
+    runner: CliRunner, config_path: Path, flag: str
+) -> None:
     result = runner.invoke(proxy, ["--gateway", "--gateway-config", str(config_path), flag])
     assert result.exit_code != 0
     assert "incompatible with gateway pure mode" in result.output
@@ -551,8 +553,12 @@ def test_directed_translation_matches_independent_literal_oracle(case) -> None:
 
 
 @pytest.mark.parametrize("feature", ["signed_thinking", "provider_tool", "unknown_role"])
-def test_unrepresentable_feature_is_rejected_before_upstream(feature, gateway_client, spies) -> None:
-    response = gateway_client.post("/v1/messages", json=fixture_for(feature), headers=client_headers())
+def test_unrepresentable_feature_is_rejected_before_upstream(
+    feature, gateway_client, spies
+) -> None:
+    response = gateway_client.post(
+        "/v1/messages", json=fixture_for(feature), headers=client_headers()
+    )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "gateway_capability_unavailable"
     assert spies.upstream_requests == 0
@@ -621,7 +627,9 @@ git commit -m "feat(proxy): translate qualified gateway protocols"
 - [ ] **Step 1: Write failing T041–T045 tests**
 
 ```python
-async def test_cross_principal_response_lookup_never_reaches_upstream(gateway_process, fake_upstream) -> None:
+async def test_cross_principal_response_lookup_never_reaches_upstream(
+    gateway_process, fake_upstream
+) -> None:
     response_id = await create_response(gateway_process, principal="a")
     result = await get_response(gateway_process, response_id, principal="b")
     assert result.status_code == 404
