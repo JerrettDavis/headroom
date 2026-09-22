@@ -48,3 +48,6 @@ class ModelRegistry:
 
     def route_for_model(self, public_model: str) -> RouteConfig | None:
         return next((route for route in self._routes if route.public_model == public_model), None)
+
+    def route_for_id(self, route_id: str) -> RouteConfig | None:
+        return next((route for route in self._routes if route.id == route_id), None)

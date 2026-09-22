@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -17,6 +19,7 @@ from headroom.proxy.gateway.context import GatewayRequestContext
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
 from headroom.proxy.gateway.errors import GatewayAuthorizationError, GatewayPublicError
 from headroom.proxy.gateway.models import Capability
+from headroom.proxy.gateway.resources import ResourceBinding
 
 _REQUEST_HEADER_DENYLIST = frozenset(
     {"host", "content-length", "connection", "transfer-encoding", "upgrade"}
@@ -93,6 +96,55 @@ async def _iter_upstream_bytes(upstream: Any) -> AsyncIterator[bytes]:
         yield chunk
 
 
+async def _bind_response_stream(
+    chunks: AsyncIterator[bytes],
+    *,
+    registry: Any,
+    principal_id: str,
+    route_id: str,
+    account_ref: str,
+) -> AsyncIterator[bytes]:
+    """Observe bounded complete SSE events while forwarding each chunk unchanged."""
+
+    buffer = bytearray()
+    async for chunk in chunks:
+        buffer.extend(chunk)
+        if len(buffer) > 1_048_576:
+            raise GatewayAuthorizationError(
+                status_code=502,
+                code="gateway_stream_event_too_large",
+                message="Upstream stream event exceeded the gateway bound",
+            )
+        while b"\n\n" in buffer:
+            raw_event, remainder = bytes(buffer).split(b"\n\n", 1)
+            buffer = bytearray(remainder)
+            data = b"\n".join(
+                line.removeprefix(b"data: ")
+                for line in raw_event.splitlines()
+                if line.startswith(b"data:")
+            )
+            if data and data != b"[DONE]":
+                with contextlib.suppress(UnicodeDecodeError, json.JSONDecodeError):
+                    event = json.loads(data)
+                    response = event.get("response") if isinstance(event, dict) else None
+                    if (
+                        isinstance(response, dict)
+                        and event.get("type") == "response.created"
+                        and isinstance(response.get("id"), str)
+                    ):
+                        await registry.bind(
+                            ResourceBinding(
+                                provider_id=response["id"],
+                                principal_id=principal_id,
+                                route_id=route_id,
+                                account_ref=account_ref,
+                                adapter="openai-responses",
+                                expires_at=None,
+                            )
+                        )
+        yield chunk
+
+
 def rewrite_routed_native_model(
     body: bytes,
     *,
@@ -155,6 +207,22 @@ async def dispatch_native_http(
             protocol=protocol,
             public_model=requested_model,
         )
+        resource_binding = None
+        if protocol == "openai-responses":
+            previous_response_id = payload.get("previous_response_id")
+            if previous_response_id is not None:
+                if not isinstance(previous_response_id, str):
+                    raise GatewayAuthorizationError(
+                        status_code=400,
+                        code="gateway_request_invalid",
+                        message="previous_response_id must be a string",
+                    )
+                resource_binding = await request.app.state.gateway_resource_registry.authorize(
+                    previous_response_id,
+                    principal_id=principal.id,
+                    route_id=route.id,
+                    now=time.time(),
+                )
         target_protocol = protocol
         translated = protocol not in route.native_protocols
         translated_stream = False
@@ -203,7 +271,12 @@ async def dispatch_native_http(
                 declared_contract=route.body_contract,
             )
             outbound_body = plan.body
-        lease = await request.app.state.gateway_credential_broker.acquire(route)
+        if resource_binding is None:
+            lease = await request.app.state.gateway_credential_broker.acquire(route)
+        else:
+            lease = await request.app.state.gateway_credential_broker.acquire(
+                route, account_ref=resource_binding.account_ref
+            )
         client_headers = {
             name: value
             for name, value in request.headers.items()
@@ -278,8 +351,45 @@ async def dispatch_native_http(
                 status_code=upstream.status_code,
                 headers=response_headers,
             )
+        native_stream = payload.get("stream") is True
+        if protocol == "openai-responses" and not native_stream:
+            upstream_body = await upstream.aread()
+            if 200 <= upstream.status_code < 300:
+                try:
+                    response_payload = json.loads(upstream_body)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    response_payload = None
+                if isinstance(response_payload, dict) and isinstance(
+                    response_payload.get("id"), str
+                ):
+                    await request.app.state.gateway_resource_registry.bind(
+                        ResourceBinding(
+                            provider_id=response_payload["id"],
+                            principal_id=principal.id,
+                            route_id=route.id,
+                            account_ref=lease.account_ref,
+                            adapter="openai-responses",
+                            expires_at=None,
+                        )
+                    )
+            await upstream.aclose()
+            return Response(
+                content=upstream_body,
+                status_code=upstream.status_code,
+                headers=response_headers,
+                media_type=None,
+            )
+        response_chunks: AsyncIterator[bytes] = _iter_upstream_bytes(upstream)
+        if protocol == "openai-responses":
+            response_chunks = _bind_response_stream(
+                response_chunks,
+                registry=request.app.state.gateway_resource_registry,
+                principal_id=principal.id,
+                route_id=route.id,
+                account_ref=lease.account_ref,
+            )
         return StreamingResponse(
-            _iter_upstream_bytes(upstream),
+            response_chunks,
             status_code=upstream.status_code,
             headers=response_headers,
             media_type=None,
@@ -319,3 +429,88 @@ def gateway_model_catalog(request: Request) -> JSONResponse:
             ],
         }
     )
+
+
+async def dispatch_stateful_response_http(
+    request: Request,
+    proxy: Any,
+    sub_path: str,
+) -> Response:
+    """Authorize an existing Responses resource before any credential or I/O."""
+
+    try:
+        response_id = sub_path.split("/", 1)[0]
+        principal = request.state.gateway_principal
+        if "inference" not in principal.scopes:
+            raise GatewayAuthorizationError(
+                status_code=403,
+                code="gateway_scope_denied",
+                message="Gateway scope denied",
+            )
+        binding = await request.app.state.gateway_resource_registry.authorize(
+            response_id,
+            principal_id=principal.id,
+            route_id=None,
+            allowed_route_ids=principal.routes,
+            now=time.time(),
+        )
+        route = request.app.state.gateway_model_registry.route_for_id(binding.route_id)
+        if route is None:
+            raise GatewayAuthorizationError(
+                status_code=404,
+                code="gateway_resource_not_found",
+                message="Stateful resource not found",
+            )
+        lease = await request.app.state.gateway_credential_broker.acquire(route)
+        target = route.upstream_origin.rstrip("/") + request.url.path
+        client_headers = {
+            name: value
+            for name, value in request.headers.items()
+            if name.lower() not in _REQUEST_HEADER_DENYLIST
+        }
+        body = await request.body()
+        outbound_headers = build_managed_upstream_headers(
+            client_headers,
+            lease,
+            target,
+            method=request.method,
+            body=body,
+        )
+        if proxy.http_client is None:
+            raise RuntimeError("gateway HTTP transport is not initialized")
+        upstream_request = proxy.http_client.build_request(
+            request.method, target, headers=outbound_headers, content=body
+        )
+        upstream = await proxy.http_client.send(
+            upstream_request, stream=True, follow_redirects=False
+        )
+        response_headers = {
+            name: value
+            for name, value in upstream.headers.items()
+            if name.lower() not in _RESPONSE_HEADER_DENYLIST
+        }
+        upstream_body = await upstream.aread()
+        await upstream.aclose()
+        if request.method == "DELETE" and 200 <= upstream.status_code < 300:
+            await request.app.state.gateway_resource_registry.delete(
+                response_id,
+                principal_id=principal.id,
+                route_id=route.id,
+            )
+        return Response(
+            content=upstream_body,
+            status_code=upstream.status_code,
+            headers=response_headers,
+            media_type=None,
+        )
+    except GatewayPublicError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "type": "gateway_error",
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+            },
+        )

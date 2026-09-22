@@ -103,13 +103,19 @@ class CredentialBroker:
                 sources[config.id] = NoCredentialSource(config)
         return cls(sources)
 
-    async def acquire(self, route: RouteConfig) -> CredentialLease:
+    async def acquire(
+        self,
+        route: RouteConfig,
+        account_ref: str | None = None,
+    ) -> CredentialLease:
         now = time.time()
         unavailable = False
         for credential_id in route.credentials:
             source = self._sources.get(credential_id)
             if source is None:
                 unavailable = True
+                continue
+            if account_ref is not None and credential_id != account_ref:
                 continue
             async with self._locks[credential_id]:
                 cached = self._leases.get(credential_id)

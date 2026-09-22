@@ -187,6 +187,11 @@ def _register_openai_responses_root_route(app: FastAPI, proxy: Any, path: str) -
 
 def _register_openai_responses_websocket_route(app: FastAPI, proxy: Any, path: str) -> None:
     async def openai_responses_ws(websocket: WebSocket):
+        if proxy.config.gateway is not None:
+            from headroom.proxy.gateway.websocket import dispatch_native_responses_websocket
+
+            await dispatch_native_responses_websocket(websocket, proxy)
+            return
         await proxy.handle_openai_responses_ws(websocket)
 
     openai_responses_ws.__name__ = path.strip("/").replace("/", "_").replace("-", "_") + "_ws"
@@ -199,6 +204,10 @@ def _register_openai_responses_subpath_route(
     spec: OpenAIResponsesSubpathRoute,
 ) -> None:
     async def openai_responses_subpath(request: Request, sub_path: str):
+        if proxy.config.gateway is not None:
+            from headroom.proxy.gateway.dispatch import dispatch_stateful_response_http
+
+            return await dispatch_stateful_response_http(request, proxy, sub_path)
         assert proxy.http_client is not None
         chatgpt_response = await handle_chatgpt_codex_responses_subpath(
             proxy.http_client,

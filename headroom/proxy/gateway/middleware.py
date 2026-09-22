@@ -15,6 +15,7 @@ from headroom.proxy.gateway.auth import (
 )
 from headroom.proxy.gateway.errors import GatewayPublicError
 from headroom.proxy.gateway.models import ModelRegistry
+from headroom.proxy.gateway.resources import ResourceRegistry
 
 if TYPE_CHECKING:
     from headroom.proxy.gateway.config import GatewayConfigSnapshot
@@ -35,6 +36,7 @@ def install_gateway_auth_middleware(
     app.state.gateway_authenticator = authenticator
     app.state.gateway_authorizer = authorizer
     app.state.gateway_model_registry = ModelRegistry(snapshot)
+    app.state.gateway_resource_registry = ResourceRegistry()
 
     @app.middleware("http")
     async def gateway_authentication(request: Request, call_next):  # type: ignore[no-untyped-def]
