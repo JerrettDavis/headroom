@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "profile": "gateway",
+  "status": "draft",
+  "runtime": {"engine": "python", "bind": "loopback-only", "workers": 1, "transforms": "off"},
+  "protocols": ["openai-chat", "openai-responses", "anthropic-messages", "gemini-generate", "vertex-generate", "bedrock-invoke"],
+  "qualified_translations": ["openai-chat->anthropic-messages", "anthropic-messages->openai-chat", "gemini-generate->openai-chat"],
+  "admitted_identities": ["openai:api-key", "anthropic:api-key", "gemini:api-key", "vertex:workload", "bedrock:workload", "compatible:none"],
+  "unavailable_native_identities": ["claude-subscription", "antigravity", "codex-native", "gemini-cli", "muse", "davin"],
+  "external_not_run": ["provider entitlement", "real credential expiry and refresh", "OS keychain persistence", "paid or live provider calls", "official retained release qualification"]
+}
