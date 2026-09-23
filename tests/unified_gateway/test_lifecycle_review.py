@@ -438,3 +438,45 @@ async def test_native_acquisition_is_owned_until_thread_finishes(monkeypatch):
     assert source.closed_after_native
     assert source.closed == 1
     assert not broker._leases
+
+
+@pytest.mark.asyncio
+async def test_ws_late_connection_is_closed_only_after_enter_finishes(monkeypatch):
+    """Mutation caught: run context exit concurrently with cancellation-resistant enter."""
+    raw = configuration()
+    raw["limits"].update(request_deadline_seconds=0.08, shutdown_cleanup_seconds=0.05)
+    enter_started, release_enter, enter_finished = (asyncio.Event() for _ in range(3))
+    exit_observations: list[bool] = []
+
+    class ResistantConnection:
+        async def __aenter__(self):
+            enter_started.set()
+            while not release_enter.is_set():
+                try:
+                    await release_enter.wait()
+                except asyncio.CancelledError:
+                    pass
+            enter_finished.set()
+            return self
+
+        async def __aexit__(self, *_args):
+            exit_observations.append(enter_finished.is_set())
+
+    connection = ResistantConnection()
+    monkeypatch.setattr(
+        "headroom.proxy.gateway.websocket.websocket_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    async with session(monkeypatch, raw) as state:
+        try:
+            await create(state)
+            await enter_started.wait()
+            await state.incoming.put({"type": "websocket.disconnect", "code": 1000})
+            done, _ = await asyncio.wait({state.task}, timeout=1)
+            assert state.task in done, "session cleanup exceeded its bounded deadline"
+            assert not enter_finished.is_set()
+            release_enter.set()
+            await asyncio.gather(*tuple(state.runtime._cleanup_tasks), return_exceptions=True)
+            assert exit_observations == [True]
+        finally:
+            release_enter.set()

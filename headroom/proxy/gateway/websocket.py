@@ -91,6 +91,9 @@ class GatewayWebSocketSession:
         self.observer: StreamObserver | None = None
         self.upstream: Any = None
         self.context: Any = None
+        self._context_settled = asyncio.Event()
+        self._context_entered = False
+        self._finishing = False
         self.tasks: set[asyncio.Task[Any]] = set()
         self.finished = asyncio.Event()
         self._cancel_requested = False
@@ -229,7 +232,13 @@ class GatewayWebSocketSession:
             )
             headers.pop("host", None)
             self.context = websocket_connection(destination, headers, generation.tls_context)
-            self.upstream = await self.context.__aenter__()
+            try:
+                self.upstream = await self.context.__aenter__()
+                self._context_entered = True
+            finally:
+                self._context_settled.set()
+            if self._finishing:
+                raise asyncio.CancelledError
             self.generation, self.route = generation, route
             self.runtime.retain(generation)
             self.binding = ResourceBinding(
@@ -429,13 +438,27 @@ class GatewayWebSocketSession:
             self._finish_task = asyncio.create_task(self.finish(result, origin))
             await asyncio.shield(self._finish_task)
 
+    async def _close_context(self) -> None:
+        while not self._context_settled.is_set():
+            try:
+                await self._context_settled.wait()
+            except asyncio.CancelledError:
+                # The caller's cleanup budget may expire before a native
+                # connector settles. Keep ownership until late entry can be
+                # paired with exactly one exit.
+                pass
+        if self._context_entered:
+            await self.context.__aexit__(None, None, None)
+            self._context_entered = False
+
     async def finish(self, result: TerminalResult, origin: FailureOrigin) -> None:
+        self._finishing = True
         deadline = time.monotonic() + self.runtime.snapshot.limits.shutdown_cleanup_seconds
         tasks = set(self.tasks)
         for task in tasks:
             task.cancel()
         if self.context is not None:
-            tasks.add(self.spawn(self.context.__aexit__(None, None, None)))
+            tasks.add(self.spawn(self._close_context()))
         tasks.add(self.spawn(self.websocket.close(code=1000 if result == "cancelled" else 1011)))
         try:
             await asyncio.wait(tasks, timeout=max(0, deadline - time.monotonic()))
