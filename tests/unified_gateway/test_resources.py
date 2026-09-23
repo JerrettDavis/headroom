@@ -147,7 +147,9 @@ def test_cross_principal_response_lookup_never_reaches_upstream(
         }
     )
     app = create_app(ProxyConfig(gateway=snapshot))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
     client = TestClient(app)
     common = {"host": "127.0.0.1:8787"}
 
@@ -209,7 +211,9 @@ def test_streamed_response_id_is_bound_before_later_lookup(
         return httpx.Response(200, json={"id": "resp_streamed", "object": "response"})
 
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
     client = TestClient(app)
     headers = {"host": "127.0.0.1:8787", "authorization": "Bearer client-a"}
 

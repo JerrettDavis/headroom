@@ -6,7 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from headroom.proxy.gateway.config import GatewayConfigSnapshot
+from headroom.proxy.gateway.config import CapabilityConfig, GatewayConfigSnapshot
 from headroom.proxy.gateway.protocols.events import (
     StreamEvent,
     translate_event,
@@ -97,6 +97,13 @@ def test_gateway_dispatch_uses_incremental_translated_stream(
             "public_model": "public-claude",
             "upstream_model": "claude-provider",
             "ingress_protocols": ("openai-chat", "anthropic-messages"),
+            "capabilities": {
+                **anthropic.capabilities,
+                "openai-chat": {
+                    "http-json": CapabilityConfig(features=("text",)),
+                    "http-stream": CapabilityConfig(features=("text",)),
+                },
+            },
             "translation": "qualified",
             "body_contract": "routed-native",
         }
@@ -109,7 +116,9 @@ def test_gateway_dispatch_uses_incremental_translated_stream(
         }
     )
     app = create_app(ProxyConfig(gateway=snapshot))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
 
     response = TestClient(app).post(
         "/v1/chat/completions",

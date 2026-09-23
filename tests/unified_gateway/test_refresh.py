@@ -60,4 +60,5 @@ def route_config():
         private_network=False,
         retry=RetryConfig(max_attempts=1, ambiguous_commit="never", after_output="never"),
         billing=BillingConfig(allow_paid_fallback=False),
+        capabilities={"openai-responses": {"http-json": {"features": ["text"]}}},
     )

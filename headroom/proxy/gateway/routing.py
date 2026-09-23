@@ -48,13 +48,20 @@ class RetryDecision:
 
 
 class AccountRouter:
+    def update_accounts(
+        self, available_accounts: set[str], identities: dict[str, str] | None = None
+    ) -> None:
+        self._available = frozenset(available_accounts)
+        self._identities = identities or {}
+
     def __init__(self, *, available_accounts: set[str]) -> None:
         self._available = frozenset(available_accounts)
+        self._identities = {}
         self._positions: dict[tuple[str, str], int] = {}
         self._cooldowns: dict[tuple[str, str], float] = {}
 
     def cool_down(self, account_ref: str, *, quota_key: str, until: float) -> None:
-        self._cooldowns[(account_ref, quota_key)] = until
+        self._cooldowns[(self._identities.get(account_ref, account_ref), quota_key)] = until
 
     def select(
         self,
@@ -63,15 +70,22 @@ class AccountRouter:
         resource_binding: ResourceBinding | None = None,
         *,
         now: float | None = None,
+        eligible_accounts: frozenset[str] | None = None,
+        authority_keys: dict[str, str] | None = None,
+        target_key: str | None = None,
     ) -> AccountSelection:
         if route.id not in principal.routes or "inference" not in principal.scopes:
             self._unavailable()
+        available = (
+            self._available if eligible_accounts is None else self._available & eligible_accounts
+        )
+        identities = self._identities if authority_keys is None else authority_keys
         if resource_binding is not None:
             if (
                 resource_binding.principal_id != principal.id
                 or resource_binding.route_id != route.id
                 or resource_binding.account_ref not in route.credentials
-                or resource_binding.account_ref not in self._available
+                or resource_binding.account_ref not in available
             ):
                 self._unavailable()
             return AccountSelection(resource_binding.account_ref, sticky=True)
@@ -80,16 +94,16 @@ class AccountRouter:
         candidates = [
             account
             for account in route.credentials
-            if account in self._available
+            if account in available
             and all(
                 deadline <= current
                 for (cooled_account, _quota_key), deadline in self._cooldowns.items()
-                if cooled_account == account
+                if cooled_account == identities.get(account, account)
             )
         ]
         if not candidates:
             self._unavailable()
-        key = (principal.id, route.id)
+        key = (principal.id, target_key or route.id)
         position = self._positions.get(key, 0)
         account = candidates[position % len(candidates)]
         self._positions[key] = position + 1

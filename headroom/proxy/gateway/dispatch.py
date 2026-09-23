@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
+from headroom.proxy.gateway.capabilities import requested_features
 from headroom.proxy.gateway.config import Protocol, RouteConfig
 from headroom.proxy.gateway.context import GatewayRequestContext
 from headroom.proxy.gateway.credentials import CredentialLease
@@ -73,7 +74,7 @@ async def _send_managed(
     body: bytes,
 ) -> Any:
     destination = await asyncio.to_thread(
-        request.app.state.gateway_egress_policy.authorize, lease, target, route=route
+        request.state.gateway_generation.egress_policy.authorize, lease, target, route=route
     )
     headers = build_managed_upstream_headers(
         client_headers,
@@ -84,15 +85,15 @@ async def _send_managed(
         method=request.method,
         body=body,
     )
-    if proxy.http_client is None:
+    if request.state.gateway_generation.http_client is None:
         raise _upstream_error()
-    upstream_request = proxy.http_client.build_request(
+    upstream_request = request.state.gateway_generation.http_client.build_request(
         request.method, target, headers=headers, content=body
     )
     upstream_request.extensions["gateway_destination"] = destination
     try:
         with private_transport():
-            upstream = await proxy.http_client.send(
+            upstream = await request.state.gateway_generation.http_client.send(
                 upstream_request, stream=True, follow_redirects=False
             )
     except Exception:
@@ -216,6 +217,7 @@ async def _bind_response_stream(
     principal_id: str,
     route_id: str,
     account_ref: str,
+    generation: Any,
 ) -> AsyncIterator[bytes]:
     """Observe bounded complete SSE events while forwarding each chunk unchanged."""
 
@@ -252,7 +254,11 @@ async def _bind_response_stream(
                                 route_id=route_id,
                                 account_ref=account_ref,
                                 adapter="openai-responses",
-                                expires_at=None,
+                                expires_at=time.time()
+                                + generation.snapshot.limits.resource_ttl_seconds,
+                                authority_fingerprint=generation.account_key(account_ref),
+                                target_fingerprint=generation.target_key(route_id),
+                                generation=generation.number,
                             )
                         )
         yield chunk
@@ -332,11 +338,17 @@ async def dispatch_native_http(
         requested_model = public_model if public_model is not None else body_model
         assert isinstance(requested_model, str)
         principal = request.state.gateway_principal
-        route = request.app.state.gateway_authorizer.authorize(
+        route = request.state.gateway_generation.authorizer.authorize(
             principal,
             scope="inference",
             protocol=protocol,
             public_model=requested_model,
+            transport="http-stream"
+            if payload.get("stream") is True
+            or "streamGenerateContent" in request.url.path
+            or "response-stream" in request.url.path
+            else "http-json",
+            features=requested_features(payload),
         )
         resource_binding = None
         if protocol == "openai-responses":
@@ -348,12 +360,14 @@ async def dispatch_native_http(
                         code="gateway_request_invalid",
                         message="previous_response_id must be a string",
                     )
-                resource_binding = await request.app.state.gateway_resource_registry.authorize(
+                resource_binding = await request.app.state.gateway_runtime.resources.authorize(
                     previous_response_id,
                     principal_id=principal.id,
                     route_id=route.id,
                     now=time.time(),
                 )
+        if resource_binding is not None:
+            request.state.gateway_generation.validate_binding(resource_binding)
         target_protocol = protocol
         translated = protocol not in route.native_protocols
         translated_stream = False
@@ -406,15 +420,27 @@ async def dispatch_native_http(
                 declared_contract=route.body_contract,
             )
             outbound_body = plan.body
-        reservation = await request.app.state.gateway_admission.reserve(
+        reservation = await request.app.state.gateway_runtime.admission.reserve(
             AdmissionRequest(principal.id, estimated_cost=None)
         )
-        selection = request.app.state.gateway_account_router.select(
+        selection = request.app.state.gateway_runtime.router.select(
             route,
             principal,
             resource_binding=resource_binding,
+            eligible_accounts=request.state.gateway_generation.catalog.eligible_accounts(
+                route,
+                protocol=protocol,
+                transport="http-stream"
+                if payload.get("stream") is True
+                or "streamGenerateContent" in request.url.path
+                or "response-stream" in request.url.path
+                else "http-json",
+                features=requested_features(payload),
+            ),
+            authority_keys=dict(request.state.gateway_generation.authorities),
+            target_key=request.state.gateway_generation.target_key(route.id),
         )
-        lease = await request.app.state.gateway_credential_broker.acquire(
+        lease = await request.state.gateway_generation.broker.acquire(
             route,
             account_ref=selection.account_ref,
         )
@@ -428,6 +454,8 @@ async def dispatch_native_http(
             route=route,
             ingress_protocol=protocol,
             request_id=request.headers.get("x-request-id", ""),
+            generation=request.state.gateway_generation,
+            catalog=request.state.gateway_generation.catalog,
             account_selection=selection,
         )
         upstream = await _send_managed(
@@ -488,14 +516,22 @@ async def dispatch_native_http(
                 if isinstance(response_payload, dict) and isinstance(
                     response_payload.get("id"), str
                 ):
-                    await request.app.state.gateway_resource_registry.bind(
+                    await request.app.state.gateway_runtime.resources.bind(
                         ResourceBinding(
                             provider_id=response_payload["id"],
                             principal_id=principal.id,
                             route_id=route.id,
                             account_ref=lease.account_ref,
                             adapter="openai-responses",
-                            expires_at=None,
+                            expires_at=time.time()
+                            + request.state.gateway_generation.snapshot.limits.resource_ttl_seconds,
+                            authority_fingerprint=request.state.gateway_generation.account_key(
+                                lease.account_ref
+                            ),
+                            target_fingerprint=request.state.gateway_generation.target_key(
+                                route.id
+                            ),
+                            generation=request.state.gateway_generation.number,
                         )
                     )
             await upstream.aclose()
@@ -510,10 +546,11 @@ async def dispatch_native_http(
         if protocol == "openai-responses":
             response_chunks = _bind_response_stream(
                 response_chunks,
-                registry=request.app.state.gateway_resource_registry,
+                registry=request.app.state.gateway_runtime.resources,
                 principal_id=principal.id,
                 route_id=route.id,
                 account_ref=lease.account_ref,
+                generation=request.state.gateway_generation,
             )
         handed_off = True
         return StreamingResponse(
@@ -550,26 +587,56 @@ async def dispatch_native_http(
             await reservation.release()
 
 
-def gateway_model_catalog(request: Request) -> JSONResponse:
+def gateway_model_catalog(
+    request: Request, model_id: str | None = None, *, protocol: str | None = None
+) -> JSONResponse:
     principal = request.state.gateway_principal
-    routes = request.app.state.gateway_model_registry.visible_routes(principal)
-    return JSONResponse(
-        {
-            "object": "list",
-            "data": [
-                {
-                    "id": route.id,
-                    "object": "model",
-                    "owned_by": "headroom-gateway",
-                    "headroom": {
-                        "route": route.route_id,
-                        "protocols": route.protocols,
-                        "body_contract": route.body_contract,
-                    },
-                }
-                for route in routes
-            ],
+    catalog = request.state.gateway_generation.catalog
+    if "models" not in principal.scopes:
+        return JSONResponse(status_code=403, content={"error": {"code": "gateway_scope_forbidden"}})
+    routes = catalog.visible_routes(principal)
+    if protocol:
+        routes = tuple(r for r in routes if protocol in r.protocols)
+    if model_id is not None:
+        routes = tuple(r for r in routes if r.id == model_id)
+        if not routes:
+            return JSONResponse(
+                status_code=404, content={"error": {"code": "gateway_model_unavailable"}}
+            )
+    data = []
+    for route in routes:
+        item = {
+            "id": route.id,
+            "object": "model",
+            "owned_by": "headroom-gateway",
+            "headroom": {
+                "protocols": route.protocols,
+                "body_contract": route.body_contract,
+                "catalog_revision": catalog.revision,
+                "generation": catalog.generation,
+                "provenance": route.provenance,
+                "state": route.state,
+                "capabilities": [
+                    {"protocol": p, "transport": t, "features": f} for p, t, f in route.capabilities
+                ],
+                "cost_available": route.tariff_revision is not None,
+                "tariff_revision": route.tariff_revision,
+            },
         }
+        if protocol == "gemini-generate":
+            item["name"] = "models/" + route.id
+            item["supportedGenerationMethods"] = ["generateContent"] + (
+                ["streamGenerateContent"]
+                if any(t == "http-stream" for p, t, _f in route.capabilities if p == protocol)
+                else []
+            )
+        data.append(item)
+    return JSONResponse(
+        data[0]
+        if model_id is not None
+        else {"models": data}
+        if protocol == "gemini-generate"
+        else {"object": "list", "data": data}
     )
 
 
@@ -590,29 +657,33 @@ async def dispatch_stateful_response_http(
                 code="gateway_scope_denied",
                 message="Gateway scope denied",
             )
-        binding = await request.app.state.gateway_resource_registry.authorize(
+        binding = await request.app.state.gateway_runtime.resources.authorize(
             response_id,
             principal_id=principal.id,
             route_id=None,
             allowed_route_ids=principal.routes,
             now=time.time(),
         )
-        route = request.app.state.gateway_model_registry.route_for_id(binding.route_id)
+        route = request.state.gateway_generation.catalog.route_for_id(binding.route_id)
         if route is None:
             raise GatewayAuthorizationError(
                 status_code=404,
                 code="gateway_resource_not_found",
                 message="Stateful resource not found",
             )
-        reservation = await request.app.state.gateway_admission.reserve(
+        request.state.gateway_generation.validate_binding(binding)
+        reservation = await request.app.state.gateway_runtime.admission.reserve(
             AdmissionRequest(principal.id, estimated_cost=None)
         )
-        selection = request.app.state.gateway_account_router.select(
+        selection = request.app.state.gateway_runtime.router.select(
             route,
             principal,
             resource_binding=binding,
+            eligible_accounts=request.state.gateway_generation.catalog.eligible_accounts(route),
+            authority_keys=dict(request.state.gateway_generation.authorities),
+            target_key=request.state.gateway_generation.target_key(route.id),
         )
-        lease = await request.app.state.gateway_credential_broker.acquire(
+        lease = await request.state.gateway_generation.broker.acquire(
             route,
             account_ref=selection.account_ref,
         )
@@ -628,7 +699,7 @@ async def dispatch_stateful_response_http(
         upstream_body = await upstream.aread()
         await upstream.aclose()
         if request.method == "DELETE" and 200 <= upstream.status_code < 300:
-            await request.app.state.gateway_resource_registry.delete(
+            await request.app.state.gateway_runtime.resources.delete(
                 response_id,
                 principal_id=principal.id,
                 route_id=route.id,

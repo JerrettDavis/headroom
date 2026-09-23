@@ -16,6 +16,9 @@ class ResourceBinding:
     account_ref: str
     adapter: str
     expires_at: float | None
+    authority_fingerprint: str | None = None
+    target_fingerprint: str | None = None
+    generation: int | None = None
 
 
 class ResourceRegistry:

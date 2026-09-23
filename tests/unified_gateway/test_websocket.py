@@ -26,6 +26,35 @@ EXAMPLE = (
 )
 
 
+def test_routed_websocket_rewrites_nested_model_without_losing_fields():
+    from headroom.proxy.gateway.websocket import routed_response_create_frame
+
+    route = (
+        GatewayConfigSnapshot.load(EXAMPLE)
+        .routes[0]
+        .model_copy(
+            update={
+                "public_model": "alias",
+                "upstream_model": "provider-model",
+                "body_contract": "routed-native",
+            }
+        )
+    )
+    frame = (
+        '{ "type": "response.create", "response": {"model":"alias","input":"hello","future":42} }'
+    )
+    assert json.loads(routed_response_create_frame(frame, route)) == {
+        "type": "response.create",
+        "response": {"model": "provider-model", "input": "hello", "future": 42},
+    }
+    assert (
+        routed_response_create_frame(
+            frame, route.model_copy(update={"body_contract": "strict-native"})
+        )
+        == frame
+    )
+
+
 def test_every_websocket_generation_turn_is_reauthorized() -> None:
     snapshot = GatewayConfigSnapshot.load(EXAMPLE)
     authorizer = GatewayAuthorizer(snapshot)
@@ -127,3 +156,52 @@ def test_gateway_websocket_reauthorizes_second_turn_before_forwarding(
     assert error["type"] == "error"
     assert error["error"]["code"] == "gateway_model_unavailable"
     assert sent == [json.dumps(first, separators=(",", ":"))]
+
+
+@pytest.mark.parametrize("selector", ["principal_id", "route_id", "account_id"])
+def test_websocket_turn_reauthenticates_current_generation(monkeypatch, selector):
+    monkeypatch.setenv("HEADROOM_GATEWAY_CLIENT_TOKEN", "client-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
+    sent = []
+
+    class Upstream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def send(self, frame):
+            sent.append(frame)
+            await app.state.gateway_runtime.revoke(
+                **{
+                    selector: {
+                        "principal_id": "local-app",
+                        "route_id": "openai-native",
+                        "account_id": "openai-api",
+                    }[selector]
+                }
+            )
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(websockets, "connect", lambda *args, **kwargs: Upstream())
+    app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
+    frame = {
+        "type": "response.create",
+        "response": {"model": "REPLACE_WITH_ENABLED_OPENAI_MODEL", "input": "hello"},
+    }
+    with TestClient(app).websocket_connect(
+        "/v1/responses", headers={"host": "127.0.0.1", "authorization": "Bearer client-secret"}
+    ) as socket:
+        socket.send_json(frame)
+        socket.send_json(frame)
+        assert socket.receive_json()["error"]["code"] in {
+            "gateway_auth_invalid",
+            "gateway_model_unavailable",
+        }
+    assert len(sent) == 1

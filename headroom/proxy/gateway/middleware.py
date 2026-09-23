@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from headroom.proxy.gateway.auth import validate_gateway_browser_request
-from headroom.proxy.gateway.egress import EgressPolicy
 from headroom.proxy.gateway.errors import GatewayPublicError
 from headroom.proxy.gateway.runtime import GatewayRuntime
-from headroom.proxy.gateway.transport import tls_context
 
 if TYPE_CHECKING:
     from headroom.proxy.gateway.config import GatewayConfigSnapshot
@@ -34,20 +33,15 @@ def install_gateway_auth_middleware(
     app: FastAPI,
     snapshot: GatewayConfigSnapshot,
     environ: Mapping[str, str],
+    config_path: Path | None = None,
 ) -> None:
     """Install mandatory gateway auth while leaving readiness locally observable."""
 
-    runtime = GatewayRuntime(snapshot, environ=environ)
-    app.state.gateway_egress_policy = EgressPolicy()
-    app.state.gateway_tls_context = tls_context(snapshot)
+    runtime = GatewayRuntime(snapshot, environ=environ, config_path=config_path)
     app.state.gateway_runtime = runtime
-    app.state.gateway_authenticator = runtime.authenticator
-    app.state.gateway_authorizer = runtime.authorizer
-    app.state.gateway_model_registry = runtime.models
-    app.state.gateway_resource_registry = runtime.resources
-    app.state.gateway_account_router = runtime.router
-    app.state.gateway_admission = runtime.admission
-    app.state.gateway_credential_broker = runtime.broker
+    from headroom.proxy.gateway.control import install_gateway_controls
+
+    install_gateway_controls(app, runtime)
 
     @app.middleware("http")
     async def gateway_authentication(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -57,7 +51,9 @@ def install_gateway_auth_middleware(
             return await call_next(request)
         try:
             validate_gateway_browser_request(request.headers)
-            request.state.gateway_principal = runtime.authenticator.authenticate(
+            generation = runtime.capture()
+            request.state.gateway_generation = generation
+            request.state.gateway_principal = generation.authenticator.authenticate(
                 request.headers,
                 query_string=request.scope.get("query_string", b""),
             )

@@ -253,7 +253,9 @@ def app_with_transport(monkeypatch, handler):
     monkeypatch.setenv("HEADROOM_GATEWAY_CLIENT_TOKEN", "client-secret-sentinel")
     monkeypatch.setenv("OPENAI_API_KEY", "upstream-secret-sentinel")
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.model_validate(example())))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
     return app
 
 
@@ -354,7 +356,9 @@ def test_private_compatible_uses_its_own_key_and_configured_path(monkeypatch):
         return httpx.Response(200, json={"ok": True})
 
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.model_validate(raw)))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
     response = TestClient(app).post(
         "/v1/chat/completions",
         headers={
@@ -391,9 +395,17 @@ def test_secondary_forwarding_paths_also_deny_dns_before_upstream(monkeypatch, k
     headers = {"host": "127.0.0.1:8787", "authorization": "Bearer client-secret-sentinel"}
     if kind == "stateful":
         asyncio.run(
-            app.state.gateway_resource_registry.bind(
+            app.state.gateway_runtime.resources.bind(
                 ResourceBinding(
-                    "resp-a", "local-app", "openai-native", "openai-api", "openai-responses", None
+                    "resp-a",
+                    "local-app",
+                    "openai-native",
+                    "openai-api",
+                    "openai-responses",
+                    None,
+                    app.state.gateway_runtime.capture().account_key("openai-api"),
+                    app.state.gateway_runtime.capture().target_key("openai-native"),
+                    1,
                 )
             )
         )
@@ -603,7 +615,7 @@ def test_dispatch_sanitizes_late_body_and_source_exceptions(monkeypatch, caplog,
         async def acquire(*args, **kwargs):
             raise RuntimeError("provider-secret-sentinel")
 
-        app.state.gateway_credential_broker.acquire = acquire
+        app.state.gateway_runtime.broker.acquire = acquire
     response = TestClient(app, raise_server_exceptions=False).post(
         "/v1/responses",
         headers={"host": "127.0.0.1:8787", "authorization": "Bearer client-secret-sentinel"},

@@ -1356,6 +1356,7 @@ def proxy(
 
     config = ProxyConfig(
         gateway=gateway_snapshot,
+        gateway_config_path=gateway_config if gateway else None,
         host=host,
         port=port,
         rollout=rollout_snapshot,

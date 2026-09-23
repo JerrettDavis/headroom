@@ -2809,10 +2809,12 @@ class WebSocketAuthMiddleware:
         *,
         proxy_token: str | None = None,
         gateway_authenticator: Any | None = None,
+        gateway_runtime: Any | None = None,
     ) -> None:
         self.app = app
         self.proxy_token = proxy_token
         self.gateway_authenticator = gateway_authenticator
+        self.gateway_runtime = gateway_runtime
         # Pre-encoded for constant-time comparison, mirroring the HTTP gate:
         # compare_digest on str raises TypeError for non-ASCII input, which
         # would turn a rejected handshake into a 500.
@@ -2820,18 +2822,24 @@ class WebSocketAuthMiddleware:
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "websocket" or (
-            not self.proxy_token and self.gateway_authenticator is None
+            not self.proxy_token
+            and self.gateway_authenticator is None
+            and self.gateway_runtime is None
         ):
             await self.app(scope, receive, send)
             return
 
         client = scope.get("client")
         client_host = client[0] if client else None
-        if self.gateway_authenticator is None and is_loopback_host(client_host):
+        if (
+            self.gateway_authenticator is None
+            and self.gateway_runtime is None
+            and is_loopback_host(client_host)
+        ):
             await self.app(scope, receive, send)
             return
 
-        if self.gateway_authenticator is not None:
+        if self.gateway_authenticator is not None or self.gateway_runtime is not None:
             from starlette.datastructures import Headers as StarletteHeaders
 
             from headroom.proxy.gateway.auth import validate_gateway_browser_request
@@ -2840,7 +2848,12 @@ class WebSocketAuthMiddleware:
             headers = StarletteHeaders(scope=scope)
             try:
                 validate_gateway_browser_request(headers)
-                scope["gateway_principal"] = self.gateway_authenticator.authenticate(headers)
+                generation = self.gateway_runtime.capture() if self.gateway_runtime else None
+                authenticator = (
+                    generation.authenticator if generation else self.gateway_authenticator
+                )
+                scope["gateway_principal"] = authenticator.authenticate(headers)
+                scope["gateway_generation"] = generation
             except GatewayPublicError:
                 message = await receive()
                 if message["type"] == "websocket.connect":
@@ -3038,7 +3051,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         app.state.rust_core_error = _rust_core_error
 
         if proxy.config.gateway is None:
-            configure_otel_metrics(OTelMetricsConfig.from_env(default_service_name="headroom-proxy"))
+            configure_otel_metrics(
+                OTelMetricsConfig.from_env(default_service_name="headroom-proxy")
+            )
             configure_langfuse_tracing(
                 LangfuseTracingConfig.from_env(default_service_name="headroom-proxy")
             )
@@ -3171,7 +3186,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     if config.gateway is not None:
         from headroom.proxy.gateway.middleware import install_gateway_auth_middleware
 
-        install_gateway_auth_middleware(app, config.gateway, os.environ)
+        install_gateway_auth_middleware(app, config.gateway, os.environ, config.gateway_config_path)
     app.add_middleware(WebSocketProjectPrefixMiddleware)
     loop_health_state: LoopHealthState = {
         "status": "healthy",
@@ -3830,7 +3845,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     app.add_middleware(
         WebSocketAuthMiddleware,
         proxy_token=_proxy_token,
-        gateway_authenticator=getattr(app.state, "gateway_authenticator", None),
+        gateway_runtime=getattr(app.state, "gateway_runtime", None),
     )
 
     # Third-party proxy extensions (Enterprise, custom plugins). Discovered via
@@ -3869,7 +3884,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     async def readyz():
         if config.gateway is not None:
             runtime = app.state.gateway_runtime
-            return JSONResponse(status_code=200, content=runtime.status().as_dict())
+            return JSONResponse(
+                status_code=200 if runtime.status().ready else 503,
+                content=runtime.status().as_dict(),
+            )
         await _check_upstream()
         payload = _health_payload(include_config=False)
         return JSONResponse(status_code=200 if payload["ready"] else 503, content=payload)

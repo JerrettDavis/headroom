@@ -92,7 +92,9 @@ def test_native_provider_routes_share_gateway_dispatch(
         }
     )
     app = create_app(ProxyConfig(gateway=snapshot))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
     body = b'{"contents":[{"role":"user"}]}'
     if model is not None:
         body = ('{"model":"' + model + '","messages":[]}').encode()
@@ -138,7 +140,9 @@ async def test_native_sse_response_releases_first_chunk_before_completion(
         )
 
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
     body = b'{"model":"REPLACE_WITH_ENABLED_OPENAI_MODEL","input":"hello","stream":true}'
     sent = False
 
@@ -163,9 +167,10 @@ async def test_native_sse_response_releases_first_chunk_before_completion(
             "server": ("127.0.0.1", 8787),
             "app": app,
             "state": {
-                "gateway_principal": app.state.gateway_authenticator.authenticate(
+                "gateway_generation": app.state.gateway_runtime.capture(),
+                "gateway_principal": app.state.gateway_runtime.authenticator.authenticate(
                     {"authorization": "Bearer client-secret"}
-                )
+                ),
             },
         },
         receive,
@@ -241,8 +246,10 @@ def test_cloud_native_routes_use_gateway_identity_and_exact_target(
             )
 
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(CLOUD_EXAMPLE)))
-    app.state.gateway_credential_broker = Broker()
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.broker = Broker()
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
 
     response = TestClient(app).post(
         path,
@@ -275,7 +282,9 @@ def test_openai_responses_uses_provider_key_and_preserves_entity_bytes(monkeypat
         )
 
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
     request_bytes = (
         '{ "model" : "REPLACE_WITH_ENABLED_OPENAI_MODEL", "input" : "héllo", "unknown" : 1.00 }'
     ).encode()

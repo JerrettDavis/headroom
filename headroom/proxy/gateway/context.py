@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 from headroom.proxy.gateway.config import Protocol, RouteConfig
 
 if TYPE_CHECKING:
+    from headroom.proxy.gateway.models import CatalogSnapshot
     from headroom.proxy.gateway.routing import AccountSelection
+    from headroom.proxy.gateway.runtime import RuntimeGeneration
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,5 +26,10 @@ class GatewayRequestContext:
     route: RouteConfig
     ingress_protocol: Protocol
     request_id: str
-    snapshot_generation: int = 1
+    generation: RuntimeGeneration
+    catalog: CatalogSnapshot
     account_selection: AccountSelection | None = None
+
+    @property
+    def snapshot_generation(self) -> int:
+        return self.generation.number

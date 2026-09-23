@@ -84,4 +84,4 @@ def test_gateway_app_owns_one_credential_broker(monkeypatch: pytest.MonkeyPatch)
 
     app = create_app(ProxyConfig(gateway=snapshot))
 
-    assert isinstance(app.state.gateway_credential_broker, CredentialBroker)
+    assert isinstance(app.state.gateway_runtime.capture().broker, CredentialBroker)

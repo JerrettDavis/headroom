@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from headroom.proxy.gateway.config import GatewayConfigSnapshot
+from headroom.proxy.gateway.config import CapabilityConfig, GatewayConfigSnapshot
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
 from headroom.proxy.gateway.protocols import translate, translate_response
 from headroom.proxy.models import ProxyConfig
@@ -392,6 +392,13 @@ def test_openai_chat_to_anthropic_route_translates_request_and_response(
             "public_model": "public-claude",
             "upstream_model": "claude-provider",
             "ingress_protocols": ("openai-chat", "anthropic-messages"),
+            "capabilities": {
+                **anthropic.capabilities,
+                "openai-chat": {
+                    "http-json": CapabilityConfig(features=("text",)),
+                    "http-stream": CapabilityConfig(features=("text",)),
+                },
+            },
             "translation": "qualified",
             "body_contract": "routed-native",
         }
@@ -404,8 +411,10 @@ def test_openai_chat_to_anthropic_route_translates_request_and_response(
         }
     )
     app = create_app(ProxyConfig(gateway=snapshot))
-    app.state.proxy.http_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
-    real_broker = app.state.gateway_credential_broker
+    app.state.gateway_runtime.dependencies.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream)
+    )
+    real_broker = app.state.gateway_runtime.broker
 
     class CountingBroker:
         acquisitions = 0
@@ -415,7 +424,7 @@ def test_openai_chat_to_anthropic_route_translates_request_and_response(
             return await real_broker.acquire(route, account_ref=account_ref)
 
     broker = CountingBroker()
-    app.state.gateway_credential_broker = broker
+    app.state.gateway_runtime.dependencies.broker = broker
 
     response = TestClient(app).post(
         "/v1/chat/completions",

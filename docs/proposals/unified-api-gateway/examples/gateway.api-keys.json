@@ -114,6 +114,84 @@
       },
       "billing": {
         "allow_paid_fallback": false
+      },
+      "enabled": true,
+      "catalog": {
+        "source": "configured",
+        "entitlements": {
+          "openai-api": "allowed"
+        }
+      },
+      "capabilities": {
+        "openai-chat": {
+          "http-json": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          },
+          "http-stream": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          }
+        },
+        "openai-responses": {
+          "http-json": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          },
+          "http-stream": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          },
+          "websocket": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          }
+        }
       }
     },
     {
@@ -142,6 +220,43 @@
       },
       "billing": {
         "allow_paid_fallback": false
+      },
+      "enabled": true,
+      "catalog": {
+        "source": "configured",
+        "entitlements": {
+          "anthropic-api": "allowed"
+        }
+      },
+      "capabilities": {
+        "anthropic-messages": {
+          "http-json": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          },
+          "http-stream": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          }
+        }
       }
     },
     {
@@ -170,8 +285,55 @@
       },
       "billing": {
         "allow_paid_fallback": false
+      },
+      "enabled": true,
+      "catalog": {
+        "source": "configured",
+        "entitlements": {
+          "gemini-api": "allowed"
+        }
+      },
+      "capabilities": {
+        "gemini-generate": {
+          "http-json": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          },
+          "http-stream": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          }
+        }
       }
     }
-  ]
+  ],
+  "admission": {
+    "max_concurrency": 128,
+    "queue_limit": 128,
+    "queue_timeout_seconds": 0,
+    "budget_usd": null,
+    "budget_period": "process",
+    "unknown_cost_policy": "allow"
+  },
+  "limits": {
+    "request_deadline_seconds": 120
+  }
 }
-

@@ -307,6 +307,27 @@ def _register_openai_image_routes(app: FastAPI, proxy: Any) -> None:
 def register_provider_routes(app: FastAPI, proxy: Any) -> None:
     """Register provider-specific proxy endpoints."""
 
+    if _gateway_enabled(proxy):
+        from headroom.proxy.gateway.dispatch import gateway_model_catalog
+
+        @app.get("/v1beta/models")
+        @app.get("/v1alpha/models")
+        async def gateway_gemini_models(request: Request):
+            return gateway_model_catalog(request, protocol="gemini-generate")
+
+        @app.get("/v1beta/models/{model_id}")
+        @app.get("/v1alpha/models/{model_id}")
+        async def gateway_gemini_model(request: Request, model_id: str):
+            return gateway_model_catalog(request, model_id, protocol="gemini-generate")
+
+        @app.get("/anthropic/v1/models")
+        async def gateway_anthropic_models(request: Request):
+            return gateway_model_catalog(request, protocol="anthropic-messages")
+
+        @app.get("/anthropic/v1/models/{model_id}")
+        async def gateway_anthropic_model(request: Request, model_id: str):
+            return gateway_model_catalog(request, model_id, protocol="anthropic-messages")
+
     async def vertex_publisher_passthrough(request: Request, publisher: str, action: str):
         return await proxy.handle_passthrough(
             request,
@@ -565,6 +586,10 @@ def register_provider_routes(app: FastAPI, proxy: Any) -> None:
 
     @app.get("/v1/models/{model_id}")
     async def get_model(request: Request, model_id: str):
+        if _gateway_enabled(proxy):
+            from headroom.proxy.gateway.dispatch import gateway_model_catalog
+
+            return gateway_model_catalog(request, model_id)
         provider_name = proxy.provider_runtime.model_metadata_provider(dict(request.headers))
         return await handle_model_metadata_endpoint(
             proxy,

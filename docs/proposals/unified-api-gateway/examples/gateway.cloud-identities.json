@@ -96,6 +96,43 @@
       },
       "billing": {
         "allow_paid_fallback": false
+      },
+      "enabled": true,
+      "catalog": {
+        "source": "configured",
+        "entitlements": {
+          "vertex-work": "allowed"
+        }
+      },
+      "capabilities": {
+        "vertex-generate": {
+          "http-json": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          },
+          "http-stream": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          }
+        }
       }
     },
     {
@@ -124,8 +161,42 @@
       },
       "billing": {
         "allow_paid_fallback": false
+      },
+      "enabled": true,
+      "catalog": {
+        "source": "configured",
+        "entitlements": {
+          "bedrock-work": "allowed"
+        }
+      },
+      "capabilities": {
+        "bedrock-invoke": {
+          "http-json": {
+            "operations": [
+              "generate"
+            ],
+            "features": [
+              "text",
+              "tools",
+              "parallel_tools",
+              "inline_images",
+              "structured_output",
+              "signed_state"
+            ]
+          }
+        }
       }
     }
-  ]
+  ],
+  "admission": {
+    "max_concurrency": 128,
+    "queue_limit": 128,
+    "queue_timeout_seconds": 0,
+    "budget_usd": null,
+    "budget_period": "process",
+    "unknown_cost_policy": "allow"
+  },
+  "limits": {
+    "request_deadline_seconds": 120
+  }
 }
-

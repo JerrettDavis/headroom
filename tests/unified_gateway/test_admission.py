@@ -85,7 +85,7 @@ def test_http_admission_denial_precedes_credential_acquisition(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
-    app.state.gateway_admission = AdmissionController(
+    app.state.gateway_runtime.admission = AdmissionController(
         budget_limit=0.0,
         max_concurrency=1,
         queue_limit=0,
@@ -96,7 +96,7 @@ def test_http_admission_denial_precedes_credential_acquisition(
         async def acquire(self, *_args, **_kwargs):
             raise AssertionError("credential acquisition must not run after admission denial")
 
-    app.state.gateway_credential_broker = Broker()
+    app.state.gateway_runtime.dependencies.broker = Broker()
 
     response = TestClient(app).post(
         "/v1/responses",

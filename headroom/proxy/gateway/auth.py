@@ -10,6 +10,7 @@ from starlette.datastructures import Headers
 from headroom.proxy.gateway.config import GatewayConfigSnapshot, Protocol, RouteConfig
 from headroom.proxy.gateway.context import GatewayPrincipal
 from headroom.proxy.gateway.errors import GatewayAuthError, GatewayAuthorizationError
+from headroom.proxy.gateway.models import CatalogSnapshot
 from headroom.proxy.loopback_guard import is_loopback_host_header
 
 
@@ -19,6 +20,8 @@ class GatewayAuthenticator:
     def __init__(self, snapshot: GatewayConfigSnapshot, environ: Mapping[str, str]) -> None:
         resolved: list[tuple[str, str, GatewayPrincipal]] = []
         for principal in snapshot.client_auth.principals:
+            if not principal.enabled:
+                continue
             env_name = principal.secret_ref.removeprefix("env:")
             secret = environ.get(env_name)
             if not secret:
@@ -70,8 +73,19 @@ class GatewayAuthenticator:
 class GatewayAuthorizer:
     """Resolve only principal-visible routes and protocols."""
 
-    def __init__(self, snapshot: GatewayConfigSnapshot) -> None:
+    def __init__(
+        self, snapshot: GatewayConfigSnapshot, catalog: CatalogSnapshot | None = None
+    ) -> None:
+        from headroom.proxy.gateway.models import ModelRegistry
+
+        self.catalog = catalog if catalog is not None else ModelRegistry(snapshot)
         self._routes_by_model = {route.public_model: route for route in snapshot.routes}
+        self._unpriced_blocked = frozenset(
+            p.id
+            for p in snapshot.client_auth.principals
+            if snapshot.admission.unknown_cost_policy == "block"
+            or p.admission.unknown_cost_policy == "block"
+        )
 
     def authorize(
         self,
@@ -80,6 +94,8 @@ class GatewayAuthorizer:
         scope: str,
         protocol: Protocol,
         public_model: str,
+        transport: str = "http-json",
+        features: frozenset[str] = frozenset({"text"}),
     ) -> RouteConfig:
         if scope not in principal.scopes:
             raise GatewayAuthorizationError(
@@ -87,7 +103,7 @@ class GatewayAuthorizer:
                 code="gateway_scope_forbidden",
                 message="Gateway scope is not granted",
             )
-        route = self._routes_by_model.get(public_model)
+        route = self.catalog.route_for_model(public_model)
         if route is None or route.id not in principal.routes:
             raise GatewayAuthorizationError(
                 status_code=404,
@@ -99,6 +115,22 @@ class GatewayAuthorizer:
                 status_code=400,
                 code="gateway_protocol_unavailable",
                 message="Model is unavailable for this protocol",
+            )
+        if not self.catalog.eligible_accounts(
+            route, protocol=protocol, transport=transport, features=features
+        ):
+            raise GatewayAuthorizationError(
+                status_code=400,
+                code="gateway_unsupported_capability",
+                message="Requested capability is unavailable",
+            )
+        # This publication batch has no qualified cost evaluator yet. Keep strict
+        # policies closed until the atomic-ledger batch supplies a proven bound.
+        if scope == "inference" and principal.id in self._unpriced_blocked:
+            raise GatewayAuthorizationError(
+                status_code=429,
+                code="gateway_admission_unknown_cost",
+                message="Generation cost bound is unavailable",
             )
         return route
 
