@@ -295,7 +295,10 @@ def _optional_number(payload: dict[str, Any], name: str) -> float | None:
         return None
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         _unsupported(name)
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        _unsupported(name)
     if not math.isfinite(number):
         _unsupported(name)
     return number

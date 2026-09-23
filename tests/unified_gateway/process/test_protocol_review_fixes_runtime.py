@@ -131,3 +131,80 @@ def test_native_path_alias_changes_only_model_component(
         assert response.status_code == 200
         assert len(calls) == 1
         assert calls[0][0] == expected + ("?alt=sse" if streamed else "")
+
+
+@pytest.mark.parametrize("ingress", ["anthropic-messages", "gemini-generate"])
+@pytest.mark.parametrize(
+    "detail", [None, {"cached_tokens": None}], ids=["detail-null", "unit-null"]
+)
+def test_translated_nullable_usage_retains_cache_over_tls(local_pki, tmp_path, ingress, detail):
+    def configure(raw):
+        raw["routes"][0].update(
+            native_protocols=["openai-chat"],
+            ingress_protocols=[ingress],
+            translation="qualified",
+            capabilities={ingress: {"http-stream": {"features": ["text", "inline_images"]}}},
+        )
+
+    def handler(upstream):
+        stream_headers(upstream)
+        frame(
+            upstream,
+            b'data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}],"usage":{"prompt_tokens":5,"prompt_tokens_details":{"cached_tokens":3}}}\n\n'
+            b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+        )
+        frame(
+            upstream,
+            b"data: "
+            + json.dumps(
+                {
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 5,
+                        "completion_tokens": 2,
+                        "total_tokens": 7,
+                        "prompt_tokens_details": detail,
+                    },
+                }
+            ).encode()
+            + b"\n\ndata: [DONE]\n\n",
+        )
+
+    path, body = (
+        (
+            "/v1/messages",
+            {"model": "fixture-model", "messages": [], "stream": True, "max_tokens": 8},
+        )
+        if ingress == "anthropic-messages"
+        else ("/v1beta/models/fixture-model:streamGenerateContent", {"contents": []})
+    )
+    with http_process(local_pki, tmp_path, handler, configure=configure) as (client, calls, _, _):
+        response = client.post(path, json=body)
+        assert response.status_code == 200
+        events = [
+            json.loads(line[6:])
+            for line in response.content.splitlines()
+            if line.startswith(b"data: ")
+        ]
+        if ingress == "gemini-generate":
+            assert events[-1]["candidates"] == [{"index": 0, "finishReason": "STOP"}]
+            assert events[-1]["usageMetadata"] == {
+                "promptTokenCount": 5,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 7,
+                "cachedContentTokenCount": 3,
+            }
+        else:
+            assert events[-1]["type"] == "message_stop"
+            assert events[-2]["usage"] == {
+                "input_tokens": 2,
+                "output_tokens": 2,
+                "cache_read_input_tokens": 3,
+            }
+        assert len(calls) == 1
+        probe = client.get("/__test/idle").json()
+        assert probe["operations"][0]["terminal"] == "success"
+        assert probe["ledger"]["known_micro_usd"] == 9
+        # The final null detail does not establish complete charge finality.
+        assert probe["ledger"]["unknown_charge_count"] == 1
+        assert probe["active"] == probe["queued"] == 0

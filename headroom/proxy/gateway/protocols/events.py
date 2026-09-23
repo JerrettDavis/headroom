@@ -70,18 +70,28 @@ async def translate_sse_stream(
     open_block: int | None = None
     next_block = 0
 
+    def merge_usage(previous: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(previous)
+        for key, value in snapshot.items():
+            prior = previous.get(key)
+            # Null is no new knowledge, not a retraction of an observed unit.
+            if value is None and key in previous:
+                continue
+            if isinstance(value, dict) and isinstance(prior, dict):
+                value = merge_usage(prior, value)
+            elif type(value) is int and type(prior) is int and value < prior:
+                # Counts are cumulative snapshots, never deltas or corrections.
+                raise stream_error("malformed")
+            merged[key] = value
+        return merged
+
     def observe_usage(raw: Any) -> None:
         nonlocal source_usage, usage
         if raw is None:
             return
         if not isinstance(raw, dict):
             raise stream_error("malformed")
-        merged = dict(source_usage)
-        for key, value in raw.items():
-            if isinstance(value, dict) and isinstance(merged.get(key), dict):
-                merged[key] = {**merged[key], **value}
-            else:
-                merged[key] = value
+        merged = merge_usage(source_usage, raw)
         usage = mapped_usage(source_protocol, target_protocol, merged)
         source_usage = merged
 

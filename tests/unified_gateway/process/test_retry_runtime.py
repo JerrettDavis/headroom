@@ -143,8 +143,16 @@ def test_overload_storm_respects_attempt_queue_and_deadline_bounds(
     maximum,  # noqa: F811
 ):  # noqa: F811
     release = threading.Event()
+    upstream_arrivals = threading.Event()
+    arrival_lock = threading.Lock()
+    arrivals = 0
 
     def handler(upstream):
+        nonlocal arrivals
+        with arrival_lock:
+            arrivals += 1
+            if arrivals == 2:
+                upstream_arrivals.set()
         assert release.wait(10)
         body = b'{"error":{"type":"overloaded_error","message":"SECRET"}}'
         upstream.send_response(529)
@@ -183,6 +191,8 @@ def test_overload_storm_respects_attempt_queue_and_deadline_bounds(
                 # while two provider sockets and two queue positions remain held.
                 for _ in range(4):
                     assert next(completed).result().status_code == 429
+                # Admission can precede TLS arrival; wait for the actual handlers.
+                assert upstream_arrivals.wait(2)
                 probe = client.get("/__test/probe").json()
                 assert probe["active"] == probe["queued"] == 2
                 assert len(calls) == 2
