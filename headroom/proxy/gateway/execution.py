@@ -199,13 +199,25 @@ class GatewayOperation:
         )
 
     async def close(
-        self, result: TerminalResult, *, failure_origin: FailureOrigin = "none"
+        self,
+        result: TerminalResult,
+        *,
+        failure_origin: FailureOrigin = "none",
+        cleanup_deadline: float | None = None,
     ) -> None:
         if self._close_task is None:
-            self._close_task = asyncio.create_task(self._finish(result, failure_origin))
+            self._close_task = asyncio.create_task(
+                self._finish(result, failure_origin, cleanup_deadline=cleanup_deadline)
+            )
         await asyncio.shield(self._close_task)
 
-    async def _finish(self, result: TerminalResult, failure_origin: FailureOrigin) -> None:
+    async def _finish(
+        self,
+        result: TerminalResult,
+        failure_origin: FailureOrigin,
+        *,
+        cleanup_deadline: float | None = None,
+    ) -> None:
         try:
             pending = self._pending_reservation
             self._pending_reservation = None
@@ -224,7 +236,7 @@ class GatewayOperation:
         finally:
             self.runtime.admission.forget_operation(self.id)
             self.runtime.active_work.pop(self.id, None)
-            await self.runtime.release(self.generation)
+            await self.runtime.release(self.generation, cleanup_deadline=cleanup_deadline)
             if not self.runtime.active_work:
                 self.runtime._work_empty.set()
             self._update_metrics()

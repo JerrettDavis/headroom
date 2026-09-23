@@ -101,8 +101,26 @@ class GatewayWebSocketSession:
     def spawn(self, coro: Any) -> asyncio.Task[Any]:
         task = asyncio.create_task(coro)
         self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+        task.add_done_callback(self._task_finished)
         return task
+
+    def _task_finished(self, task: asyncio.Task[Any]) -> None:
+        self.tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    async def wait_owned(self, coro: Any, deadline: float) -> Any:
+        task = self.spawn(coro)
+        remaining = deadline - time.monotonic()
+        try:
+            if remaining > 0:
+                done, _ = await asyncio.wait({task}, timeout=remaining)
+                if task in done:
+                    return task.result()
+            raise _invalid("gateway_websocket_timeout", 504)
+        finally:
+            if not task.done():
+                task.cancel()
 
     async def cancel(self, *, cancel_owner: bool = True) -> None:
         if not cancel_owner:
@@ -290,7 +308,7 @@ class GatewayWebSocketSession:
             self.operation = None
             self.observer = None
         # Release the turn slot before a client can react to the terminal event.
-        await self.websocket.send_text(frame)
+        await self.wait_owned(self.websocket.send_text(frame), operation.deadline)
         return terminal
 
     async def run(self) -> None:
@@ -387,51 +405,62 @@ class GatewayWebSocketSession:
         except GatewayPublicError as exc:
             origin = "gateway" if exc.status_code < 500 else "upstream"
             with contextlib.suppress(Exception):
-                await self.websocket.send_json(
-                    {"type": "error", "error": {"code": exc.code, "message": exc.message}}
+                await self.wait_owned(
+                    self.websocket.send_json(
+                        {"type": "error", "error": {"code": exc.code, "message": exc.message}}
+                    ),
+                    deadline,
                 )
         except Exception:
             with contextlib.suppress(Exception):
-                await self.websocket.send_json(
-                    {
-                        "type": "error",
-                        "error": {
-                            "code": "gateway_upstream_error",
-                            "message": "Upstream request failed",
+                await self.wait_owned(
+                    self.websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": {
+                                "code": "gateway_upstream_error",
+                                "message": "Upstream request failed",
+                            },
                         },
-                    }
+                    ),
+                    deadline,
                 )
         finally:
             self._finish_task = asyncio.create_task(self.finish(result, origin))
             await asyncio.shield(self._finish_task)
 
     async def finish(self, result: TerminalResult, origin: FailureOrigin) -> None:
-        tasks = tuple(self.tasks)
+        deadline = time.monotonic() + self.runtime.snapshot.limits.shutdown_cleanup_seconds
+        tasks = set(self.tasks)
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if self.context is not None:
+            tasks.add(self.spawn(self.context.__aexit__(None, None, None)))
+        tasks.add(self.spawn(self.websocket.close(code=1000 if result == "cancelled" else 1011)))
         try:
-            try:
-                if self.context is not None:
-                    with contextlib.suppress(Exception):
-                        await asyncio.wait_for(
-                            self.context.__aexit__(None, None, None),
-                            self.runtime.snapshot.limits.shutdown_cleanup_seconds,
-                        )
-                with contextlib.suppress(Exception):
-                    await self.websocket.close(code=1000 if result == "cancelled" else 1011)
-            finally:
-                if self.operation is not None:
-                    await self.operation.close(result, failure_origin=origin)
+            await asyncio.wait(tasks, timeout=max(0, deadline - time.monotonic()))
         finally:
+            # A cancellation-resistant transport stays explicitly owned, but
+            # cannot defer settlement or release of the logical operation.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+                    self.runtime._cleanup_tasks.add(task)
+                    task.add_done_callback(self.runtime._cleanup_finished)
             try:
-                if self.generation is not None:
-                    await self.runtime.release(self.generation)
+                if self.operation is not None:
+                    await self.operation.close(
+                        result, failure_origin=origin, cleanup_deadline=deadline
+                    )
             finally:
-                self.runtime.active_work.pop(self.id, None)
-                if not self.runtime.active_work:
-                    self.runtime._work_empty.set()
-                self.finished.set()
+                try:
+                    if self.generation is not None:
+                        await self.runtime.release(self.generation, cleanup_deadline=deadline)
+                finally:
+                    self.runtime.active_work.pop(self.id, None)
+                    if not self.runtime.active_work:
+                        self.runtime._work_empty.set()
+                    self.finished.set()
 
 
 async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) -> None:

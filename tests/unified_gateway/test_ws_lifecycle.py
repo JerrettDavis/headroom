@@ -87,7 +87,7 @@ class Upstream:
 
 
 @asynccontextmanager
-async def session(monkeypatch, raw=None):
+async def session(monkeypatch, raw=None, *, downstream_send=None):
     runtime = GatewayRuntime(
         GatewayConfigSnapshot.model_validate(raw or configuration()),
         environ={
@@ -100,6 +100,12 @@ async def session(monkeypatch, raw=None):
     upstream = Upstream()
     monkeypatch.setattr("websockets.connect", lambda *args, **kwargs: upstream)
     headers = [(b"host", b"127.0.0.1"), (b"authorization", b"Bearer client-secret")]
+
+    async def send(message):
+        if downstream_send is not None:
+            await downstream_send(message)
+        await outgoing.put(message)
+
     socket = WebSocket(
         {
             "type": "websocket",
@@ -108,7 +114,7 @@ async def session(monkeypatch, raw=None):
             "app": SimpleNamespace(state=SimpleNamespace(gateway_runtime=runtime)),
         },
         incoming.get,
-        outgoing.put,
+        send,
     )
     # Authenticate using the same decoded headers used by Starlette's handshake middleware.
     socket.scope["gateway_principal"] = runtime.authenticator.authenticate(socket.headers)

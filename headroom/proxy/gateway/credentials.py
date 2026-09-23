@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -128,6 +129,14 @@ class CredentialBroker:
                 continue
             async with self._locks[credential_id]:
                 self._check_available(credential_id)
+                # A cancelled caller must not free the account's *source* slot.
+                # Join its discarded result before starting another acquisition;
+                # never cancel the task wrapping a native SDK thread.
+                for pending, account in tuple(self._pending.items()):
+                    if account == credential_id:
+                        with contextlib.suppress(Exception):
+                            await asyncio.shield(pending)
+                self._check_available(credential_id)
                 epoch = self._epochs.get(credential_id, 0)
                 now = time.time()
                 cached = self._leases.get(credential_id)
@@ -139,11 +148,7 @@ class CredentialBroker:
                     pending = asyncio.create_task(source.acquire(now=now))
                     self._pending[pending] = credential_id
                     pending.add_done_callback(self._source_finished)
-                    try:
-                        lease = await asyncio.shield(pending)
-                    except asyncio.CancelledError:
-                        pending.cancel()
-                        raise
+                    lease = await asyncio.shield(pending)
                 except GatewayCredentialUnavailable:
                     unavailable = True
                     continue
@@ -190,9 +195,8 @@ class CredentialBroker:
         self._epochs[credential_id] = self._epochs.get(credential_id, 0) + 1
         self._revoked.add(credential_id)
         self._leases.pop(credential_id, None)
-        for task, account in tuple(self._pending.items()):
-            if account == credential_id:
-                task.cancel()
+        # Owners cancel the waiters, not this source task. Cancelling a
+        # to_thread wrapper cannot stop the worker and would lose its ownership.
 
     async def aclose(self) -> None:
         if self._close_task is None:
@@ -203,8 +207,6 @@ class CredentialBroker:
     async def _finish_close(self) -> None:
         self._leases.clear()
         pending = tuple(self._pending)
-        for task in pending:
-            task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
         for source in self._sources.values():
             close = getattr(source, "aclose", None)

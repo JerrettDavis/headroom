@@ -272,8 +272,11 @@ class AdmissionController:
         grants: dict[str, frozenset[str]] | None = None,
         routes: frozenset[str] | None = None,
         publish: Callable[[], None] | None = None,
+        validate: Callable[[], None] | None = None,
     ) -> None:
         async with self._condition:
+            if validate is not None:
+                validate()
             previous_generation = self._generation
             self._install(policy, principals, account_limits, generation, grants, routes)
             if publish is not None:

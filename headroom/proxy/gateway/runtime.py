@@ -161,6 +161,8 @@ class GatewayRuntime:
         self._refresh_tasks: dict[tuple[int, str, str], asyncio.Task[dict[str, object]]] = {}
         self._retired: list[RuntimeGeneration] = []
         self._generation_users: dict[int, int] = {}
+        self._generations_empty = asyncio.Event()
+        self._generations_empty.set()
         self._shutdown_task: asyncio.Task[None] | None = None
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
         self._cleanup_deadline: float | None = None
@@ -262,6 +264,9 @@ class GatewayRuntime:
             )
             try:
                 await self._publish(candidate)
+            except GatewayAuthorizationError as exc:
+                await self._close_generation(candidate)
+                return ReloadResult(False, self.generation, exc.code)
             except ValueError:
                 await self._close_generation(candidate)
                 return ReloadResult(False, self.generation, "invalid_configuration")
@@ -327,27 +332,33 @@ class GatewayRuntime:
             },
             routes=frozenset(r.id for r in snapshot.routes if r.enabled),
             publish=publish,
+            validate=self._require_ready,
         )
         await self._cancel_revoked(candidate)
         await self._retire_unused()
 
     def retain(self, generation: RuntimeGeneration) -> None:
+        self._generations_empty.clear()
         self._generation_users[generation.number] = (
             self._generation_users.get(generation.number, 0) + 1
         )
 
-    async def release(self, generation: RuntimeGeneration) -> None:
+    async def release(
+        self, generation: RuntimeGeneration, *, cleanup_deadline: float | None = None
+    ) -> None:
         count = self._generation_users.get(generation.number, 0)
         if count <= 1:
             self._generation_users.pop(generation.number, None)
         else:
             self._generation_users[generation.number] = count - 1
-        await self._retire_unused()
+        if not self._generation_users:
+            self._generations_empty.set()
+        await self._retire_unused(cleanup_deadline=cleanup_deadline)
 
     async def _close_generation(self, generation: RuntimeGeneration) -> None:
         await asyncio.gather(generation.http_client.aclose(), generation.broker.aclose())
 
-    async def _retire_unused(self) -> None:
+    async def _retire_unused(self, *, cleanup_deadline: float | None = None) -> None:
         unused = [
             generation
             for generation in self._retired
@@ -362,7 +373,10 @@ class GatewayRuntime:
             # An SDK thread cannot be force-stopped safely. Keep ownership and
             # close its source after the guarded late result, within a bounded
             # wait for the caller (never publish that result into a new broker).
-            await asyncio.wait(tasks, timeout=self._cleanup_remaining())
+            timeout = self._cleanup_remaining()
+            if cleanup_deadline is not None:
+                timeout = min(timeout, max(0, cleanup_deadline - time.monotonic()))
+            await asyncio.wait(tasks, timeout=timeout)
 
     def _cleanup_remaining(self) -> float:
         if self._cleanup_deadline is None:
@@ -467,27 +481,53 @@ class GatewayRuntime:
                     item["enabled"] = False
             snapshot = GatewayConfigSnapshot.model_validate(raw)
             candidate = self._build_generation(snapshot, self.generation + 1)
-            await self._publish(candidate)
+            try:
+                await self._publish(candidate)
+            except GatewayAuthorizationError as exc:
+                await self._close_generation(candidate)
+                return ReloadResult(False, self.generation, exc.code)
         return ReloadResult(True, candidate.number)
 
+    def _require_ready(self) -> None:
+        if not self._ready:
+            raise GatewayAuthorizationError(
+                status_code=503,
+                code="gateway_shutting_down",
+                message="Gateway is shutting down",
+            )
+
     async def refresh_catalog(self) -> dict[str, object]:
+        # This check and task registration do not yield. Publication performs
+        # its own check after its lock wait, coordinated with shutdown's
+        # synchronous readiness transition on the same event loop.
+        self._require_ready()
         generation = self.capture()
         key = (generation.number, "catalog", "complete")
         task = self._refresh_tasks.get(key)
         if task is None:
             self.retain(generation)
-            task = asyncio.create_task(self._owned_refresh(generation))
+            task = asyncio.create_task(self._refresh_complete(generation))
             self._refresh_tasks[key] = task
-            task.add_done_callback(lambda done: self._refresh_tasks.pop(key, None))
+            task.add_done_callback(lambda done: self._refresh_finished(key, generation, done))
         return await asyncio.shield(task)
 
-    async def _owned_refresh(self, generation: RuntimeGeneration) -> dict[str, object]:
-        try:
-            return await self._refresh_complete(generation)
-        finally:
-            await self.release(generation)
+    def _refresh_finished(
+        self,
+        key: tuple[int, str, str],
+        generation: RuntimeGeneration,
+        task: asyncio.Task[dict[str, object]],
+    ) -> None:
+        self._refresh_tasks.pop(key, None)
+        # A coroutine cancelled before its first step never enters a finally
+        # block. Its registered generation lease must still be released.
+        cleanup = asyncio.create_task(self.release(generation))
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_finished)
+        if not task.cancelled():
+            task.exception()
 
     async def _refresh_complete(self, generation: RuntimeGeneration) -> dict[str, object]:
+        self._require_ready()
         semaphore = asyncio.Semaphore(8)
 
         async def probe(
@@ -495,6 +535,7 @@ class GatewayRuntime:
         ) -> tuple[str, str, tuple[ProviderModelMetadata, ...] | None]:
             try:
                 async with semaphore:
+                    self._require_ready()
                     reader = self.dependencies.metadata_reader or self._read_metadata
                     models = await asyncio.wait_for(
                         reader(generation, route, account),
@@ -530,6 +571,7 @@ class GatewayRuntime:
             )
         )
         async with self._reload_lock:
+            self._require_ready()
             current = self._generation
             if current.number != generation.number:
                 return {
@@ -688,6 +730,9 @@ class GatewayRuntime:
 
     async def _close_dependencies(self) -> None:
         await self._work_empty.wait()
+        # Catalog refreshes aren't logical inference operations, but their
+        # captured generations can still be using these injected dependencies.
+        await self._generations_empty.wait()
         await self.resources.clear()
         for dependency, owned in (
             (self.dependencies.http_client, self._generation.http_client),
