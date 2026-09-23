@@ -11,9 +11,19 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Literal, NoReturn
 
-from headroom.proxy.gateway.config import AdmissionPolicy, PricingConfig, PrincipalAdmissionPolicy
+from headroom.proxy.gateway.config import (
+    AdmissionPolicy,
+    ModelBounds,
+    PricingConfig,
+    PrincipalAdmissionPolicy,
+)
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
-from headroom.proxy.gateway.usage import UsageObservation, evaluate_cost, usd_to_micro
+from headroom.proxy.gateway.usage import (
+    CostEvaluation,
+    UsageObservation,
+    evaluate_cost,
+    usd_to_micro,
+)
 
 AcceptanceState = Literal[
     "unsent", "proven_rejected", "acceptance_unknown", "accepted", "output_exposed"
@@ -33,6 +43,8 @@ class AdmissionRequest:
     deadline: float = float("inf")
     pricing: PricingConfig | None = None
     operation_id: str | None = None
+    cost_bound: CostEvaluation | None = None
+    model_bounds: ModelBounds | None = None
 
     def __post_init__(self) -> None:
         upper = self.reserved_upper_micro_usd
@@ -62,6 +74,7 @@ class LedgerSnapshot:
     reserved_micro_usd: int = 0
     unknown_charge_count: int = 0
     unbounded_charge_count: int = 0
+    unqualified_charge_count: int = 0
 
     @property
     def total_micro_usd(self) -> int:
@@ -74,7 +87,7 @@ class AdmissionReservation:
     def __init__(self, controller: AdmissionController, reservation_id: str) -> None:
         self._controller = controller
         self._reservation_id = reservation_id
-        self._finalizer: asyncio.Task[None] | None = None
+        self._finalizer: asyncio.Task[CostEvaluation] | None = None
 
     async def finalize(
         self,
@@ -82,7 +95,7 @@ class AdmissionReservation:
         acceptance: AcceptanceState = "accepted",
         *,
         actual_cost: float | None = None,
-    ) -> None:
+    ) -> CostEvaluation:
         if acceptance not in {
             "unsent",
             "proven_rejected",
@@ -106,7 +119,7 @@ class AdmissionReservation:
             self._finalizer = asyncio.create_task(
                 self._controller._close(self._reservation_id, usage, acceptance)
             )
-        await asyncio.shield(self._finalizer)
+        return await asyncio.shield(self._finalizer)
 
     async def release_unsent(self) -> None:
         await self.finalize(UsageObservation(), "unsent")
@@ -159,6 +172,7 @@ class AdmissionController:
         self._revoked: set[tuple[str, str]] = set()
         self._violated: set[tuple[str, str | None]] = set()
         self._admitted_operations: dict[str, tuple[str, str, int]] = {}
+        self._registered_operations: dict[str, str] = {}
 
     @classmethod
     def from_policy(
@@ -212,6 +226,41 @@ class AdmissionController:
 
     def forget_operation(self, operation_id: str) -> None:
         self._admitted_operations.pop(operation_id, None)
+        self._registered_operations.pop(operation_id, None)
+
+    def register_operation(self, operation_id: str, principal_id: str) -> None:
+        """Bound owners without taking another tenant's reserved allocation.
+
+        This synchronous, no-I/O transition runs on the controller's event loop,
+        so policy publication cannot interleave with its checks or publication.
+        """
+        if self._shutdown:
+            self._raise_denied("shutdown")
+        if self._principals is not None and principal_id not in self._principals:
+            self._raise_denied("revoked")
+        if operation_id in self._registered_operations:
+            raise ValueError("operation already registered")
+        counts = {
+            key: sum(owner == key for owner in self._registered_operations.values())
+            for key in (self._principals or {})
+        }
+        principal = self._principal_policy(principal_id)
+        if (
+            principal is not None
+            and counts[principal_id] >= principal.max_concurrency + principal.queue_limit
+        ):
+            self._raise_denied("queue_full")
+        protected = sum(
+            max(0, policy.reserved_concurrency - counts[key])
+            for key, policy in (self._principals or {}).items()
+            if key != principal_id
+        )
+        if (
+            len(self._registered_operations) + 1 + protected
+            > self._policy.max_concurrency + self._policy.queue_limit
+        ):
+            self._raise_denied("queue_full")
+        self._registered_operations[operation_id] = principal_id
 
     async def update_policy(
         self,
@@ -265,6 +314,23 @@ class AdmissionController:
             for key, p in principals.items()
         ):
             raise ValueError("unbounded principal liabilities prevent strict budget")
+        if policy.budget_usd is not None and (
+            self._ledger.unqualified_charge_count
+            or any(not self._has_qualified_bound(request) for request in self._active.values())
+        ):
+            raise ValueError("unqualified liabilities prevent strict budget")
+        if any(
+            p.budget_usd is not None
+            and (
+                self.snapshot(key).unqualified_charge_count
+                or any(
+                    request.principal_id == key and not self._has_qualified_bound(request)
+                    for request in self._active.values()
+                )
+            )
+            for key, p in principals.items()
+        ):
+            raise ValueError("unqualified principal liabilities prevent strict budget")
         if sum(p.reserved_concurrency for p in principals.values()) > policy.max_concurrency:
             raise ValueError("reserved concurrency exceeds global capacity")
         if any(type(limit) is not int or limit < 1 for limit in account_limits.values()):
@@ -318,6 +384,23 @@ class AdmissionController:
     def _principal_policy(self, principal_id: str) -> PrincipalAdmissionPolicy | None:
         return self._principals.get(principal_id) if self._principals is not None else None
 
+    @staticmethod
+    def _has_qualified_bound(request: AdmissionRequest) -> bool:
+        bound, pricing, model = request.cost_bound, request.pricing, request.model_bounds
+        return bool(
+            bound is not None
+            and pricing is not None
+            and model is not None
+            and bound.qualified_bound
+            and bound.basis == "configured_tariff"
+            and bound.reserved_upper_micro_usd is not None
+            and bound.reserved_upper_micro_usd == request.reserved_upper_micro_usd
+            and bound.tariff_revision == pricing.revision
+            and bound.provider_contract == model.provider_contract
+            and pricing.cache_read_usd_per_million is not None
+            and pricing.cache_create_usd_per_million is not None
+        )
+
     def _denial_reason(self, request: AdmissionRequest) -> str | None:
         if self._shutdown:
             return "shutdown"
@@ -365,7 +448,7 @@ class AdmissionController:
         ):
             if policy is None:
                 continue
-            if request.reserved_upper_micro_usd is None and (
+            if not self._has_qualified_bound(request) and (
                 policy.unknown_cost_policy == "block" or policy.budget_usd is not None
             ):
                 return "unknown_cost"
@@ -412,6 +495,8 @@ class AdmissionController:
         async with self._condition:
             self._drain()
             reason = self._denial_reason(request)
+            if reason is None and self._queues.get(request.principal_id):
+                reason = "concurrency"
             if reason is not None:
                 return AdmissionResult(False, reason, None)
             return AdmissionResult(True, None, self._admit(request))
@@ -420,6 +505,8 @@ class AdmissionController:
         async with self._condition:
             self._drain()
             reason = self._denial_reason(request)
+            if reason is None and self._queues.get(request.principal_id):
+                reason = "concurrency"
             if reason is None:
                 return self._admit(request)
             timeout = min(request.queue_timeout, request.deadline - time.monotonic())
@@ -512,11 +599,13 @@ class AdmissionController:
         self._ledger = changed(self._ledger)
         self._principal_ledgers[principal] = changed(self.snapshot(principal))
 
-    async def _close(self, key: str, usage: UsageObservation, acceptance: AcceptanceState) -> None:
+    async def _close(
+        self, key: str, usage: UsageObservation, acceptance: AcceptanceState
+    ) -> CostEvaluation:
         async with self._condition:
             request = self._active.pop(key, None)
             if request is None:
-                return
+                return CostEvaluation()
             cost = evaluate_cost(
                 usage, request.pricing, reserved_upper_micro_usd=request.reserved_upper_micro_usd
             )
@@ -531,6 +620,7 @@ class AdmissionController:
                 reserved_micro_usd=-(request.reserved_upper_micro_usd or 0),
                 unknown_charge_count=int(unknown),
                 unbounded_charge_count=int(unknown and request.reserved_upper_micro_usd is None),
+                unqualified_charge_count=int(unknown and not self._has_qualified_bound(request)),
             )
             if cost.bound_violated and not free:
                 self._violated.add(
@@ -538,6 +628,17 @@ class AdmissionController:
                 )
             self._drain()
             self._condition.notify_all()
+            return (
+                replace(
+                    cost,
+                    known_micro_usd=0,
+                    complete=True,
+                    basis="provider_reported",
+                    bound_violated=False,
+                )
+                if free
+                else cost
+            )
 
     async def shutdown(self) -> None:
         async with self._condition:

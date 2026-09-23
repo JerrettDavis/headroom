@@ -40,6 +40,9 @@ class UsageObservation:
     provenance: str = "unknown"
     charge_free: bool = False
     tariff_revision: str | None = None
+    # Retain the authoritative inclusive counter. Uncached input can decrease
+    # when a later snapshot refines cache detail, so it is not monotonic itself.
+    input_total_tokens: int | None = None
 
     def __post_init__(self) -> None:
         for count in (
@@ -47,6 +50,7 @@ class UsageObservation:
             self.output_tokens,
             self.cache_read_tokens,
             self.cache_create_tokens,
+            self.input_total_tokens,
         ):
             if count is not None and (type(count) is not int or count < 0):
                 raise ValueError("invalid usage count")
@@ -66,6 +70,7 @@ class CostEvaluation:
     complete: bool = False
     bound_violated: bool = False
     provider_contract: str | None = None
+    qualified_bound: bool = False
 
 
 def evaluate_cost(
@@ -165,7 +170,9 @@ def conservative_cost_bound(
         cost = bounds.max_input_tokens * max(Decimal(rate) for rate in rates if rate is not None)
         cost += output * Decimal(pricing.output_usd_per_million)
         maximum = int(cost.to_integral_value(rounding=ROUND_CEILING))
-    return replace(unknown, basis="configured_tariff", reserved_upper_micro_usd=maximum)
+    return replace(
+        unknown, basis="configured_tariff", reserved_upper_micro_usd=maximum, qualified_bound=True
+    )
 
 
 def _unbounded_shape(body: Mapping[str, Any]) -> bool:
@@ -214,6 +221,7 @@ def normalize_usage(
     if not isinstance(raw, dict):
         return previous or UsageObservation()
     cache_included = False
+    cache_reported = created_reported = False
     created: int | None
     if protocol in {"openai-chat", "openai-responses"}:
         input_key, output_key = (
@@ -222,33 +230,49 @@ def normalize_usage(
             else ("input_tokens", "output_tokens")
         )
         details = raw.get(input_key.replace("tokens", "tokens_details"), {})
+        cache_reported = isinstance(details, dict) and "cached_tokens" in details
         cache = _count(details.get("cached_tokens", 0)) if isinstance(details, dict) else None
         created, cache_included = 0, True
     elif protocol == "anthropic-messages":
         input_key, output_key = "input_tokens", "output_tokens"
         cache = _count(raw.get("cache_read_input_tokens", 0))
         created = _count(raw.get("cache_creation_input_tokens", 0))
+        cache_reported = "cache_read_input_tokens" in raw
+        created_reported = "cache_creation_input_tokens" in raw
     elif protocol in {"gemini-generate", "vertex-generate"}:
         input_key, output_key = "promptTokenCount", "candidatesTokenCount"
         cache, created, cache_included = _count(raw.get("cachedContentTokenCount", 0)), 0, True
+        cache_reported = "cachedContentTokenCount" in raw
     elif protocol == "bedrock-invoke":
         input_key, output_key = "inputTokens", "outputTokens"
         cache, created = (
             _count(raw.get("cacheReadInputTokens", 0)),
             _count(raw.get("cacheWriteInputTokens", 0)),
         )
+        cache_reported = "cacheReadInputTokens" in raw
+        created_reported = "cacheWriteInputTokens" in raw
     else:
         return previous or UsageObservation()
     input_count, output_count = _count(raw.get(input_key)), _count(raw.get(output_key))
+    input_total = input_count if cache_included else None
     if protocol in {"gemini-generate", "vertex-generate"} and output_count is not None:
         thoughts = _count(raw.get("thoughtsTokenCount", 0))
         output_count = output_count + thoughts if thoughts is not None else None
     if cache_included and input_count is not None:
         input_count = input_count - cache if cache is not None and cache <= input_count else None
-    # Missing input usage cannot assert missing cache fields are zero.
+    # Preserve explicit cache-only refinements; absent input cannot assert
+    # omitted cache dimensions are zero or validate a contradictory partition.
     if input_count is None:
-        cache, created = None, None
-    result = UsageObservation(input_count, output_count, cache, created, provenance=protocol)
+        cache = cache if cache_reported and input_total is None else None
+        created = created if created_reported and input_total is None else None
+    result = UsageObservation(
+        input_count,
+        output_count,
+        cache,
+        created,
+        provenance=protocol,
+        input_total_tokens=input_total,
+    )
     if previous is not None:
         updates: dict[str, Any] = {}
         for field in fields(result):
@@ -260,6 +284,14 @@ def normalize_usage(
                 ]
                 updates[field.name] = max(known) if known else None
         result = replace(result, **updates)
+    if cache_included:
+        total, cached = result.input_total_tokens, result.cache_read_tokens
+        result = replace(
+            result,
+            input_tokens=total - cached
+            if total is not None and cached is not None and cached <= total
+            else None,
+        )
     counts = (
         result.input_tokens,
         result.output_tokens,

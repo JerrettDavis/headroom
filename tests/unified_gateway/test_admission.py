@@ -12,6 +12,7 @@ from headroom.proxy.gateway.config import GatewayConfigSnapshot
 from headroom.proxy.gateway.usage import UsageObservation
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
+from tests.unified_gateway.accounting_fixtures import qualified_request
 
 EXAMPLE = (
     Path(__file__).parents[2]
@@ -28,7 +29,9 @@ async def test_finalize_cancellation_cannot_drop_reservation() -> None:
     controller = AdmissionController(
         budget_limit=1, max_concurrency=1, queue_limit=0, unknown_cost_policy="block"
     )
-    reservation = await controller.reserve(AdmissionRequest("a", estimated_cost=0.5))
+    reservation = await controller.reserve(
+        qualified_request(AdmissionRequest("a", estimated_cost=0.5))
+    )
     async with controller._condition:
         finishing = asyncio.create_task(
             reservation.finalize(
@@ -60,8 +63,12 @@ async def test_atomic_budget_reservation_allows_only_one_boundary_request() -> N
     )
 
     results = await asyncio.gather(
-        controller.try_reserve(AdmissionRequest("principal-a", estimated_cost=0.75)),
-        controller.try_reserve(AdmissionRequest("principal-a", estimated_cost=0.75)),
+        controller.try_reserve(
+            qualified_request(AdmissionRequest("principal-a", estimated_cost=0.75))
+        ),
+        controller.try_reserve(
+            qualified_request(AdmissionRequest("principal-a", estimated_cost=0.75))
+        ),
     )
 
     assert sorted(result.allowed for result in results) == [False, True]

@@ -10,7 +10,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from headroom.proxy.gateway.admission import AcceptanceState, AdmissionRequest, AdmissionReservation
@@ -27,7 +27,7 @@ from headroom.proxy.gateway.observability import (
     TerminalResult,
 )
 from headroom.proxy.gateway.routing import ExposureState, ProviderContract, RetryDecision
-from headroom.proxy.gateway.usage import CostEvaluation, UsageObservation, evaluate_cost
+from headroom.proxy.gateway.usage import CostEvaluation, UsageObservation
 
 if TYPE_CHECKING:
     from headroom.proxy.gateway.runtime import GatewayRuntime, RuntimeGeneration
@@ -73,11 +73,7 @@ class GatewayOperation:
             )
             for account in route.credentials
         }
-        capacity = (
-            runtime.snapshot.admission.max_concurrency + runtime.snapshot.admission.queue_limit
-        )
-        if len(runtime.active_work) >= capacity:
-            self._deny("queue_full")
+        runtime.admission.register_operation(self.id, principal.id)
         runtime.active_work[self.id] = self
         runtime._work_empty.clear()
 
@@ -122,19 +118,6 @@ class GatewayOperation:
             for p in self.generation.snapshot.client_auth.principals
             if p.id == self.principal.id
         )
-        current = self.runtime.snapshot
-        strict = current.admission.budget_usd is not None or any(
-            p.id == self.principal.id and p.admission.budget_usd is not None
-            for p in current.client_auth.principals
-        )
-        if strict and (
-            cost.basis != "configured_tariff"
-            or self.route.pricing is None
-            or self.route.model_bounds is None
-            or cost.tariff_revision != self.route.pricing.revision
-            or cost.provider_contract != self.route.model_bounds.provider_contract
-        ):
-            self._deny("unknown_cost")
         policy = self.generation.snapshot.admission
         request = AdmissionRequest(
             self.principal.id,
@@ -147,11 +130,18 @@ class GatewayOperation:
             deadline=self.deadline,
             pricing=self.route.pricing,
             operation_id=self.id,
+            cost_bound=cost,
+            model_bounds=self.route.model_bounds,
         )
         self._starting = True
         try:
-            self._pending_reservation = asyncio.create_task(self.runtime.admission.reserve(request))
-            reservation = await self._pending_reservation
+            pending = asyncio.create_task(self.runtime.admission.reserve(request))
+            self._pending_reservation = pending
+            reservation = await asyncio.shield(pending)
+            # No await in this handoff: close either owns the pending reservation,
+            # or sees the fully published attempt. It can never own both.
+            if self._close_task is not None or self._pending_reservation is not pending:
+                self._deny("closing")
             self.current_attempt = GatewayAttempt(self, account_ref, request, reservation)
             self._pending_reservation = None
             self._update_metrics()
@@ -217,12 +207,13 @@ class GatewayOperation:
     async def _finish(self, result: TerminalResult, failure_origin: FailureOrigin) -> None:
         try:
             pending = self._pending_reservation
+            self._pending_reservation = None
             if pending is not None:
-                pending.cancel()
+                if not pending.done():
+                    pending.cancel()
                 finished = await asyncio.gather(pending, return_exceptions=True)
                 if isinstance(finished[0], AdmissionReservation):
                     await finished[0].release_unsent()
-                self._pending_reservation = None
             if self.current_attempt is not None:
                 await self.current_attempt.close(result, failure_origin=failure_origin)
                 if result == "success" and self.attempts[-1].result != "success":
@@ -284,7 +275,7 @@ class GatewayAttempt:
         self.account_key = request.account_key
         self.lease_generation: int | None = None
         self.exposure = ExposureState.UNSENT
-        self.usage = UsageObservation()
+        self._usage = UsageObservation()
         self.upstream_close: Callable[[], Awaitable[None]] | None = None
         self._close_task: asyncio.Task[None] | None = None
 
@@ -292,8 +283,22 @@ class GatewayAttempt:
     def closed(self) -> bool:
         return self._close_task is not None and self._close_task.done()
 
+    @property
+    def usage(self) -> UsageObservation:
+        return self._usage
+
+    @usage.setter
+    def usage(self, observation: UsageObservation) -> None:
+        if self._close_task is not None:
+            raise ValueError("attempt observation is already finalized")
+        self._usage = observation
+
     def mark_sending(self) -> None:
-        if self.exposure != ExposureState.UNSENT or self._close_task is not None:
+        if (
+            self.exposure != ExposureState.UNSENT
+            or self._close_task is not None
+            or self.operation._close_task is not None
+        ):
             raise ValueError("invalid attempt exposure transition")
         self.exposure = ExposureState.ACCEPTANCE_UNKNOWN
 
@@ -336,32 +341,42 @@ class GatewayAttempt:
     ) -> None:
         if self._close_task is None:
             self._close_task = asyncio.create_task(
-                self._finish(result, failure_origin, retry_reason)
+                self._finish(
+                    result,
+                    failure_origin,
+                    retry_reason,
+                    self._usage,
+                    self.exposure,
+                    self.upstream_close,
+                )
             )
         await asyncio.shield(self._close_task)
 
     async def _finish(
-        self, result: TerminalResult, failure_origin: FailureOrigin, retry_reason: RetryReason
+        self,
+        result: TerminalResult,
+        failure_origin: FailureOrigin,
+        retry_reason: RetryReason,
+        usage: UsageObservation,
+        exposure: ExposureState,
+        upstream_close: Callable[[], Awaitable[None]] | None,
     ) -> None:
         try:
-            if self.upstream_close is not None:
+            if upstream_close is not None:
                 try:
                     await asyncio.wait_for(
-                        self.upstream_close(),
+                        upstream_close(),
                         self.operation.generation.snapshot.limits.shutdown_cleanup_seconds,
                     )
+                except asyncio.CancelledError:
+                    # Cancellation of the owned callback is a terminal fact. A
+                    # cancelled caller still propagates through close's shield.
+                    result, failure_origin = "cancelled", "network"
                 except Exception:
                     result, failure_origin = "failed", "network"
         finally:
-            await self.reservation.finalize(self.usage, cast(AcceptanceState, self.exposure.value))
-            cost = evaluate_cost(
-                self.usage,
-                self.request.pricing,
-                reserved_upper_micro_usd=self.request.reserved_upper_micro_usd,
-            )
-            if self.exposure == ExposureState.UNSENT:
-                cost = replace(cost, known_micro_usd=0, complete=True, basis="provider_reported")
-            self.operation.attempts.append(AttemptOutcome(result, self.exposure, cost, self.usage))
+            cost = await self.reservation.finalize(usage, cast(AcceptanceState, exposure.value))
+            self.operation.attempts.append(AttemptOutcome(result, exposure, cost, usage))
             self.operation.runtime.observability.record_attempt(
                 self.operation._event(
                     result,
@@ -369,7 +384,7 @@ class GatewayAttempt:
                     failure_origin=failure_origin,
                     retry_reason=retry_reason,
                 ),
-                self.usage,
+                usage,
                 cost,
             )
             self.operation._update_metrics()

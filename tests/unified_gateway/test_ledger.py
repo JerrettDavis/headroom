@@ -10,6 +10,7 @@ from headroom.proxy.gateway.admission import AdmissionController, AdmissionReque
 from headroom.proxy.gateway.config import AdmissionPolicy, PrincipalAdmissionPolicy
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
 from headroom.proxy.gateway.usage import UsageObservation
+from tests.unified_gateway.accounting_fixtures import qualified_request
 
 
 def controller(*, cap="0.000010", maximum=2, principals=None, accounts=None, queue=4):
@@ -29,14 +30,16 @@ def controller(*, cap="0.000010", maximum=2, principals=None, accounts=None, que
 
 
 def request(principal="a", *, upper=5, route="r", account="key", timeout=0, generation=1):
-    return AdmissionRequest(
-        principal,
-        route_id=route,
-        account_key=account,
-        generation=generation,
-        reserved_upper_micro_usd=upper,
-        deadline=time.monotonic() + 2,
-        queue_timeout=timeout,
+    return qualified_request(
+        AdmissionRequest(
+            principal,
+            route_id=route,
+            account_key=account,
+            generation=generation,
+            reserved_upper_micro_usd=upper,
+            deadline=time.monotonic() + 2,
+            queue_timeout=timeout,
+        )
     )
 
 

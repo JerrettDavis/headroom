@@ -15,6 +15,7 @@ from headroom.proxy.gateway.errors import GatewayAuthorizationError
 from headroom.proxy.gateway.observability import GatewayEvent, GatewayObservability
 from headroom.proxy.gateway.runtime import GatewayRuntime
 from headroom.proxy.gateway.usage import CostEvaluation, UsageObservation
+from tests.unified_gateway.accounting_fixtures import qualified_request
 from tests.unified_gateway.test_admission import EXAMPLE
 
 
@@ -63,7 +64,7 @@ async def test_runtime_enforces_configured_budget_without_credential_acquisition
     try:
         principal = runtime.snapshot.client_auth.principals[0].id
         result = await runtime.admission.try_reserve(
-            AdmissionRequest(principal, estimated_cost=0.000002)
+            qualified_request(AdmissionRequest(principal, estimated_cost=0.000002))
         )
         assert result.allowed is False
         assert result.reason == "budget"
@@ -167,7 +168,7 @@ async def test_runtime_reload_preserves_ledger_and_updates_caps_atomically(tmp_p
         assert result.applied
         assert runtime.admission.snapshot().known_micro_usd == 4
         denied = await runtime.admission.try_reserve(
-            AdmissionRequest(op.principal.id, estimated_cost=0.000001)
+            qualified_request(AdmissionRequest(op.principal.id, estimated_cost=0.000001))
         )
         assert not denied.allowed and denied.reason == "budget"
     finally:
