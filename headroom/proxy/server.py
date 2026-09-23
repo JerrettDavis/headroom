@@ -2852,6 +2852,8 @@ class WebSocketAuthMiddleware:
                 authenticator = (
                     generation.authenticator if generation else self.gateway_authenticator
                 )
+                if authenticator is None:
+                    raise RuntimeError("Gateway authentication requires an authenticator")
                 scope["gateway_principal"] = authenticator.authenticate(headers)
                 scope["gateway_generation"] = generation
             except GatewayPublicError:
