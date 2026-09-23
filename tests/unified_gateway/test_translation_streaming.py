@@ -24,13 +24,19 @@ EXAMPLE = (
     / "gateway.api-keys.json"
 )
 
+ANTHROPIC_START = (
+    b'data: {"type":"message_start","message":{"content":[]}}\n\n'
+    b'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n'
+)
+
 
 @pytest.mark.asyncio
 async def test_translation_accepts_crlf_multiline_and_many_bounded_events():
     async def upstream():
         yield (
             b": ping\r\n\r\n" * 100000
-            + b'data: {"type":"content_block_delta",\r\ndata: "delta":{"type":"text_delta","text":"hello"}}\r\n\r\ndata: {"type":"message_stop"}\r\n\r\n'
+            + ANTHROPIC_START
+            + b'data: {"type":"content_block_delta","index":0,\r\ndata: "delta":{"type":"text_delta","text":"hello"}}\r\n\r\ndata: {"type":"content_block_stop","index":0}\r\n\r\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\r\n\r\ndata: {"type":"message_stop"}\r\n\r\n'
         )
 
     received = b"".join(
@@ -70,10 +76,11 @@ async def test_anthropic_text_delta_becomes_openai_chunk_before_stream_completio
     completion_released = False
 
     async def source():
+        yield ANTHROPIC_START
         yield b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,'
         yield b'"delta":{"type":"text_delta","text":"Hel"}}\n\n'
         assert completion_released
-        yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+        yield b'data: {"type":"content_block_stop","index":0}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n'
 
     translated = translate_sse_stream(
         "anthropic-messages",
@@ -83,13 +90,14 @@ async def test_anthropic_text_delta_becomes_openai_chunk_before_stream_completio
     )
     iterator = translated.__aiter__()
 
+    assert b'"role":"assistant"' in await anext(iterator)
     assert await anext(iterator) == (
-        b'data: {"object":"chat.completion.chunk","model":"public-claude",'
+        b'data: {"id":"gateway-translated","object":"chat.completion.chunk","created":0,"model":"public-claude",'
         b'"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}\n\n'
     )
     completion_released = True
     assert await anext(iterator) == (
-        b'data: {"object":"chat.completion.chunk","model":"public-claude",'
+        b'data: {"id":"gateway-translated","object":"chat.completion.chunk","created":0,"model":"public-claude",'
         b'"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
     )
     assert await anext(iterator) == b"data: [DONE]\n\n"
@@ -108,9 +116,10 @@ def test_gateway_dispatch_uses_incremental_translated_stream(
             200,
             headers={"content-type": "text/event-stream"},
             content=(
-                b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,'
+                ANTHROPIC_START
+                + b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,'
                 b'"delta":{"type":"text_delta","text":"Hi"}}\n\n'
-                b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+                b'data: {"type":"content_block_stop","index":0}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n'
             ),
         )
 
@@ -157,9 +166,11 @@ def test_gateway_dispatch_uses_incremental_translated_stream(
 
     assert response.status_code == 200
     assert response.content == (
-        b'data: {"object":"chat.completion.chunk","model":"public-claude",'
+        b'data: {"id":"gateway-translated","object":"chat.completion.chunk","created":0,"model":"public-claude",'
+        b'"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'
+        b'data: {"id":"gateway-translated","object":"chat.completion.chunk","created":0,"model":"public-claude",'
         b'"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n\n'
-        b'data: {"object":"chat.completion.chunk","model":"public-claude",'
+        b'data: {"id":"gateway-translated","object":"chat.completion.chunk","created":0,"model":"public-claude",'
         b'"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
         b"data: [DONE]\n\n"
     )

@@ -145,12 +145,15 @@ async def test_terminal_closes_without_waiting_for_provider_eof(protocol, termin
 @pytest.mark.parametrize(
     "protocol,terminal",
     [
-        ("openai-chat", b'data: {"choices":[{"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'),
+        (
+            "openai-chat",
+            b'data: {"choices":[{"finish_reason":"content_filter"}]}\n\ndata: [DONE]\n\n',
+        ),
         (
             "anthropic-messages",
             b'data: {"type":"message_delta","delta":{"stop_reason":"refusal"}}\n\ndata: {"type":"message_stop"}\n\n',
         ),
-        ("gemini-generate", b'data: {"candidates":[{"finishReason":"MAX_TOKENS"}]}\n\n'),
+        ("gemini-generate", b'data: {"candidates":[{"finishReason":"SAFETY"}]}\n\n'),
     ],
 )
 async def test_incomplete_and_refusal_are_not_success(protocol, terminal):

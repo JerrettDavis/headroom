@@ -145,7 +145,13 @@ def test_protocol_feature_rejected_before_identity_and_dispatch(
     assert client.get(f"/v1/models/{route['public_model']}", headers=headers).status_code == 200
     response = client.post(path, headers=headers, json={"model": route["public_model"], **payload})
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "gateway_unsupported_capability"
+    error = response.json()["error"]
+    if protocol == "gemini-generate":
+        assert error["code"] == 400
+        assert error["status"] == "INVALID_ARGUMENT"
+        assert error["details"] == [{"reason": "gateway_unsupported_capability"}]
+    else:
+        assert error["code"] == "gateway_unsupported_capability"
     assert calls == {"identity": 0, "upstream": 0}
 
 

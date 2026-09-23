@@ -189,9 +189,9 @@ class StreamObserver:
                 if not 0 <= index < 128:
                     raise stream_error("malformed")
                 self._choices[index] = choice.get("finish_reason") is not None
-                if choice.get("finish_reason") in {"length", "content_filter"} or choice.get(
-                    "delta", {}
-                ).get("refusal"):
+                if choice.get("finish_reason") == "content_filter" or choice.get("delta", {}).get(
+                    "refusal"
+                ):
                     self.terminal = "failed"
                     raise stream_error("upstream_error")
             if direct.availability != "unknown":
@@ -224,7 +224,6 @@ class StreamObserver:
                 self._apply_finality()
             if delta.get("stop_reason") in {
                 "refusal",
-                "max_tokens",
                 "model_context_window_exceeded",
             }:
                 self.terminal = "failed"
@@ -242,10 +241,12 @@ class StreamObserver:
                 if type(index) is not int or not 0 <= index < (self._expected_candidates or 8):
                     raise stream_error("malformed")
                 finish = candidate.get("finishReason")
-                if finish is not None and finish != "STOP":
+                if finish is not None and finish not in {"STOP", "MAX_TOKENS"}:
                     self.terminal = "failed"
                     raise stream_error("upstream_error")
-                self._choices[index] = finish == "STOP" or self._choices.get(index, False)
+                self._choices[index] = finish in {"STOP", "MAX_TOKENS"} or self._choices.get(
+                    index, False
+                )
             # A permitted usage-only tail must be consumed before closing.
             if self._choices and all(self._choices.values()) and direct.availability == "complete":
                 self._usage_final = True

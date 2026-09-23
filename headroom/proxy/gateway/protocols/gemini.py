@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any, Literal, cast
 
 from headroom.proxy.gateway.protocols.content import ContentBlock, Conversation, Message
-from headroom.proxy.gateway.protocols.openai import _reject_unknown, _unsupported
+from headroom.proxy.gateway.protocols.openai import (
+    _inline_image,
+    _plain_text,
+    _reject_unknown,
+    _unsupported,
+)
 
 _FIELDS = frozenset({"contents", "systemInstruction", "generationConfig"})
 
@@ -18,6 +23,7 @@ def decode_gemini(payload: dict[str, Any]) -> Conversation:
         if not isinstance(system_instruction, dict) or set(system_instruction) != {"parts"}:
             _unsupported("systemInstruction")
         system = _parts(system_instruction["parts"])
+        _plain_text(system)
     raw_contents = payload.get("contents")
     if not isinstance(raw_contents, list):
         _unsupported("contents")
@@ -78,6 +84,12 @@ def _parts(value: object) -> tuple[ContentBlock, ...]:
         _unsupported("parts")
     blocks: list[ContentBlock] = []
     for part in value:
+        if isinstance(part, dict) and set(part) == {"inlineData"}:
+            image = part["inlineData"]
+            if not isinstance(image, dict) or set(image) != {"mimeType", "data"}:
+                _unsupported("image")
+            blocks.append(_inline_image(image["mimeType"], image["data"]))
+            continue
         if not isinstance(part, dict) or set(part) != {"text"} or not isinstance(part["text"], str):
             _unsupported("part")
         blocks.append(ContentBlock(kind="text", text=part["text"]))

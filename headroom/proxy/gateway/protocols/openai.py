@@ -22,6 +22,8 @@ _FIELDS = frozenset({"model", "messages", "max_tokens", "temperature", "stream",
 
 def decode_openai(payload: dict[str, Any]) -> Conversation:
     _reject_unknown(payload, _FIELDS)
+    if "stream" in payload and not isinstance(payload["stream"], bool):
+        _unsupported("stream")
     system: list[ContentBlock] = []
     messages: list[Message] = []
     raw_messages = payload.get("messages")
@@ -40,6 +42,9 @@ def decode_openai(payload: dict[str, Any]) -> Conversation:
             _unsupported("message")
         content = _decode_content(item.get("content"))
         if role == "system":
+            if messages:
+                _unsupported("non-leading system message")
+            _plain_text(content)
             system.extend(content)
         elif role in ("user", "assistant"):
             calls = _decode_tool_calls(item.get("tool_calls", []))
@@ -75,6 +80,8 @@ def encode_openai(conversation: Conversation) -> dict[str, Any]:
         messages.append({"role": "system", "content": _plain_text(conversation.system)})
     for message in conversation.messages:
         if message.tool_results:
+            if message.content or message.tool_calls:
+                _unsupported("mixed tool result content")
             messages.extend(
                 {
                     "role": "tool",
@@ -203,6 +210,20 @@ def _decode_tool_calls(value: object) -> tuple[ToolCall, ...]:
             ToolCall(id=call["id"], name=function["name"], arguments=function["arguments"])
         )
     return tuple(calls)
+
+
+def _inline_image(media_type: object, data: object) -> ContentBlock:
+    if media_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"} or not isinstance(
+        data, str
+    ):
+        _unsupported("image")
+    if len(data) > 5_592_408:
+        _unsupported("image size")
+    try:
+        base64.b64decode(data, validate=True)
+    except (ValueError, binascii.Error):
+        _unsupported("image encoding")
+    return ContentBlock(kind="image", media_type=str(media_type), data=data)
 
 
 def _decode_tools(value: object) -> tuple[ToolDefinition, ...]:

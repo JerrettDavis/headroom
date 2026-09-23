@@ -17,12 +17,14 @@ def test_first_event_precedes_upstream_completion_barrier(local_pki, tmp_path, t
     release = threading.Event()
     finished = threading.Event()
     first = (
-        b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}\r\n\r\n'
+        b'data: {"type":"message_start","message":{"content":[]}}\r\n\r\n'
+        b'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\r\n\r\n'
+        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}\r\n\r\n'
         if translated
         else CHAT_FIRST
     )
     final = (
-        b'data: {"type":"message_delta","usage":{"output_tokens":2}}\r\n\r\ndata: {"type":"message_stop"}\r\n\r\n'
+        b'data: {"type":"content_block_stop","index":0}\r\n\r\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\r\n\r\ndata: {"type":"message_stop"}\r\n\r\n'
         if translated
         else CHAT_END
     )
@@ -49,11 +51,14 @@ def test_first_event_precedes_upstream_completion_barrier(local_pki, tmp_path, t
             with client.stream(
                 "POST",
                 "/v1/chat/completions",
-                json={"model": "fixture-model", "messages": [], "stream": True},
+                json={"model": "fixture-model", "messages": [], "stream": True, "max_tokens": 8},
             ) as response:
                 assert response.status_code == 200
                 iterator = response.iter_raw()
                 initial = next(iterator)
+                if translated:
+                    while b"hello" not in initial:
+                        initial += next(iterator)
                 assert b"hello" in initial if translated else CHAT_FIRST == initial
                 assert not finished.is_set()
                 release.set()

@@ -45,7 +45,7 @@ def test_dispatch_plan_declares_routed_native_model_mutation() -> None:
     assert plan.contract == "routed-native"
     assert plan.capabilities == frozenset({Capability.GENERATE})
     assert plan.mutation_reasons == ("model_alias",)
-    assert plan.body == b'{"model":"provider-model","input":"hi"}'
+    assert plan.body == b'{ "model" : "provider-model", "input" : "hi" }'
 
 
 def test_strict_native_dispatch_plan_preserves_entity_identity() -> None:

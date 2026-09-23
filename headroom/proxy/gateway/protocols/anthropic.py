@@ -14,6 +14,7 @@ from headroom.proxy.gateway.protocols.content import (
     ToolResult,
 )
 from headroom.proxy.gateway.protocols.openai import (
+    _inline_image,
     _optional_int,
     _optional_number,
     _reject_unknown,
@@ -25,6 +26,8 @@ _FIELDS = frozenset({"model", "system", "messages", "max_tokens", "temperature",
 
 def decode_anthropic(payload: dict[str, Any]) -> Conversation:
     _reject_unknown(payload, _FIELDS)
+    if "stream" in payload and not isinstance(payload["stream"], bool):
+        _unsupported("stream")
     system = _blocks(payload.get("system", ""))
     raw_messages = payload.get("messages")
     if not isinstance(raw_messages, list):
@@ -129,6 +132,8 @@ def _blocks(value: object) -> tuple[ContentBlock, ...]:
 def _message_blocks(
     value: object,
 ) -> tuple[tuple[ContentBlock, ...], tuple[ToolCall, ...], tuple[ToolResult, ...]]:
+    if isinstance(value, str):
+        return _blocks(value), (), ()
     if not isinstance(value, list):
         _unsupported("content")
     content: list[ContentBlock] = []
@@ -138,10 +143,14 @@ def _message_blocks(
         if not isinstance(block, dict) or not isinstance(block.get("type"), str):
             _unsupported("content block")
         if block["type"] == "text" and set(block) == {"type", "text"}:
+            if calls or results:
+                _unsupported("interleaved tool content")
             if not isinstance(block["text"], str):
                 _unsupported("text")
             content.append(ContentBlock(kind="text", text=block["text"]))
         elif block["type"] == "image" and set(block) == {"type", "source"}:
+            if calls or results:
+                _unsupported("interleaved tool content")
             source = block["source"]
             if not isinstance(source, dict) or set(source) != {
                 "type",
@@ -153,13 +162,7 @@ def _message_blocks(
                 isinstance(source.get(key), str) for key in ("media_type", "data")
             ):
                 _unsupported("image")
-            content.append(
-                ContentBlock(
-                    kind="image",
-                    media_type=source["media_type"],
-                    data=source["data"],
-                )
-            )
+            content.append(_inline_image(source["media_type"], source["data"]))
         elif block["type"] == "tool_use" and set(block) == {
             "type",
             "id",
@@ -182,6 +185,8 @@ def _message_blocks(
             "tool_use_id",
             "content",
         }:
+            if content or calls:
+                _unsupported("mixed tool result content")
             if not isinstance(block["tool_use_id"], str) or not isinstance(block["content"], str):
                 _unsupported("tool result")
             results.append(

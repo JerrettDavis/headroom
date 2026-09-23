@@ -1,13 +1,19 @@
-"""Explicit incremental event mappings for qualified directions."""
+"""Bounded, incremental mappings for admitted text streams.
+
+Tool, signed and hosted-tool streams are not admitted by the translation
+contract. Unexpected semantic events fail closed even after admission.
+"""
 
 from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator, AsyncIterable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
+from headroom.proxy.gateway.protocols import mapped_usage
+from headroom.proxy.gateway.streaming import SSEFrames, parse_event, stream_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,14 +26,13 @@ class StreamEvent:
 
 
 def translate_event(
-    source_protocol: str,
-    target_protocol: str,
-    event: StreamEvent,
+    source_protocol: str, target_protocol: str, event: StreamEvent
 ) -> tuple[dict[str, object], ...]:
-    if (
-        source_protocol == "openai-chat"
-        and target_protocol == "anthropic-messages"
-        and event.kind == "tool_argument_delta"
+    """Standalone fragment mapping, not a qualified serving contract."""
+    if (source_protocol, target_protocol, event.kind) == (
+        "openai-chat",
+        "anthropic-messages",
+        "tool_argument_delta",
     ):
         return (
             {
@@ -36,80 +41,295 @@ def translate_event(
                 "delta": {"type": "input_json_delta", "partial_json": event.data},
             },
         )
-    raise GatewayAuthorizationError(
-        status_code=400,
-        code="gateway_unsupported_capability",
-        message="Streaming translation direction is unsupported",
-    )
+    raise stream_error("malformed")
+
+
+def _sse(payload: dict[str, Any], *, named: bool = False) -> bytes:
+    prefix = f"event: {payload['type']}\n" if named else ""
+    try:
+        return (
+            prefix
+            + "data: "
+            + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            + "\n\n"
+        ).encode()
+    except UnicodeEncodeError:
+        raise stream_error("malformed") from None
 
 
 async def translate_sse_stream(
-    source_protocol: str,
-    target_protocol: str,
-    chunks: AsyncIterable[bytes],
-    *,
-    public_model: str,
+    source_protocol: str, target_protocol: str, chunks: AsyncIterable[bytes], *, public_model: str
 ) -> AsyncGenerator[bytes, None]:
-    """Translate complete SSE events while retaining only one bounded partial event."""
-
-    if (source_protocol, target_protocol) != ("anthropic-messages", "openai-chat"):
+    if (source_protocol, target_protocol) not in {
+        ("anthropic-messages", "openai-chat"),
+        ("openai-chat", "anthropic-messages"),
+        ("openai-chat", "gemini-generate"),
+    }:
         raise GatewayAuthorizationError(
             status_code=400,
             code="gateway_unsupported_capability",
             message="Streaming translation direction is unsupported",
         )
-    from headroom.proxy.gateway.streaming import SSEFrames, event_data
-
     frames = SSEFrames(1_048_576)
+    identifier = "gateway-translated"
+    usage: dict[str, Any] = {}
+    finish: str | None = None
+    started = False
+    text_started = False
+    terminal = False
+    open_block: int | None = None
+    next_block = 0
+
+    def chat(delta: dict[str, Any], reason: str | None = None) -> dict[str, Any]:
+        return {
+            "id": identifier,
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": public_model,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+        }
+
     async for chunk in chunks:
-        for raw_event in frames.feed(chunk):
-            data = event_data(raw_event)
-            if not data:
+        for frame in frames.feed(chunk):
+            parsed = parse_event(frame)
+            if parsed.name == "error":
+                raise stream_error("upstream_error")
+            if not parsed.data:
+                continue
+            if terminal:
+                raise stream_error("malformed")
+            if parsed.data == "[DONE]":
+                if source_protocol != "openai-chat" or finish is None:
+                    raise stream_error("truncated")
+                terminal = True
+                if target_protocol == "anthropic-messages":
+                    if text_started:
+                        yield _sse({"type": "content_block_stop", "index": 0}, named=True)
+                    yield _sse(
+                        {
+                            "type": "message_delta",
+                            "delta": {"stop_reason": finish, "stop_sequence": None},
+                            "usage": usage,
+                        },
+                        named=True,
+                    )
+                    yield _sse({"type": "message_stop"}, named=True)
+                else:
+                    terminal_payload: dict[str, Any] = {
+                        "responseId": identifier,
+                        "modelVersion": public_model,
+                        "candidates": [{"index": 0, "finishReason": finish}],
+                    }
+                    if usage:
+                        terminal_payload["usageMetadata"] = usage
+                    yield _sse(terminal_payload)
                 continue
             try:
-                event = json.loads(data)
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise GatewayAuthorizationError(
-                    status_code=502,
-                    code="gateway_upstream_invalid",
-                    message="Upstream stream event is invalid JSON",
-                ) from exc
-            if event.get("type") == "content_block_delta":
-                delta = event.get("delta")
-                if isinstance(delta, dict) and delta.get("type") == "text_delta":
-                    payload = {
-                        "object": "chat.completion.chunk",
-                        "model": public_model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": delta.get("text", "")},
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield (
-                        b"data: "
-                        + json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-                        + b"\n\n"
+                event = json.loads(parsed.data)
+            except (ValueError, RecursionError):
+                raise stream_error("malformed") from None
+            if not isinstance(event, dict):
+                raise stream_error("malformed")
+            if event.get("error") or event.get("type") == "error":
+                raise stream_error("upstream_error")
+            if source_protocol == "anthropic-messages":
+                kind = event.get("type")
+                if kind == "ping":
+                    continue
+                if kind == "message_start":
+                    if started:
+                        raise stream_error("malformed")
+                    message = event.get("message", {})
+                    if not isinstance(message, dict) or message.get("content", []):
+                        raise stream_error("malformed")
+                    identifier = message.get("id", identifier)
+                    usage.update(message.get("usage", {}))
+                    started = True
+                    yield _sse(chat({"role": "assistant"}))
+                elif kind == "content_block_start":
+                    if (
+                        not started
+                        or finish is not None
+                        or open_block is not None
+                        or type(event.get("index")) is not int
+                        or event["index"] != next_block
+                    ):
+                        raise stream_error("malformed")
+                    block = event.get("content_block", {})
+                    if (
+                        not isinstance(block, dict)
+                        or set(block) != {"type", "text"}
+                        or block.get("type") != "text"
+                        or not isinstance(block.get("text"), str)
+                    ):
+                        raise stream_error("malformed")
+                    open_block = next_block
+                    if block["text"]:
+                        yield _sse(chat({"content": block["text"]}))
+                elif kind == "content_block_delta":
+                    if (
+                        open_block is None
+                        or type(event.get("index")) is not int
+                        or event["index"] != open_block
+                    ):
+                        raise stream_error("malformed")
+                    delta = event.get("delta", {})
+                    if (
+                        not isinstance(delta, dict)
+                        or set(delta) != {"type", "text"}
+                        or delta.get("type") != "text_delta"
+                        or not isinstance(delta["text"], str)
+                    ):
+                        raise stream_error("malformed")
+                    yield _sse(chat({"content": delta["text"]}))
+                elif kind == "content_block_stop":
+                    if (
+                        open_block is None
+                        or type(event.get("index")) is not int
+                        or event["index"] != open_block
+                    ):
+                        raise stream_error("malformed")
+                    open_block = None
+                    next_block += 1
+                    continue
+                elif kind == "message_delta":
+                    if not started or open_block is not None or finish is not None:
+                        raise stream_error("malformed")
+                    delta = event.get("delta", {})
+                    if (
+                        not isinstance(delta, dict)
+                        or set(delta) - {"stop_reason", "stop_sequence"}
+                        or delta.get("stop_sequence") is not None
+                    ):
+                        raise stream_error("malformed")
+                    raw_finish = delta.get("stop_reason")
+                    if not isinstance(raw_finish, str):
+                        raise stream_error("malformed")
+                    finish = {
+                        "end_turn": "stop",
+                        "max_tokens": "length",
+                        "refusal": "content_filter",
+                    }.get(raw_finish)
+                    if finish is None:
+                        raise stream_error("malformed")
+                    usage.update(event.get("usage", {}))
+                elif kind == "message_stop":
+                    if finish is None:
+                        raise stream_error("truncated")
+                    yield _sse(chat({}, finish))
+                    if usage:
+                        tail = chat({})
+                        tail["choices"] = []
+                        tail["usage"] = mapped_usage(source_protocol, target_protocol, usage)
+                        yield _sse(tail)
+                    yield b"data: [DONE]\n\n"
+                    terminal = True
+                else:
+                    raise stream_error("malformed")
+                continue
+
+            if set(event) - {
+                "id",
+                "object",
+                "created",
+                "model",
+                "choices",
+                "usage",
+                "system_fingerprint",
+                "service_tier",
+            }:
+                raise stream_error("malformed")
+            identifier = event.get("id", identifier)
+            choices = event.get("choices", [])
+            if not isinstance(choices, list) or len(choices) > 1:
+                raise stream_error("malformed")
+            if event.get("usage") is not None:
+                usage = mapped_usage(source_protocol, target_protocol, event["usage"])
+            for choice in choices:
+                if (
+                    not isinstance(choice, dict)
+                    or choice.get("index", 0) != 0
+                    or set(choice) - {"index", "delta", "finish_reason", "logprobs"}
+                    or choice.get("logprobs") is not None
+                ):
+                    raise stream_error("malformed")
+                delta = choice.get("delta", {})
+                if (
+                    not isinstance(delta, dict)
+                    or set(delta) - {"role", "content", "refusal"}
+                    or delta.get("role", "assistant") != "assistant"
+                ):
+                    raise stream_error("malformed")
+                refusal = delta.get("refusal")
+                text = delta.get("content")
+                if refusal:
+                    if target_protocol != "anthropic-messages" or text:
+                        raise stream_error("malformed")
+                    text, finish = refusal, "refusal"
+                if text is not None and not isinstance(text, str):
+                    raise stream_error("malformed")
+                if not started and target_protocol == "anthropic-messages":
+                    yield _sse(
+                        {
+                            "type": "message_start",
+                            "message": {
+                                "id": identifier,
+                                "type": "message",
+                                "role": "assistant",
+                                "model": public_model,
+                                "content": [],
+                                "stop_reason": None,
+                                "stop_sequence": None,
+                                "usage": {},
+                            },
+                        },
+                        named=True,
                     )
-            elif event.get("type") == "message_stop":
-                # This direction is qualified for text only. The source observer
-                # has already rejected incomplete/refused provider termination.
-                payload = {
-                    "object": "chat.completion.chunk",
-                    "model": public_model,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }
-                yield (
-                    b"data: "
-                    + json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-                    + b"\n\n"
-                )
-                yield b"data: [DONE]\n\n"
-    if frames.pending:
-        raise GatewayAuthorizationError(
-            status_code=502,
-            code="gateway_upstream_truncated",
-            message="Upstream stream ended during an event",
-        )
+                started = True
+                if text:
+                    if finish is not None and not refusal:
+                        raise stream_error("malformed")
+                    if target_protocol == "anthropic-messages":
+                        if not text_started:
+                            yield _sse(
+                                {
+                                    "type": "content_block_start",
+                                    "index": 0,
+                                    "content_block": {"type": "text", "text": ""},
+                                },
+                                named=True,
+                            )
+                            text_started = True
+                        yield _sse(
+                            {
+                                "type": "content_block_delta",
+                                "index": 0,
+                                "delta": {"type": "text_delta", "text": text},
+                            },
+                            named=True,
+                        )
+                    else:
+                        yield _sse(
+                            {
+                                "responseId": identifier,
+                                "modelVersion": public_model,
+                                "candidates": [
+                                    {
+                                        "index": 0,
+                                        "content": {"role": "model", "parts": [{"text": text}]},
+                                    }
+                                ],
+                            }
+                        )
+                reason = choice.get("finish_reason")
+                if reason is not None:
+                    mapping = (
+                        {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}
+                        if target_protocol == "anthropic-messages"
+                        else {"stop": "STOP", "length": "MAX_TOKENS", "content_filter": "SAFETY"}
+                    )
+                    if reason not in mapping:
+                        raise stream_error("malformed")
+                    finish = finish or mapping[reason]
+    if frames.pending or not terminal:
+        raise stream_error("truncated")

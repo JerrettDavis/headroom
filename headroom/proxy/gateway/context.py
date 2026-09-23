@@ -31,6 +31,7 @@ class GatewayRequestContext:
     catalog: CatalogSnapshot
     account_selection: AccountSelection | None = None
     operation: GatewayOperation | None = None
+    mutation_reasons: tuple[str, ...] = ()
 
     @property
     def snapshot_generation(self) -> int:

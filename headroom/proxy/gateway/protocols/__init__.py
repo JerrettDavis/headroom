@@ -30,6 +30,16 @@ def translate(
     target_protocol: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    if (source_protocol, target_protocol) not in {
+        ("openai-chat", "anthropic-messages"),
+        ("anthropic-messages", "openai-chat"),
+        ("gemini-generate", "openai-chat"),
+    }:
+        raise GatewayAuthorizationError(
+            status_code=400,
+            code="gateway_unsupported_capability",
+            message="Translation direction is unsupported",
+        )
     try:
         decoder = _DECODERS[source_protocol]
         encoder = _ENCODERS[target_protocol]
@@ -51,15 +61,67 @@ def translate_response(
 ) -> dict[str, Any]:
     """Translate a qualified non-streaming response without inventing usage."""
 
+    if source_protocol == "openai-chat" and target_protocol == "gemini-generate":
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
+            _unsupported_response()
+        choice = choices[0]
+        if (
+            set(choice) - {"index", "message", "finish_reason", "logprobs"}
+            or choice.get("logprobs") is not None
+        ):
+            _unsupported_response()
+        message = choice.get("message")
+        if not isinstance(message, dict) or set(message) - {"role", "content", "refusal"}:
+            _unsupported_response()
+        text = message.get("content")
+        if message.get("role") != "assistant" or not isinstance(text, str):
+            _unsupported_response()
+        raw_finish = choice.get("finish_reason")
+        if not isinstance(raw_finish, str):
+            _unsupported_response()
+        finish = {"stop": "STOP", "length": "MAX_TOKENS", "content_filter": "SAFETY"}.get(
+            raw_finish
+        )
+        if finish is None:
+            _unsupported_response()
+        if message.get("refusal"):
+            _unsupported_response()
+        result: dict[str, Any] = {
+            "responseId": payload.get("id"),
+            "modelVersion": public_model,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": text}]},
+                    "finishReason": finish,
+                }
+            ],
+        }
+        usage = payload.get("usage")
+        if isinstance(usage, dict):
+            result["usageMetadata"] = mapped_usage("openai-chat", "gemini-generate", usage)
+        return result
+
     if source_protocol == "openai-chat" and target_protocol == "anthropic-messages":
         choices = payload.get("choices")
         if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
             _unsupported_response()
         choice = choices[0]
+        if (
+            set(choice) - {"index", "message", "finish_reason", "logprobs"}
+            or choice.get("logprobs") is not None
+        ):
+            _unsupported_response()
         message = choice.get("message")
-        if not isinstance(message, dict) or set(message) != {"role", "content"}:
+        if not isinstance(message, dict) or set(message) - {"role", "content", "refusal"}:
             _unsupported_response()
         content = message.get("content")
+        refusal = message.get("refusal")
+        if isinstance(refusal, str) and refusal:
+            if content:
+                _unsupported_response()
+            content = refusal
         if message.get("role") != "assistant" or not isinstance(content, str):
             _unsupported_response()
         raw_finish = choice.get("finish_reason")
@@ -68,10 +130,12 @@ def translate_response(
         stop_reason = (
             None
             if raw_finish is None
-            else {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use"}.get(
+            else {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}.get(
                 raw_finish
             )
         )
+        if refusal:
+            stop_reason = "refusal"
         if raw_finish is not None and stop_reason is None:
             _unsupported_response()
         openai_result: dict[str, Any] = {
@@ -85,10 +149,7 @@ def translate_response(
         }
         usage = payload.get("usage")
         if isinstance(usage, dict):
-            prompt = usage.get("prompt_tokens")
-            completion = usage.get("completion_tokens")
-            if isinstance(prompt, int) and isinstance(completion, int):
-                openai_result["usage"] = {"input_tokens": prompt, "output_tokens": completion}
+            openai_result["usage"] = mapped_usage(source_protocol, target_protocol, usage)
         return openai_result
 
     if source_protocol == "gemini-generate" and target_protocol == "openai-chat":
@@ -117,7 +178,11 @@ def translate_response(
         if raw_finish is not None and not isinstance(raw_finish, str):
             _unsupported_response()
         finish = (
-            None if raw_finish is None else {"STOP": "stop", "MAX_TOKENS": "length"}.get(raw_finish)
+            None
+            if raw_finish is None
+            else {"STOP": "stop", "MAX_TOKENS": "length", "SAFETY": "content_filter"}.get(
+                raw_finish
+            )
         )
         if raw_finish is not None and finish is None:
             _unsupported_response()
@@ -167,6 +232,7 @@ def translate_response(
                 "end_turn": "stop",
                 "max_tokens": "length",
                 "tool_use": "tool_calls",
+                "refusal": "content_filter",
             }.get(raw_stop_reason)
         )
         if raw_stop_reason is not None and stop_reason is None:
@@ -185,16 +251,55 @@ def translate_response(
         }
         usage = payload.get("usage")
         if isinstance(usage, dict):
-            input_tokens = usage.get("input_tokens")
-            output_tokens = usage.get("output_tokens")
-            if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-                anthropic_result["usage"] = {
-                    "prompt_tokens": input_tokens,
-                    "completion_tokens": output_tokens,
-                    "total_tokens": input_tokens + output_tokens,
-                }
+            anthropic_result["usage"] = mapped_usage(source_protocol, target_protocol, usage)
         return anthropic_result
     _unsupported_response()
+
+
+def mapped_usage(source: str, target: str, usage: dict[str, Any]) -> dict[str, Any]:
+    """Map documented token counts; absent counts stay absent, never zero-filled."""
+    result: dict[str, Any] = {}
+    if source == "openai-chat":
+        fields = (
+            {"prompt_tokens": "input_tokens", "completion_tokens": "output_tokens"}
+            if target == "anthropic-messages"
+            else {
+                "prompt_tokens": "promptTokenCount",
+                "completion_tokens": "candidatesTokenCount",
+                "total_tokens": "totalTokenCount",
+            }
+        )
+    else:
+        fields = {"input_tokens": "prompt_tokens", "output_tokens": "completion_tokens"}
+    for source_key, target_key in fields.items():
+        if source_key in usage:
+            value = usage[source_key]
+            if type(value) is not int or value < 0:
+                _unsupported_response()
+            result[target_key] = value
+    if source == "anthropic-messages" and "prompt_tokens" in result:
+        for name in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+            if name in usage:
+                value = usage[name]
+                if type(value) is not int or value < 0:
+                    _unsupported_response()
+                result["prompt_tokens"] += value
+        if "cache_read_input_tokens" in usage:
+            result["prompt_tokens_details"] = {"cached_tokens": usage["cache_read_input_tokens"]}
+        if "completion_tokens" in result:
+            result["total_tokens"] = result["prompt_tokens"] + result["completion_tokens"]
+    if source == "openai-chat":
+        details = usage.get("prompt_tokens_details", {})
+        cached = details.get("cached_tokens") if isinstance(details, dict) else None
+        if cached is not None:
+            if type(cached) is not int or cached < 0 or cached > usage.get("prompt_tokens", 0):
+                _unsupported_response()
+            if target == "gemini-generate":
+                result["cachedContentTokenCount"] = cached
+            else:
+                result["input_tokens"] -= cached
+                result["cache_read_input_tokens"] = cached
+    return result
 
 
 def _unsupported_response() -> NoReturn:

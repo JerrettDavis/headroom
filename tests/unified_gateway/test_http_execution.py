@@ -129,7 +129,7 @@ def test_stateful_get_does_not_charge_original_generation_again(monkeypatch):
     [
         {"error": {"message": "SECRET"}},
         {"status": "incomplete"},
-        {"choices": [{"finish_reason": "length"}]},
+        {"choices": [{"finish_reason": "content_filter"}]},
     ],
 )
 def test_failed_native_body_preserves_reported_usage_liability(monkeypatch, terminal):

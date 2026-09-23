@@ -12,9 +12,14 @@ def implemented_features(
         return frozenset()
     if not native:
         return (
-            frozenset({"text"})
-            if transport == "http-json"
-            or (protocol, target, transport) == ("openai-chat", "anthropic-messages", "http-stream")
+            frozenset({"text", "inline_images"})
+            if transport in {"http-json", "http-stream"}
+            and (protocol, target)
+            in {
+                ("openai-chat", "anthropic-messages"),
+                ("anthropic-messages", "openai-chat"),
+                ("gemini-generate", "openai-chat"),
+            }
             else frozenset()
         )
     return frozenset(

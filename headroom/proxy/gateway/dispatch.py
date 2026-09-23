@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 from fastapi import Request
@@ -22,7 +22,11 @@ from headroom.proxy.gateway.context import GatewayRequestContext
 from headroom.proxy.gateway.credentials import CredentialLease
 from headroom.proxy.gateway.destinations import path_within, validate_path
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
-from headroom.proxy.gateway.errors import GatewayAuthorizationError, GatewayPublicError
+from headroom.proxy.gateway.errors import (
+    GatewayAuthorizationError,
+    GatewayPublicError,
+    protocol_error_payload,
+)
 from headroom.proxy.gateway.execution import GatewayAttempt, GatewayOperation
 from headroom.proxy.gateway.models import Capability
 from headroom.proxy.gateway.observability import RetryReason, TerminalResult
@@ -63,9 +67,10 @@ DispatchContract = Literal["strict-native", "routed-native", "translated"]
 def route_target(route: RouteConfig, path: str) -> str:
     validate_path(path)
     if route.provider == "compatible" and not path_within(path, route.upstream_path_prefix):
-        if not path.startswith("/v1/"):
+        prefix = next((p for p in ("/v1beta/", "/v1/") if path.startswith(p)), None)
+        if prefix is None:
             raise ValueError("unsupported compatible route path")
-        path = route.upstream_path_prefix.rstrip("/") + "/" + path.removeprefix("/v1/")
+        path = route.upstream_path_prefix.rstrip("/") + "/" + path.removeprefix(prefix)
     return route.upstream_origin.rstrip("/") + path
 
 
@@ -318,6 +323,7 @@ async def _run_attempts(
             catalog=generation.catalog,
             account_selection=selection,
             operation=operation,
+            mutation_reasons=getattr(request.state, "gateway_mutation_reasons", ()),
         )
         retry = None
         try:
@@ -495,15 +501,7 @@ async def _owned_stream(
     except Exception:
         # ASGI middleware may convert an aborted body to normal HTTP EOF. Emit
         # a protocol error (never a success terminal) so clients see the failure.
-        error: dict[str, Any] = {
-            "error": {
-                "type": "gateway_error",
-                "code": "gateway_upstream_error",
-                "message": "Upstream request failed",
-            }
-        }
-        if operation.ingress_protocol in {"anthropic-messages", "openai-responses"}:
-            error["type"] = "error"
+        error = protocol_error_payload(operation.ingress_protocol, _upstream_error())
         prefix = (
             b"event: error\n"
             if operation.ingress_protocol in {"anthropic-messages", "openai-responses"}
@@ -544,8 +542,40 @@ def rewrite_routed_native_model(
             code="gateway_model_mismatch",
             message="Request model does not match the authorized route model",
         )
-    payload["model"] = upstream_model
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    # Walk only top-level JSON members to retain all unrelated entity bytes,
+    # including numeric spellings, whitespace, escapes and signed blocks.
+    text = body.decode("utf-8")
+    decoder = json.JSONDecoder()
+    position = text.index("{") + 1
+    replacements = []
+    while True:
+        while text[position].isspace():
+            position += 1
+        if text[position] == "}":
+            break
+        key, position = decoder.raw_decode(text, position)
+        while text[position].isspace():
+            position += 1
+        position += 1  # colon; the complete entity has already been validated
+        while text[position].isspace():
+            position += 1
+        start = position
+        _, position = decoder.raw_decode(text, position)
+        if key == "model":
+            replacements.append((start, position))
+        while text[position].isspace():
+            position += 1
+        if text[position] == "}":
+            break
+        position += 1
+    if len(replacements) != 1:
+        raise GatewayAuthorizationError(
+            status_code=400,
+            code="gateway_request_invalid",
+            message="Model must appear exactly once",
+        )
+    start, end = replacements[0]
+    return (text[:start] + json.dumps(upstream_model, ensure_ascii=False) + text[end:]).encode()
 
 
 async def dispatch_native_http(
@@ -610,6 +640,11 @@ async def dispatch_native_http(
         if resource_binding is not None:
             request.state.gateway_generation.validate_binding(resource_binding)
         target_protocol = protocol
+        streaming = bool(
+            payload.get("stream")
+            or "streamGenerateContent" in request.url.path
+            or "response-stream" in request.url.path
+        )
         translated = protocol not in route.native_protocols
         if translated:
             if route.translation != "qualified" or len(route.native_protocols) != 1:
@@ -622,6 +657,19 @@ async def dispatch_native_http(
             from headroom.proxy.gateway.protocols import translate
 
             translated_payload = translate(protocol, target_protocol, payload)
+            if (
+                target_protocol == "anthropic-messages"
+                and translated_payload.get("max_tokens") is None
+            ):
+                raise GatewayAuthorizationError(
+                    status_code=400,
+                    code="gateway_unsupported_capability",
+                    message="This route requires an explicit output token limit",
+                )
+            if streaming:
+                translated_payload["stream"] = True
+                if target_protocol == "openai-chat":
+                    translated_payload["stream_options"] = {"include_usage": True}
             if target_protocol in ("openai-chat", "anthropic-messages"):
                 translated_payload["model"] = route.upstream_model
             outbound_body = json.dumps(
@@ -634,7 +682,7 @@ async def dispatch_native_http(
             "openai-chat": "/v1/chat/completions",
             "openai-responses": "/v1/responses",
             "anthropic-messages": "/v1/messages",
-            "gemini-generate": f"/v1beta/models/{route.upstream_model}:generateContent",
+            "gemini-generate": f"/v1beta/models/{route.upstream_model}:{'streamGenerateContent' if streaming else 'generateContent'}",
         }
         upstream_path = (
             upstream_paths.get(target_protocol, request.url.path)
@@ -648,6 +696,9 @@ async def dispatch_native_http(
         ):
             upstream_path = upstream_path.replace(route.public_model, route.upstream_model, 1)
         target = route_target(route, upstream_path)
+        mutation_reasons: tuple[str, ...] = ()
+        if not translated and urlparse(target).path != request.url.path:
+            mutation_reasons = ("endpoint_route",)
         safe_query = [
             (name, value)
             for name, value in parse_qsl(request.url.query, keep_blank_values=True)
@@ -663,6 +714,8 @@ async def dispatch_native_http(
                 declared_contract=route.body_contract,
             )
             outbound_body = plan.body
+            mutation_reasons += plan.mutation_reasons
+        request.state.gateway_mutation_reasons = mutation_reasons
         generation = request.state.gateway_generation
         runtime = request.app.state.gateway_runtime
         expected_candidates = None
@@ -751,7 +804,7 @@ async def dispatch_native_http(
             or (
                 target_protocol == "openai-chat"
                 and any(
-                    choice.get("finish_reason") in {"length", "content_filter"}
+                    choice.get("finish_reason") == "content_filter"
                     or choice.get("message", {}).get("refusal")
                     for choice in response_payload.get("choices", [])
                 )
@@ -759,12 +812,12 @@ async def dispatch_native_http(
             or (
                 target_protocol == "anthropic-messages"
                 and response_payload.get("stop_reason")
-                in {"refusal", "max_tokens", "model_context_window_exceeded"}
+                in {"refusal", "model_context_window_exceeded"}
             )
             or (
                 target_protocol in {"gemini-generate", "vertex-generate"}
                 and any(
-                    candidate.get("finishReason") not in {None, "STOP"}
+                    candidate.get("finishReason") not in {None, "STOP", "MAX_TOKENS"}
                     for candidate in response_payload.get("candidates", [])
                 )
             )
@@ -790,18 +843,12 @@ async def dispatch_native_http(
     except GatewayPublicError as exc:
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": {"type": "gateway_error", "code": exc.code, "message": exc.message}},
+            content=protocol_error_payload(protocol, exc),
         )
     except Exception:
         return JSONResponse(
             status_code=502,
-            content={
-                "error": {
-                    "type": "gateway_error",
-                    "code": "gateway_upstream_error",
-                    "message": "Upstream request failed",
-                }
-            },
+            content=protocol_error_payload(protocol, _upstream_error()),
         )
     finally:
         if operation is not None and not handed_off:
