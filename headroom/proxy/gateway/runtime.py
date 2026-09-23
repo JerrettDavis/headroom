@@ -10,16 +10,20 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from headroom.proxy.gateway.admission import AdmissionController
 from headroom.proxy.gateway.auth import GatewayAuthenticator, GatewayAuthorizer
-from headroom.proxy.gateway.config import GatewayConfigSnapshot, RouteConfig
+from headroom.proxy.gateway.config import CredentialConfig, GatewayConfigSnapshot, RouteConfig
 from headroom.proxy.gateway.control import RedactedGatewayStatus
 from headroom.proxy.gateway.credentials import CredentialBroker
 from headroom.proxy.gateway.egress import EgressPolicy, build_managed_upstream_headers
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
-from headroom.proxy.gateway.models import AccountAvailability, CatalogSnapshot
+from headroom.proxy.gateway.models import (
+    AccountAvailability,
+    CatalogSnapshot,
+    ProviderModelMetadata,
+)
 from headroom.proxy.gateway.observability import GatewayObservability
 from headroom.proxy.gateway.resources import ResourceBinding, ResourceRegistry
 from headroom.proxy.gateway.routing import AccountRouter
@@ -30,6 +34,50 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _provider_metadata(provider: str, model_id: str, item: dict[str, Any]) -> ProviderModelMetadata:
+    """Retain positive provider evidence; an ID alone proves no operation."""
+    operations: set[str] = set()
+    evidence = item.get("supportedFeatures")
+    if provider == "gemini":
+        methods = item.get("supportedGenerationMethods", [])
+        if not isinstance(methods, list) or any(not isinstance(v, str) for v in methods):
+            raise ValueError("invalid metadata operations")
+        if "generateContent" in methods:
+            operations.add("generate")
+        if "streamGenerateContent" in methods:
+            operations.add("stream")
+    elif provider == "anthropic" and item.get("type") == "model":
+        # Anthropic's ModelInfo contract identifies Messages models, whose
+        # documented minimum is text generation with optional SSE streaming.
+        operations.update({"generate", "stream"})
+    elif provider in {"openai", "compatible"}:
+        capabilities = item.get("capabilities", {})
+        if not isinstance(capabilities, dict):
+            raise ValueError("invalid metadata capabilities")
+        for operation in ("generate", "stream"):
+            if capabilities.get(operation) is True:
+                operations.add(operation)
+        evidence = capabilities.get("features", evidence)
+    if evidence is None:
+        features = frozenset({"text"}) if "generate" in operations else frozenset()
+    else:
+        if not isinstance(evidence, list) or any(not isinstance(v, str) for v in evidence):
+            raise ValueError("invalid metadata features")
+        features = frozenset(evidence)
+    return ProviderModelMetadata(model_id, frozenset(operations), features)
+
+
+def _source_state(
+    credential: CredentialConfig, environ: Mapping[str, str]
+) -> Literal["available", "unavailable", "unknown"]:
+    if not credential.enabled:
+        return "unavailable"
+    source = credential.source
+    if source.kind == "none" or source.kind == "env" and source.ref in environ:
+        return "available"
+    return "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +95,9 @@ class RuntimeDependencies:
     egress_policy: EgressPolicy = field(default_factory=EgressPolicy)
     http_client: Any = None
     broker: Any = None
-    metadata_reader: Callable[[Any, RouteConfig, str], Awaitable[tuple[str, ...]]] | None = None
+    metadata_reader: (
+        Callable[[Any, RouteConfig, str], Awaitable[tuple[ProviderModelMetadata, ...]]] | None
+    ) = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +199,7 @@ class GatewayRuntime:
         catalog = CatalogSnapshot(
             generation.snapshot,
             accounts=generation.catalog.accounts,
+            published_at=generation.catalog.published_at,
             revision=generation.catalog.revision,
             generation=generation.number,
             now=self.dependencies.clock(),
@@ -267,7 +318,7 @@ class GatewayRuntime:
 
         async def probe(
             route: RouteConfig, account: str
-        ) -> tuple[str, str, tuple[str, ...] | None]:
+        ) -> tuple[str, str, tuple[ProviderModelMetadata, ...] | None]:
             try:
                 async with semaphore:
                     reader = self.dependencies.metadata_reader or self._read_metadata
@@ -278,7 +329,12 @@ class GatewayRuntime:
                 if (
                     not isinstance(models, tuple)
                     or len(models) > 10000
-                    or any(not isinstance(model, str) or len(model) > 1024 for model in models)
+                    or any(
+                        not isinstance(model, ProviderModelMetadata)
+                        or not model.id
+                        or len(model.id) > 1024
+                        for model in models
+                    )
                 ):
                     raise ValueError("invalid metadata")
                 return route.id, account, models
@@ -316,9 +372,13 @@ class GatewayRuntime:
                     if record.route_id != route_id or record.account_ref != account:
                         continue
                     if models is not None:
+                        metadata = next((m for m in models if m.id == route.upstream_model), None)
                         records[index] = replace(
                             record,
-                            metadata_available=route.upstream_model in models,
+                            metadata_available=metadata is not None
+                            and "generate" in metadata.operations,
+                            features=metadata.features if metadata is not None else frozenset(),
+                            operations=metadata.operations if metadata is not None else frozenset(),
                             observed_at=now,
                             expires_at=now + route.catalog.ttl_seconds,
                             stale_until=now
@@ -350,7 +410,7 @@ class GatewayRuntime:
 
     async def _read_metadata(
         self, generation: RuntimeGeneration, route: RouteConfig, account: str
-    ) -> tuple[str, ...]:
+    ) -> tuple[ProviderModelMetadata, ...]:
         if route.provider not in {"openai", "compatible", "anthropic", "gemini"}:
             raise ValueError("provider metadata adapter unavailable")
         lease = await generation.broker.acquire(route, account_ref=account)
@@ -382,14 +442,23 @@ class GatewayRuntime:
                 payload = json.loads(body)
             finally:
                 await response.aclose()
-        items = (
-            payload.get("models" if route.provider == "gemini" else "data")
-            if isinstance(payload, dict)
-            else None
-        )
+        if not isinstance(payload, dict):
+            raise ValueError("invalid metadata")
+        # A bounded first page is not a complete catalog. Keep the prior snapshot
+        # on pagination rather than publishing false absence or partial authority.
+        if route.provider == "gemini":
+            token = payload.get("nextPageToken")
+            if token is not None and (not isinstance(token, str) or token):
+                raise ValueError("incomplete metadata")
+        if route.provider == "anthropic":
+            has_more = payload.get("has_more", False)
+            if not isinstance(has_more, bool) or has_more:
+                raise ValueError("incomplete metadata")
+        items = payload.get("models" if route.provider == "gemini" else "data")
         if not isinstance(items, list) or len(items) > 10000:
             raise ValueError("invalid metadata")
         models = []
+        seen = set()
         for item in items:
             value = (
                 item.get("name" if route.provider == "gemini" else "id")
@@ -398,7 +467,11 @@ class GatewayRuntime:
             )
             if not isinstance(value, str) or not value or len(value) > 1024:
                 raise ValueError("invalid metadata model")
-            models.append(value.removeprefix("models/"))
+            model_id = value.removeprefix("models/")
+            if model_id in seen:
+                raise ValueError("duplicate metadata model")
+            seen.add(model_id)
+            models.append(_provider_metadata(route.provider, model_id, item))
         return tuple(models)
 
     async def shutdown(self) -> None:
@@ -451,9 +524,7 @@ class GatewayRuntime:
                 r.id,
                 account,
                 dict(authorities)[account],
-                ("available" if credentials[account].source.kind in {"env", "none"} else "unknown")
-                if credentials[account].enabled
-                else "unavailable",
+                _source_state(credentials[account], self._environ),
                 r.catalog.entitlements.get(account, "unknown"),
                 r.catalog.source,
                 metadata_available=r.catalog.source == "configured",

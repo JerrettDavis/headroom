@@ -23,6 +23,13 @@ class RouteCapabilities:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderModelMetadata:
+    id: str
+    operations: frozenset[str]
+    features: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
 class AccountAvailability:
     route_id: str
     account_ref: str
@@ -36,6 +43,7 @@ class AccountAvailability:
     metadata_available: bool = False
     refresh_failed: bool = False
     features: frozenset[str] | None = None
+    operations: frozenset[str] | None = None
 
     def state(self, now: float) -> str:
         if (
@@ -72,6 +80,7 @@ class ModelRegistry:
     revision: int
     generation: int
     captured_at: float
+    published_at: float
 
     def __init__(
         self,
@@ -81,11 +90,15 @@ class ModelRegistry:
         revision: int = 1,
         generation: int = 1,
         now: float | None = None,
+        published_at: float | None = None,
     ):
         object.__setattr__(self, "_routes", snapshot.routes)
         object.__setattr__(self, "revision", revision)
         object.__setattr__(self, "generation", generation)
         object.__setattr__(self, "captured_at", time.time() if now is None else now)
+        object.__setattr__(
+            self, "published_at", self.captured_at if published_at is None else published_at
+        )
         if accounts is None:
             credentials = {item.id: item for item in snapshot.credentials}
             accounts = tuple(
@@ -93,7 +106,9 @@ class ModelRegistry:
                     route.id,
                     account,
                     "",
-                    "available" if credentials[account].enabled else "unavailable",
+                    ("available" if credentials[account].source.kind == "none" else "unknown")
+                    if credentials[account].enabled
+                    else "unavailable",
                     route.catalog.entitlements.get(account, "unknown"),
                     route.catalog.source,
                     metadata_available=route.catalog.source == "configured",
@@ -130,6 +145,11 @@ class ModelRegistry:
             if record.route_id == route.id
             and record.state(self.captured_at) != "unavailable"
             and (record.features is None or features <= record.features)
+            and (
+                record.operations is None
+                or ("stream" if transport in {"http-stream", "websocket"} else "generate")
+                in record.operations
+            )
         )
 
     def visible_routes(self, principal: GatewayPrincipal) -> tuple[PublishedRoute, ...]:
@@ -141,17 +161,24 @@ class ModelRegistry:
                 or not self.eligible_accounts(route)
             ):
                 continue
-            capabilities = tuple(
-                (protocol, transport, tuple(sorted(declaration.features)))
-                for protocol, transports in route.capabilities.items()
-                for transport, declaration in transports.items()
-                if self.eligible_accounts(
-                    route,
-                    protocol=protocol,
-                    transport=transport,
-                    features=frozenset(declaration.features),
-                )
-            )
+            declarations = []
+            for protocol, transports in route.capabilities.items():
+                for transport, declaration in transports.items():
+                    accounts = self.eligible_accounts(
+                        route, protocol=protocol, transport=transport, features=frozenset({"text"})
+                    )
+                    if not accounts:
+                        continue
+                    supported = set(declaration.features)
+                    for record in self.accounts:
+                        if (
+                            record.route_id == route.id
+                            and record.account_ref in accounts
+                            and record.features is not None
+                        ):
+                            supported.intersection_update(record.features)
+                    declarations.append((protocol, transport, tuple(sorted(supported))))
+            capabilities = tuple(declarations)
             if not capabilities:
                 continue
             states = {

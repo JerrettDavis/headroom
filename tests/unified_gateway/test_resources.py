@@ -12,6 +12,30 @@ from headroom.proxy.gateway.resources import ResourceBinding, ResourceRegistry
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_id", [False, True])
+async def test_bind_reclaims_expired_capacity_and_identity(monkeypatch, reuse_id):
+    import time
+
+    now = [10.0]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    registry = ResourceRegistry(max_entries=1)
+    first = ResourceBinding("old", "a", "route", "account", "openai-responses", 11.0)
+    await registry.bind(first)
+    now[0] = 12.0
+    replacement = ResourceBinding(
+        "old" if reuse_id else "new", "b", "route", "account", "openai-responses", 20.0
+    )
+    await registry.bind(replacement)
+    assert (
+        await registry.authorize(
+            replacement.provider_id, principal_id="b", route_id="route", now=12.0
+        )
+        == replacement
+    )
+
+
 EXAMPLE = (
     Path(__file__).parents[2]
     / "docs"

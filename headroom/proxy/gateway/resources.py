@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
@@ -38,6 +39,7 @@ class ResourceRegistry:
 
     async def bind(self, binding: ResourceBinding) -> None:
         async with self._lock:
+            self._expire_locked(time.time())
             existing = self._bindings.get(binding.provider_id)
             if existing is not None and existing != binding:
                 raise GatewayAuthorizationError(
@@ -94,11 +96,14 @@ class ResourceRegistry:
 
     async def expire(self, *, now: float) -> int:
         async with self._lock:
-            expired = [
-                provider_id
-                for provider_id, binding in self._bindings.items()
-                if binding.expires_at is not None and binding.expires_at <= now
-            ]
-            for provider_id in expired:
-                self._bindings.pop(provider_id, None)
-            return len(expired)
+            return self._expire_locked(now)
+
+    def _expire_locked(self, now: float) -> int:
+        expired = [
+            provider_id
+            for provider_id, binding in self._bindings.items()
+            if binding.expires_at is not None and binding.expires_at <= now
+        ]
+        for provider_id in expired:
+            self._bindings.pop(provider_id, None)
+        return len(expired)

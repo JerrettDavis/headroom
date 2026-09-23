@@ -22,46 +22,106 @@ def implemented_features(
     )
 
 
-def requested_features(payload: dict[str, Any]) -> frozenset[str]:
+def requested_features(protocol: str, payload: dict[str, Any]) -> frozenset[str]:
+    """Classify native semantic fields, never arbitrary tool arguments or schemas."""
     features = {"text"}
-    if payload.get("tools") or payload.get("tool_choice") or payload.get("toolConfig"):
+
+    def content(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                content(item)
+            return
+        if not isinstance(value, dict):
+            return
+        kind = value.get("type")
+        if kind in {"image", "image_url", "input_image"} or "image" in value:
+            features.add("inline_images")
+        if kind in {"input_audio", "audio", "video", "file", "input_file", "document"} or any(
+            key in value for key in ("audio", "video", "document", "fileData")
+        ):
+            features.add("unsupported_media")
+        inline = value.get("inlineData")
+        if isinstance(inline, dict):
+            mime = inline.get("mimeType")
+            features.add(
+                "inline_images"
+                if isinstance(mime, str) and mime.startswith("image/")
+                else "unsupported_media"
+            )
+        if kind in {"thinking", "redacted_thinking", "reasoning"} or any(
+            key in value for key in ("signature", "encrypted_content", "thoughtSignature")
+        ):
+            features.add("signed_state")
+        if protocol == "openai-chat" and (
+            value.get("role") in {"tool", "function"}
+            or "tool_calls" in value
+            or "function_call" in value
+        ):
+            features.add("tools")
+        if protocol == "openai-responses" and kind in {
+            "function_call",
+            "function_call_output",
+            "custom_tool_call",
+            "custom_tool_call_output",
+        }:
+            features.add("tools")
+        if protocol in {"anthropic-messages", "bedrock-invoke", "bedrock-converse"} and (
+            kind in {"tool_use", "tool_result"} or "toolUse" in value or "toolResult" in value
+        ):
+            features.add("tools")
+        if protocol in {"gemini-generate", "vertex-generate"} and any(
+            key in value for key in ("functionCall", "functionResponse")
+        ):
+            features.add("tools")
+        if isinstance(kind, str) and (
+            kind.startswith(("web_search", "code_interpreter", "file_search", "computer"))
+            or kind
+            in {"server_tool_use", "code_execution_tool_result", "bash_code_execution_tool_result"}
+        ):
+            features.add("hosted_tools")
+        for key in ("content", "messages", "input", "contents", "parts", "system"):
+            content(value.get(key))
+
+    tools = payload.get("tools")
+    if tools or payload.get("tool_choice") or payload.get("toolConfig") or payload.get("functions"):
         features.add("tools")
+    if isinstance(tools, list):
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            kind = tool.get("type")
+            if (
+                isinstance(kind, str)
+                and kind not in {"function", "custom"}
+                and not kind.startswith("function_")
+            ) or any(
+                key in tool
+                for key in (
+                    "googleSearch",
+                    "googleSearchRetrieval",
+                    "codeExecution",
+                    "retrieval",
+                    "urlContext",
+                    "computerUse",
+                )
+            ):
+                features.add("hosted_tools")
     if payload.get("parallel_tool_calls"):
         features.add("parallel_tools")
     text_options = payload.get("text")
+    output_config = payload.get("output_config")
+    generation_config = payload.get("generationConfig")
     if (
         payload.get("response_format")
         or isinstance(text_options, dict)
         and text_options.get("format")
+        or isinstance(output_config, dict)
+        and output_config.get("format")
+        or isinstance(generation_config, dict)
+        and any(key in generation_config for key in ("responseSchema", "responseJsonSchema"))
+        or isinstance(generation_config, dict)
+        and generation_config.get("responseMimeType") not in {None, "text/plain"}
     ):
         features.add("structured_output")
-
-    def visit(value: Any) -> None:
-        if isinstance(value, list):
-            for item in value:
-                visit(item)
-        elif isinstance(value, dict):
-            kind = value.get("type")
-            if (
-                kind in {"image", "image_url", "input_image"}
-                or "inlineData" in value
-                or "fileData" in value
-            ):
-                features.add("inline_images")
-            if (
-                kind in {"thinking", "redacted_thinking", "reasoning"}
-                or "signature" in value
-                or "encrypted_content" in value
-            ):
-                features.add("signed_state")
-            if isinstance(kind, str) and kind.startswith(
-                ("web_search", "code_interpreter", "file_search", "computer")
-            ):
-                features.add("hosted_tools")
-            if kind in {"input_audio", "audio", "video", "file", "input_file"}:
-                features.add("unsupported_media")
-            for item in value.values():
-                visit(item)
-
-    visit(payload)
+    content(payload)
     return frozenset(features)

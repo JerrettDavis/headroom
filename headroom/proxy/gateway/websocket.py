@@ -75,7 +75,7 @@ def authorize_response_create_frame(
         protocol="openai-responses",
         public_model=payload["model"],
         transport="websocket",
-        features=requested_features(payload),
+        features=requested_features("openai-responses", payload),
     )
     if expected_route_id is not None and route.id != expected_route_id:
         raise GatewayAuthorizationError(
@@ -140,7 +140,7 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                 route,
                 protocol="openai-responses",
                 transport="websocket",
-                features=requested_features(first_payload),
+                features=requested_features("openai-responses", first_payload),
             ),
             authority_keys=dict(generation.authorities),
             target_key=generation.target_key(route.id),
@@ -209,7 +209,7 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                                 turn_route,
                                 protocol="openai-responses",
                                 transport="websocket",
-                                features=requested_features(turn_payload),
+                                features=requested_features("openai-responses", turn_payload),
                             )
                         ):
                             raise GatewayAuthorizationError(

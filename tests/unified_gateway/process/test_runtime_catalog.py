@@ -48,7 +48,20 @@ def catalog_process(local_pki, tmp_path):  # noqa: F811
                 503 if state["fail"] else 200,
                 b'{"error":"private-upstream-error"}'
                 if state["fail"]
-                else b'{"data":[{"id":"fixture-model"}]}',
+                else json.dumps(
+                    {
+                        "data": [
+                            {
+                                "id": "fixture-model",
+                                "capabilities": {
+                                    "generate": True,
+                                    "stream": True,
+                                    "features": ["text"],
+                                },
+                            }
+                        ]
+                    }
+                ).encode(),
             )
 
         def do_POST(self):
@@ -176,9 +189,22 @@ def catalog_process(local_pki, tmp_path):  # noqa: F811
 
 def test_denied_entitlement_hides_model_and_blocks_generation(catalog_process):
     client, admin, state, raw, path, *_ = catalog_process
+    assert client.post("/admin/gateway/catalog/refresh", headers=admin).json()["refreshed"] == 1
+    assert client.get("/v1/models/fixture-model").status_code == 200
+    assert (
+        client.post(
+            "/v1/chat/completions", json={"model": "fixture-model", "messages": []}
+        ).status_code
+        == 200
+    )
     raw["routes"][0]["catalog"]["entitlements"]["internal-key"] = "denied"
     path.write_text(json.dumps(raw))
     assert client.post("/admin/gateway/reload", headers=admin).json()["applied"]
+    # Populate the replacement generation too: entitlement is the only denial,
+    # not an empty provider cache or a broken upstream/identity fixture.
+    assert client.post("/admin/gateway/catalog/refresh", headers=admin).json()["refreshed"] == 1
+    identity_before = client.get("/__test/probe").json()["identity"]
+    calls_before = state["metadata_calls"], state["generation_calls"]
     assert client.get("/v1/models").json()["data"] == []
     assert client.get("/v1/models/fixture-model").status_code == 404
     assert client.get("/v1beta/models").json()["models"] == []
@@ -188,8 +214,8 @@ def test_denied_entitlement_hides_model_and_blocks_generation(catalog_process):
         ).status_code
         == 404
     )
-    assert client.get("/__test/probe").json()["identity"] == 0
-    assert state["metadata_calls"] == state["generation_calls"] == 0
+    assert client.get("/__test/probe").json()["identity"] == identity_before
+    assert (state["metadata_calls"], state["generation_calls"]) == calls_before
 
 
 def test_failed_catalog_refresh_is_explicitly_stale_then_unavailable(catalog_process):

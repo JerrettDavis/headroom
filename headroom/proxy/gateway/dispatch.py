@@ -8,6 +8,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode
 
@@ -348,7 +349,7 @@ async def dispatch_native_http(
             or "streamGenerateContent" in request.url.path
             or "response-stream" in request.url.path
             else "http-json",
-            features=requested_features(payload),
+            features=requested_features(protocol, payload),
         )
         resource_binding = None
         if protocol == "openai-responses":
@@ -435,7 +436,7 @@ async def dispatch_native_http(
                 or "streamGenerateContent" in request.url.path
                 or "response-stream" in request.url.path
                 else "http-json",
-                features=requested_features(payload),
+                features=requested_features(protocol, payload),
             ),
             authority_keys=dict(request.state.gateway_generation.authorities),
             target_key=request.state.gateway_generation.target_key(route.id),
@@ -590,19 +591,34 @@ async def dispatch_native_http(
 def gateway_model_catalog(
     request: Request, model_id: str | None = None, *, protocol: str | None = None
 ) -> JSONResponse:
+    if protocol is None and "anthropic-version" in request.headers:
+        protocol = "anthropic-messages"
     principal = request.state.gateway_principal
     catalog = request.state.gateway_generation.catalog
+
+    def catalog_error(status: int, code: str) -> JSONResponse:
+        if protocol == "anthropic-messages":
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": "not_found_error" if status == 404 else "permission_error",
+                        "message": "Model unavailable" if status == 404 else "Scope denied",
+                    },
+                },
+            )
+        return JSONResponse(status_code=status, content={"error": {"code": code}})
+
     if "models" not in principal.scopes:
-        return JSONResponse(status_code=403, content={"error": {"code": "gateway_scope_forbidden"}})
+        return catalog_error(403, "gateway_scope_forbidden")
     routes = catalog.visible_routes(principal)
     if protocol:
         routes = tuple(r for r in routes if protocol in r.protocols)
     if model_id is not None:
         routes = tuple(r for r in routes if r.id == model_id)
         if not routes:
-            return JSONResponse(
-                status_code=404, content={"error": {"code": "gateway_model_unavailable"}}
-            )
+            return catalog_error(404, "gateway_model_unavailable")
     data = []
     for route in routes:
         item = {
@@ -623,7 +639,16 @@ def gateway_model_catalog(
                 "tariff_revision": route.tariff_revision,
             },
         }
-        if protocol == "gemini-generate":
+        if protocol == "anthropic-messages":
+            item.pop("object")
+            item.pop("owned_by")
+            item.update(
+                type="model",
+                display_name=route.id,
+                created_at=datetime.fromtimestamp(catalog.published_at, timezone.utc).isoformat(),
+            )
+            item["headroom"]["created_at_provenance"] = "gateway_catalog_publication"
+        elif protocol == "gemini-generate":
             item["name"] = "models/" + route.id
             item["supportedGenerationMethods"] = ["generateContent"] + (
                 ["streamGenerateContent"]
@@ -631,6 +656,15 @@ def gateway_model_catalog(
                 else []
             )
         data.append(item)
+    if protocol == "anthropic-messages" and model_id is None:
+        return JSONResponse(
+            {
+                "data": data,
+                "has_more": False,
+                "first_id": data[0]["id"] if data else None,
+                "last_id": data[-1]["id"] if data else None,
+            }
+        )
     return JSONResponse(
         data[0]
         if model_id is not None

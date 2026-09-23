@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from headroom.proxy.gateway.config import GatewayConfigSnapshot
+from headroom.proxy.gateway.models import ProviderModelMetadata
 from headroom.proxy.gateway.runtime import RuntimeDependencies
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
@@ -44,7 +45,11 @@ async def test_refresh_singleflight_and_obsolete_publish_rejected(tmp_path):
         if route.id == "anthropic-native":
             started.set()
             await release.wait()
-        return (route.upstream_model,)
+        return (
+            ProviderModelMetadata(
+                route.upstream_model, frozenset({"generate"}), frozenset({"text"})
+            ),
+        )
 
     service = runtime(raw, dependencies=RuntimeDependencies(metadata_reader=metadata))
     revision = service.capture().catalog.revision
