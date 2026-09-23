@@ -7,6 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from headroom.proxy.gateway.capabilities import requested_features
 from headroom.proxy.gateway.config import GatewayConfigSnapshot
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
@@ -79,6 +80,36 @@ EXAMPLE = (
         ),
         ("gemini-generate", {"tools": [{"googleSearch": {}}]}, ["text", "tools"]),
         ("gemini-generate", {"tools": [{"codeExecution": {}}]}, ["text", "tools"]),
+        pytest.param(
+            "openai-responses",
+            {
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-a",
+                        "output": [
+                            {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
+                        ],
+                    }
+                ]
+            },
+            ["text", "tools"],
+            id="response-tool-output-image",
+        ),
+        pytest.param(
+            "openai-responses",
+            {
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-a",
+                        "output": [{"type": "input_file", "file_id": "file-a"}],
+                    }
+                ]
+            },
+            ["text", "tools"],
+            id="response-tool-output-file",
+        ),
     ],
 )
 def test_protocol_feature_rejected_before_identity_and_dispatch(
@@ -116,3 +147,52 @@ def test_protocol_feature_rejected_before_identity_and_dispatch(
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "gateway_unsupported_capability"
     assert calls == {"identity": 0, "upstream": 0}
+
+
+@pytest.mark.parametrize(
+    ("output", "feature"),
+    [
+        ({"type": "input_image", "image_url": "data:image/png;base64,AAAA"}, "inline_images"),
+        ({"type": "input_file", "file_id": "file-a"}, "unsupported_media"),
+    ],
+    ids=["image", "file"],
+)
+def test_response_tool_output_content_classification(output, feature):
+    payload = {
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "call-a",
+                "output": [{"type": "input_text", "text": "Tool result"}, output],
+            }
+        ]
+    }
+    assert requested_features("openai-responses", payload) == {"text", "tools", feature}
+
+
+def test_response_tool_arguments_and_schema_are_not_content():
+    arbitrary_data = {"output": [{"type": "input_file", "file_id": "not-a-real-file"}]}
+    payload = {
+        "tools": [
+            {
+                "type": "function",
+                "name": "tool",
+                "parameters": {"type": "object", "examples": [arbitrary_data]},
+            }
+        ],
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call-a",
+                "name": "tool",
+                "arguments": json.dumps(arbitrary_data),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call-a",
+                "output": json.dumps(arbitrary_data),
+            },
+        ],
+        "metadata": arbitrary_data,
+    }
+    assert requested_features("openai-responses", payload) == {"text", "tools"}

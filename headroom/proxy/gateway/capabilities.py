@@ -65,6 +65,8 @@ def requested_features(protocol: str, payload: dict[str, Any]) -> frozenset[str]
             "custom_tool_call_output",
         }:
             features.add("tools")
+            if kind == "function_call_output" and isinstance(value.get("output"), list):
+                content(value["output"])
         if protocol in {"anthropic-messages", "bedrock-invoke", "bedrock-converse"} and (
             kind in {"tool_use", "tool_result"} or "toolUse" in value or "toolResult" in value
         ):
