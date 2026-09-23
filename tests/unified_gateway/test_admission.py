@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from headroom.proxy.gateway.admission import AdmissionController, AdmissionRequest
 from headroom.proxy.gateway.config import GatewayConfigSnapshot
+from headroom.proxy.gateway.usage import UsageObservation
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
 
@@ -19,6 +21,33 @@ EXAMPLE = (
     / "examples"
     / "gateway.api-keys.json"
 )
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancellation_cannot_drop_reservation() -> None:
+    controller = AdmissionController(
+        budget_limit=1, max_concurrency=1, queue_limit=0, unknown_cost_policy="block"
+    )
+    reservation = await controller.reserve(AdmissionRequest("a", estimated_cost=0.5))
+    async with controller._condition:
+        finishing = asyncio.create_task(
+            reservation.finalize(
+                UsageObservation(
+                    currency_charge=Decimal("0.25"), currency="USD", availability="complete"
+                ),
+                "accepted",
+            )
+        )
+        await asyncio.sleep(0)
+        finishing.cancel()
+        await asyncio.sleep(0)
+    try:
+        await finishing
+    except asyncio.CancelledError:
+        pass
+    await reservation.finalize(UsageObservation(), "acceptance_unknown")
+    assert controller.active_count == 0
+    assert controller.committed_cost == 0.25
 
 
 @pytest.mark.asyncio

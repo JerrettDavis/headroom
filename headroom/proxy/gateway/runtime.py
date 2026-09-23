@@ -149,25 +149,38 @@ class GatewayRuntime:
         self.config_path = config_path.resolve() if config_path is not None else None
         self.dependencies = dependencies or RuntimeDependencies()
         self._reload_lock = asyncio.Lock()
-        self.admission = AdmissionController(
-            max_concurrency=snapshot.admission.max_concurrency,
-            budget_limit=None,
-            queue_limit=snapshot.admission.queue_limit,
-            unknown_cost_policy=snapshot.admission.unknown_cost_policy,
-        )
         self.resources = ResourceRegistry(max_entries=snapshot.limits.max_resource_bindings)
         self.router = AccountRouter(
             available_accounts={c.id for c in snapshot.credentials if c.enabled}
         )
         self.observability = GatewayObservability()
         self.active_work: dict[str, Any] = {}
+        self._work_empty = asyncio.Event()
+        self._work_empty.set()
         self._refresh_tasks: dict[tuple[int, str, str], asyncio.Task[dict[str, object]]] = {}
         self._retired: list[RuntimeGeneration] = []
         self._pseudonyms: dict[str, str] = {}
         self._ready = True
         self._generation = self._build_generation(snapshot, 1)
+        self.admission = AdmissionController.from_policy(
+            snapshot.admission,
+            principals={p.id: p.admission for p in snapshot.client_auth.principals if p.enabled},
+            account_limits={
+                self._generation.account_key(c.id): c.max_concurrency
+                for c in snapshot.credentials
+                if c.enabled
+            },
+            generation=1,
+            grants={
+                p.id: frozenset(p.routes) for p in snapshot.client_auth.principals if p.enabled
+            },
+            routes=frozenset(r.id for r in snapshot.routes if r.enabled),
+        )
+        self.observability.bind_admission(self.admission)
         self.router.update_accounts(
-            {c.id for c in snapshot.credentials if c.enabled}, dict(self._generation.authorities)
+            {c.id for c in snapshot.credentials if c.enabled},
+            dict(self._generation.authorities),
+            credentials={c.id: c for c in snapshot.credentials},
         )
 
     @property
@@ -237,12 +250,63 @@ class GatewayRuntime:
                 catalog=catalog,
                 authorizer=GatewayAuthorizer(candidate.snapshot, catalog),
             )
+            try:
+                await self._publish(candidate)
+            except ValueError:
+                await candidate.http_client.aclose()
+                return ReloadResult(False, self.generation, "invalid_configuration")
+        return ReloadResult(True, candidate.number)
+
+    async def _publish(self, candidate: RuntimeGeneration) -> None:
+        snapshot = candidate.snapshot
+
+        def publish() -> None:
             self._retired.append(self._generation)
             self._generation = candidate
             self.router.update_accounts(
-                {c.id for c in snapshot.credentials if c.enabled}, dict(candidate.authorities)
+                {c.id for c in snapshot.credentials if c.enabled},
+                dict(candidate.authorities),
+                credentials={c.id: c for c in snapshot.credentials},
             )
-        return ReloadResult(True, candidate.number)
+
+        await self.admission.update_policy(
+            snapshot.admission,
+            principals={p.id: p.admission for p in snapshot.client_auth.principals if p.enabled},
+            account_limits={
+                candidate.account_key(c.id): c.max_concurrency
+                for c in snapshot.credentials
+                if c.enabled
+            },
+            generation=candidate.number,
+            grants={
+                p.id: frozenset(p.routes) for p in snapshot.client_auth.principals if p.enabled
+            },
+            routes=frozenset(r.id for r in snapshot.routes if r.enabled),
+            publish=publish,
+        )
+        await self._cancel_revoked(candidate)
+
+    async def _cancel_revoked(self, candidate: RuntimeGeneration) -> None:
+        principals = {p.id: p for p in candidate.snapshot.client_auth.principals if p.enabled}
+        routes = {r.id for r in candidate.snapshot.routes if r.enabled}
+        accounts = {
+            candidate.account_key(c.id) for c in candidate.snapshot.credentials if c.enabled
+        }
+        caller = asyncio.current_task()
+        owners = [
+            owner
+            for owner in tuple(self.active_work.values())
+            if (
+                owner.principal.id not in principals
+                or owner.route.id not in routes
+                or owner.route.id not in principals[owner.principal.id].routes
+                or owner.selected_account_key is not None
+                and owner.selected_account_key not in accounts
+            )
+        ]
+        await asyncio.gather(
+            *(owner.cancel(cancel_owner=owner.owner_task is not caller) for owner in owners)
+        )
 
     def status(self) -> RedactedGatewayStatus:
         generation = self.capture()
@@ -296,11 +360,7 @@ class GatewayRuntime:
         snapshot = GatewayConfigSnapshot.model_validate(raw)
         async with self._reload_lock:
             candidate = self._build_generation(snapshot, self.generation + 1)
-            self._retired.append(self._generation)
-            self._generation = candidate
-            self.router.update_accounts(
-                {c.id for c in snapshot.credentials if c.enabled}, dict(candidate.authorities)
-            )
+            await self._publish(candidate)
         return ReloadResult(True, candidate.number)
 
     async def refresh_catalog(self) -> dict[str, object]:
@@ -480,6 +540,19 @@ class GatewayRuntime:
             task.cancel()
         await asyncio.gather(*tuple(self._refresh_tasks.values()), return_exceptions=True)
         await self.admission.shutdown()
+        try:
+            await asyncio.wait_for(
+                self._work_empty.wait(), self.snapshot.limits.shutdown_drain_seconds
+            )
+        except asyncio.TimeoutError:
+            caller = asyncio.current_task()
+            owners = tuple(self.active_work.values())
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(owner.cancel(cancel_owner=owner.owner_task is not caller) for owner in owners)
+                ),
+                self.snapshot.limits.shutdown_cleanup_seconds,
+            )
         await self.resources.clear()
         for generation in [self._generation, *self._retired]:
             await generation.http_client.aclose()
