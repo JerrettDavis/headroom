@@ -75,6 +75,7 @@ class GatewayOperation:
         }
         runtime.admission.register_operation(self.id, principal.id)
         runtime.active_work[self.id] = self
+        runtime.retain(generation)
         runtime._work_empty.clear()
 
     async def start_attempt(
@@ -223,6 +224,7 @@ class GatewayOperation:
         finally:
             self.runtime.admission.forget_operation(self.id)
             self.runtime.active_work.pop(self.id, None)
+            await self.runtime.release(self.generation)
             if not self.runtime.active_work:
                 self.runtime._work_empty.set()
             self._update_metrics()

@@ -356,6 +356,7 @@ async def _run_attempts(
         )
         retry = None
         try:
+            await attempt.check_current()
             lease = await asyncio.wait_for(
                 generation.broker.acquire(route, account_ref=selection.account_ref),
                 max(0, operation.deadline - time.monotonic()),

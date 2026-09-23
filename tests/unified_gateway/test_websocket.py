@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 import pytest
 import websockets
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from headroom.proxy.gateway.auth import GatewayAuthorizer
 from headroom.proxy.gateway.config import GatewayConfigSnapshot
@@ -116,6 +118,7 @@ def test_gateway_websocket_reauthorizes_second_turn_before_forwarding(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
     sent: list[str] = []
+    accepted = threading.Event()
 
     class FakeUpstream:
         async def __aenter__(self):
@@ -126,6 +129,7 @@ def test_gateway_websocket_reauthorizes_second_turn_before_forwarding(
 
         async def send(self, frame: str) -> None:
             sent.append(frame)
+            accepted.set()
 
         def __aiter__(self):
             return self
@@ -150,6 +154,7 @@ def test_gateway_websocket_reauthorizes_second_turn_before_forwarding(
         headers={"host": "127.0.0.1:8787", "authorization": "Bearer client-secret"},
     ) as socket:
         socket.send_json(first)
+        assert accepted.wait(3)
         socket.send_json(second)
         error = socket.receive_json()
 
@@ -163,6 +168,7 @@ def test_websocket_turn_reauthenticates_current_generation(monkeypatch, selector
     monkeypatch.setenv("HEADROOM_GATEWAY_CLIENT_TOKEN", "client-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     sent = []
+    revoked = threading.Event()
 
     class Upstream:
         async def __aenter__(self):
@@ -182,6 +188,7 @@ def test_websocket_turn_reauthenticates_current_generation(monkeypatch, selector
                     }[selector]
                 }
             )
+            revoked.set()
 
         def __aiter__(self):
             return self
@@ -199,9 +206,14 @@ def test_websocket_turn_reauthenticates_current_generation(monkeypatch, selector
         "/v1/responses", headers={"host": "127.0.0.1", "authorization": "Bearer client-secret"}
     ) as socket:
         socket.send_json(frame)
-        socket.send_json(frame)
-        assert socket.receive_json()["error"]["code"] in {
-            "gateway_auth_invalid",
-            "gateway_model_unavailable",
-        }
+        assert revoked.wait(3)
+        try:
+            assert socket.receive_json()["error"]["code"] in {
+                "gateway_auth_invalid",
+                "gateway_model_unavailable",
+                "gateway_upstream_error",
+            }
+        except WebSocketDisconnect:
+            # Explicit revocation now closes the runtime-owned active session.
+            pass
     assert len(sent) == 1

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from tests.unified_gateway.process.harness import _unused_loopback_port
+from tests.unified_gateway.process.harness import _unused_loopback_port, gateway_config_digest
 
 
 @contextmanager
@@ -26,6 +26,8 @@ def http_process(
     fail_connect=False,
     public_provider=False,
     reserve_barrier=0,
+    websocket_handler=None,
+    acquire_barrier=False,
 ):
     context, raw = local_pki
     calls = []
@@ -48,6 +50,13 @@ def http_process(
     server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    ws_server = ws_thread = None
+    if websocket_handler is not None:
+        from websockets.sync.server import serve
+
+        ws_server = serve(websocket_handler, "127.0.0.1", 0, ssl=context, close_timeout=1)
+        ws_thread = threading.Thread(target=ws_server.serve_forever, daemon=True)
+        ws_thread.start()
     raw["runtime"]["port"] = _unused_loopback_port()
     raw["transport"]["ca_bundle"] = str(tmp_path / "ca.pem")
     hostname = "api.anthropic.com" if public_provider else "llm.internal.example"
@@ -101,6 +110,11 @@ def http_process(
         route["capabilities"] = {"anthropic-messages": route["capabilities"]["anthropic-messages"]}
     if configure:
         configure(raw)
+    if ws_server is not None:
+        ws_origin = f"https://llm.internal.example:{ws_server.socket.getsockname()[1]}"
+        raw["credentials"][0]["allowed_origins"].append(ws_origin)
+        route["upstream_origin"] = ws_origin
+        route["capabilities"]["openai-responses"]["websocket"] = {"features": ["text", "tools"]}
     path = tmp_path / "http-runtime.json"
     path.write_text(json.dumps(raw))
     env = {
@@ -123,6 +137,8 @@ def http_process(
     env["HEADROOM_GATEWAY_CLIENT_TOKEN_B"] = "client-b"
     env["GATEWAY_TEST_RUNTIME_HTTP"] = "1"
     env["GATEWAY_TEST_RESERVE_BARRIER"] = str(reserve_barrier)
+    env["GATEWAY_TEST_ACQUIRE_BARRIER"] = "1" if acquire_barrier else "0"
+    env["OPERATOR_TOKEN"] = "operator-secret"
     if public_provider:
         env["GATEWAY_TEST_UPSTREAM_PORT"] = str(server.server_port)
     if fail_connect:
@@ -153,11 +169,16 @@ def http_process(
         headers={"authorization": "Bearer client-secret"},
         timeout=12,
     )
+    client.gateway_test_process = process
     try:
         assert ready.wait(30), "".join(output)
         assert any("Uvicorn running on" in line for line in output), "".join(output)
         assert process.poll() is None, "".join(output)
-        assert client.get("/readyz").json()["profile"] == "gateway"
+        readiness = client.get("/readyz").json()
+        assert readiness["service"] == "headroom" and readiness["profile"] == "gateway"
+        assert readiness["ready"] is True and readiness["config_digest"] == gateway_config_digest(
+            raw
+        )
         yield client, calls, output, raw
     finally:
         client.close()
@@ -171,6 +192,9 @@ def http_process(
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+        if ws_server is not None:
+            ws_server.shutdown()
+            ws_thread.join(timeout=3)
         (tmp_path / "http-process.log").write_text("".join(output), encoding="utf-8")
 
 

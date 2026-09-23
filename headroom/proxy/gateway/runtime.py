@@ -160,6 +160,10 @@ class GatewayRuntime:
         self._work_empty.set()
         self._refresh_tasks: dict[tuple[int, str, str], asyncio.Task[dict[str, object]]] = {}
         self._retired: list[RuntimeGeneration] = []
+        self._generation_users: dict[int, int] = {}
+        self._shutdown_task: asyncio.Task[None] | None = None
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._cleanup_deadline: float | None = None
         self._pseudonyms: dict[str, str] = {}
         self._ready = True
         self._generation = self._build_generation(snapshot, 1)
@@ -228,6 +232,8 @@ class GatewayRuntime:
         )
 
     async def reload(self, path: Path | None = None) -> ReloadResult:
+        if not self._ready:
+            return ReloadResult(False, self.generation, "gateway_shutting_down")
         # The Python API accepts a trusted path; HTTP controls never accept one.
         selected = self.config_path if path is None else path
         if selected is None:
@@ -238,6 +244,9 @@ class GatewayRuntime:
         except (OSError, ValueError):
             return ReloadResult(False, self.generation, "gateway_configuration_invalid")
         async with self._reload_lock:
+            if not self._ready:
+                await self._close_generation(candidate)
+                return ReloadResult(False, self.generation, "gateway_shutting_down")
             candidate = replace(candidate, number=self.generation + 1)
             catalog = CatalogSnapshot(
                 candidate.snapshot,
@@ -254,7 +263,7 @@ class GatewayRuntime:
             try:
                 await self._publish(candidate)
             except ValueError:
-                await candidate.http_client.aclose()
+                await self._close_generation(candidate)
                 return ReloadResult(False, self.generation, "invalid_configuration")
         return ReloadResult(True, candidate.number)
 
@@ -262,6 +271,38 @@ class GatewayRuntime:
         snapshot = candidate.snapshot
 
         def publish() -> None:
+            current = self._generation
+            enabled = {candidate.account_key(c.id) for c in snapshot.credentials if c.enabled}
+            principals = {p.id: p for p in snapshot.client_auth.principals if p.enabled}
+            revoked = (
+                any(
+                    p.enabled
+                    and (
+                        p.id not in principals
+                        or bool(set(p.routes) - set(principals[p.id].routes))
+                        or bool(set(p.scopes) - set(principals[p.id].scopes))
+                    )
+                    for p in current.snapshot.client_auth.principals
+                )
+                or bool(
+                    {r.id for r in current.snapshot.routes if r.enabled}
+                    - {r.id for r in snapshot.routes if r.enabled}
+                )
+                or bool(
+                    {current.account_key(c.id) for c in current.snapshot.credentials if c.enabled}
+                    - enabled
+                )
+            )
+            if revoked:
+                # A refresh spans accounts/routes. Cancel the whole bounded
+                # refresh when any captured authority is revoked; ordinary
+                # reloads still let it finish against its retained snapshot.
+                for refresh_task in self._refresh_tasks.values():
+                    refresh_task.cancel()
+            for retired in [current, *self._retired]:
+                for account, authority in retired.authorities:
+                    if authority not in enabled:
+                        retired.broker.revoke(account)
             self._retired.append(self._generation)
             self._generation = candidate
             self.router.update_accounts(
@@ -280,12 +321,58 @@ class GatewayRuntime:
             },
             generation=candidate.number,
             grants={
-                p.id: frozenset(p.routes) for p in snapshot.client_auth.principals if p.enabled
+                p.id: frozenset(p.routes) if "inference" in p.scopes else frozenset()
+                for p in snapshot.client_auth.principals
+                if p.enabled
             },
             routes=frozenset(r.id for r in snapshot.routes if r.enabled),
             publish=publish,
         )
         await self._cancel_revoked(candidate)
+        await self._retire_unused()
+
+    def retain(self, generation: RuntimeGeneration) -> None:
+        self._generation_users[generation.number] = (
+            self._generation_users.get(generation.number, 0) + 1
+        )
+
+    async def release(self, generation: RuntimeGeneration) -> None:
+        count = self._generation_users.get(generation.number, 0)
+        if count <= 1:
+            self._generation_users.pop(generation.number, None)
+        else:
+            self._generation_users[generation.number] = count - 1
+        await self._retire_unused()
+
+    async def _close_generation(self, generation: RuntimeGeneration) -> None:
+        await asyncio.gather(generation.http_client.aclose(), generation.broker.aclose())
+
+    async def _retire_unused(self) -> None:
+        unused = [
+            generation
+            for generation in self._retired
+            if not self._generation_users.get(generation.number)
+        ]
+        self._retired = [generation for generation in self._retired if generation not in unused]
+        tasks = [asyncio.create_task(self._close_generation(generation)) for generation in unused]
+        for task in tasks:
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_finished)
+        if tasks:
+            # An SDK thread cannot be force-stopped safely. Keep ownership and
+            # close its source after the guarded late result, within a bounded
+            # wait for the caller (never publish that result into a new broker).
+            await asyncio.wait(tasks, timeout=self._cleanup_remaining())
+
+    def _cleanup_remaining(self) -> float:
+        if self._cleanup_deadline is None:
+            return self.snapshot.limits.shutdown_cleanup_seconds
+        return max(0, self._cleanup_deadline - time.monotonic())
+
+    def _cleanup_finished(self, task: asyncio.Task[None]) -> None:
+        self._cleanup_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
 
     async def _cancel_revoked(self, candidate: RuntimeGeneration) -> None:
         principals = {p.id: p for p in candidate.snapshot.client_auth.principals if p.enabled}
@@ -299,15 +386,30 @@ class GatewayRuntime:
             for owner in tuple(self.active_work.values())
             if (
                 owner.principal.id not in principals
-                or owner.route.id not in routes
-                or owner.route.id not in principals[owner.principal.id].routes
+                or "inference" not in principals[owner.principal.id].scopes
+                or owner.route is not None
+                and (
+                    owner.route.id not in routes
+                    or owner.route.id not in principals[owner.principal.id].routes
+                )
                 or owner.selected_account_key is not None
                 and owner.selected_account_key not in accounts
             )
         ]
-        await asyncio.gather(
-            *(owner.cancel(cancel_owner=owner.owner_task is not caller) for owner in owners)
-        )
+        tasks = [
+            asyncio.create_task(
+                owner.cancel(
+                    cancel_owner=owner.owner_task is not caller
+                    and caller not in getattr(owner, "tasks", ())
+                )
+            )
+            for owner in owners
+        ]
+        for task in tasks:
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_finished)
+        if tasks:
+            await asyncio.wait(tasks, timeout=candidate.snapshot.limits.shutdown_cleanup_seconds)
 
     def status(self) -> RedactedGatewayStatus:
         generation = self.capture()
@@ -344,22 +446,26 @@ class GatewayRuntime:
     ) -> ReloadResult:
         if sum(value is not None for value in (principal_id, route_id, account_id)) != 1:
             raise ValueError("one revocation selector required")
-        raw = self.snapshot.model_dump(mode="json")
-        items = (
-            raw["client_auth"]["principals"]
-            if principal_id
-            else raw["routes"]
-            if route_id
-            else raw["credentials"]
-        )
-        selector = principal_id or route_id or account_id
-        if not any(item["id"] == selector for item in items):
-            raise ValueError("unknown revocation selector")
-        for item in items:
-            if item["id"] == selector:
-                item["enabled"] = False
-        snapshot = GatewayConfigSnapshot.model_validate(raw)
         async with self._reload_lock:
+            if not self._ready:
+                return ReloadResult(False, self.generation, "gateway_shutting_down")
+            # Derive mutations while holding the publication lock: concurrent
+            # revocations must compose instead of restoring an older snapshot.
+            raw = self.snapshot.model_dump(mode="json")
+            items = (
+                raw["client_auth"]["principals"]
+                if principal_id
+                else raw["routes"]
+                if route_id
+                else raw["credentials"]
+            )
+            selector = principal_id or route_id or account_id
+            if not any(item["id"] == selector for item in items):
+                raise ValueError("unknown revocation selector")
+            for item in items:
+                if item["id"] == selector:
+                    item["enabled"] = False
+            snapshot = GatewayConfigSnapshot.model_validate(raw)
             candidate = self._build_generation(snapshot, self.generation + 1)
             await self._publish(candidate)
         return ReloadResult(True, candidate.number)
@@ -369,10 +475,17 @@ class GatewayRuntime:
         key = (generation.number, "catalog", "complete")
         task = self._refresh_tasks.get(key)
         if task is None:
-            task = asyncio.create_task(self._refresh_complete(generation))
+            self.retain(generation)
+            task = asyncio.create_task(self._owned_refresh(generation))
             self._refresh_tasks[key] = task
             task.add_done_callback(lambda done: self._refresh_tasks.pop(key, None))
         return await asyncio.shield(task)
+
+    async def _owned_refresh(self, generation: RuntimeGeneration) -> dict[str, object]:
+        try:
+            return await self._refresh_complete(generation)
+        finally:
+            await self.release(generation)
 
     async def _refresh_complete(self, generation: RuntimeGeneration) -> dict[str, object]:
         semaphore = asyncio.Semaphore(8)
@@ -536,27 +649,53 @@ class GatewayRuntime:
         return tuple(models)
 
     async def shutdown(self) -> None:
+        if self._shutdown_task is None:
+            self._ready = False
+            self._shutdown_task = asyncio.create_task(self._shutdown())
+        await asyncio.shield(self._shutdown_task)
+
+    async def _shutdown(self) -> None:
         self._ready = False
-        for task in self._refresh_tasks.values():
-            task.cancel()
-        await asyncio.gather(*tuple(self._refresh_tasks.values()), return_exceptions=True)
+        for refresh_task in self._refresh_tasks.values():
+            refresh_task.cancel()
         await self.admission.shutdown()
         try:
             await asyncio.wait_for(
                 self._work_empty.wait(), self.snapshot.limits.shutdown_drain_seconds
             )
         except asyncio.TimeoutError:
+            pass
+        self._cleanup_deadline = time.monotonic() + self.snapshot.limits.shutdown_cleanup_seconds
+        if self.active_work:
             caller = asyncio.current_task()
             owners = tuple(self.active_work.values())
-            await asyncio.wait_for(
-                asyncio.gather(
-                    *(owner.cancel(cancel_owner=owner.owner_task is not caller) for owner in owners)
-                ),
-                self.snapshot.limits.shutdown_cleanup_seconds,
-            )
+            tasks = [
+                asyncio.create_task(owner.cancel(cancel_owner=owner.owner_task is not caller))
+                for owner in owners
+            ]
+            for task in tasks:
+                self._cleanup_tasks.add(task)
+                task.add_done_callback(self._cleanup_finished)
+            await asyncio.wait(tasks, timeout=self._cleanup_remaining())
+        self._retired.append(self._generation)
+        await self._retire_unused()
+        cleanup = asyncio.create_task(self._close_dependencies())
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_finished)
+        pending = {*self._cleanup_tasks, *self._refresh_tasks.values()}
+        if pending:
+            await asyncio.wait(pending, timeout=self._cleanup_remaining())
+
+    async def _close_dependencies(self) -> None:
+        await self._work_empty.wait()
         await self.resources.clear()
-        for generation in [self._generation, *self._retired]:
-            await generation.http_client.aclose()
+        for dependency, owned in (
+            (self.dependencies.http_client, self._generation.http_client),
+            (self.dependencies.broker, self._generation.broker),
+        ):
+            close = getattr(dependency, "aclose", None)
+            if dependency is not owned and close is not None:
+                await close()
 
     def _build_generation(self, snapshot: GatewayConfigSnapshot, number: int) -> RuntimeGeneration:
         authorities = tuple(

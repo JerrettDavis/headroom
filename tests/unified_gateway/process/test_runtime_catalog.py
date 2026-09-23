@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.unified_gateway.process.harness import _unused_loopback_port
+from tests.unified_gateway.process.harness import _unused_loopback_port, gateway_config_digest
 from tests.unified_gateway.test_gateway_tls import local_pki  # noqa: F401
 
 
@@ -164,8 +164,16 @@ def catalog_process(local_pki, tmp_path):  # noqa: F811
                 pytest.fail("".join(output))
             try:
                 response = client.get("/readyz", timeout=0.2)
-                if response.status_code == 200 and response.json().get("profile") == "gateway":
-                    break
+                if response.status_code == 200:
+                    readiness = response.json()
+                    if (
+                        process.poll() is None
+                        and readiness.get("service") == "headroom"
+                        and readiness.get("profile") == "gateway"
+                        and readiness.get("ready") is True
+                        and readiness.get("config_digest") == gateway_config_digest(raw)
+                    ):
+                        break
             except httpx.HTTPError:
                 pass
             time.sleep(0.05)

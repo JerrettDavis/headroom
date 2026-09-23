@@ -78,6 +78,11 @@ class CredentialBroker:
         self._sources = dict(sources)
         self._leases: dict[str, CredentialLease] = {}
         self._generations: dict[str, int] = {}
+        self._epochs: dict[str, int] = {}
+        self._revoked: set[str] = set()
+        self._pending: dict[asyncio.Task[CredentialLease], str] = {}
+        self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
         self._locks: dict[str, asyncio.Lock] = {
             credential_id: asyncio.Lock() for credential_id in self._sources
         }
@@ -122,6 +127,8 @@ class CredentialBroker:
             if account_ref is not None and credential_id != account_ref:
                 continue
             async with self._locks[credential_id]:
+                self._check_available(credential_id)
+                epoch = self._epochs.get(credential_id, 0)
                 now = time.time()
                 cached = self._leases.get(credential_id)
                 if cached is not None and (
@@ -129,10 +136,20 @@ class CredentialBroker:
                 ):
                     return cached
                 try:
-                    lease = await source.acquire(now=now)
+                    pending = asyncio.create_task(source.acquire(now=now))
+                    self._pending[pending] = credential_id
+                    pending.add_done_callback(self._source_finished)
+                    try:
+                        lease = await asyncio.shield(pending)
+                    except asyncio.CancelledError:
+                        pending.cancel()
+                        raise
                 except GatewayCredentialUnavailable:
                     unavailable = True
                     continue
+                self._check_available(credential_id)
+                if epoch != self._epochs.get(credential_id, 0):
+                    raise self._unavailable()
                 if lease.provider != route.provider or lease.credential_id != credential_id:
                     raise GatewayCredentialUnavailable(
                         status_code=503,
@@ -149,6 +166,50 @@ class CredentialBroker:
             code="credential_unavailable",
             message="No configured provider credential is available",
         ) from (None if unavailable else None)
+
+    @staticmethod
+    def _unavailable() -> GatewayCredentialUnavailable:
+        return GatewayCredentialUnavailable(
+            status_code=503,
+            code="credential_unavailable",
+            message="Provider credential unavailable",
+        )
+
+    def _check_available(self, credential_id: str) -> None:
+        if self._closed or credential_id in self._revoked:
+            raise self._unavailable()
+
+    def _source_finished(self, task: asyncio.Task[CredentialLease]) -> None:
+        self._pending.pop(task, None)
+        if not task.cancelled():
+            task.exception()
+
+    def revoke(self, credential_id: str) -> None:
+        # No await: publication invalidates caches and in-flight results before
+        # the admission condition wakes any queued operation.
+        self._epochs[credential_id] = self._epochs.get(credential_id, 0) + 1
+        self._revoked.add(credential_id)
+        self._leases.pop(credential_id, None)
+        for task, account in tuple(self._pending.items()):
+            if account == credential_id:
+                task.cancel()
+
+    async def aclose(self) -> None:
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._finish_close())
+        await asyncio.shield(self._close_task)
+
+    async def _finish_close(self) -> None:
+        self._leases.clear()
+        pending = tuple(self._pending)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for source in self._sources.values():
+            close = getattr(source, "aclose", None)
+            if close is not None:
+                await close()
 
     async def invalidate(self, lease: CredentialLease, reason: str) -> None:
         source = self._sources.get(lease.credential_id)

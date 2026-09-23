@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from threading import Event
 
 import pytest
 import websockets
@@ -28,18 +29,18 @@ def test_websocket_disconnect_closes_owned_upstream(
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
-    closed = False
+    sent = Event()
+    closed = Event()
 
     class FakeUpstream:
         async def __aenter__(self):
             return self
 
         async def __aexit__(self, *_args):
-            nonlocal closed
-            closed = True
+            closed.set()
 
         async def send(self, _frame: str) -> None:
-            return None
+            sent.set()
 
         def __aiter__(self):
             return self
@@ -50,18 +51,20 @@ def test_websocket_disconnect_closes_owned_upstream(
     monkeypatch.setattr(websockets, "connect", lambda *_args, **_kwargs: FakeUpstream())
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
 
-    with TestClient(app).websocket_connect(
-        "/v1/responses",
-        headers={"host": "127.0.0.1:8787", "authorization": "Bearer client-secret"},
-    ) as socket:
-        socket.send_json(
-            {
-                "type": "response.create",
-                "response": {
-                    "model": "REPLACE_WITH_ENABLED_OPENAI_MODEL",
-                    "input": "one",
-                },
-            }
-        )
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/v1/responses",
+            headers={"host": "127.0.0.1:8787", "authorization": "Bearer client-secret"},
+        ) as socket:
+            socket.send_json(
+                {
+                    "type": "response.create",
+                    "response": {
+                        "model": "REPLACE_WITH_ENABLED_OPENAI_MODEL",
+                        "input": "one",
+                    },
+                }
+            )
+            assert sent.wait(2), "disconnect only after the upstream is owned"
 
-    assert closed is True
+        assert closed.wait(2), "disconnect must close the owned upstream"

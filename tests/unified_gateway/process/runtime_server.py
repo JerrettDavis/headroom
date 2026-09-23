@@ -15,6 +15,7 @@ from headroom.proxy.gateway.config import GatewayConfigSnapshot
 from headroom.proxy.gateway.credential_sources.environment import EnvironmentCredentialSource
 from headroom.proxy.gateway.egress import EgressPolicy
 from headroom.proxy.gateway.execution import GatewayOperation
+from headroom.proxy.gateway.lifecycle import GatewayServer
 from headroom.proxy.gateway.transport import PinnedHTTPTransport, tls_context
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
@@ -30,6 +31,16 @@ def run(path: Path) -> None:
     finished = {}
     arrivals = []
     reserve_barrier = asyncio.Event()
+    acquire_entered, acquire_release = asyncio.Event(), asyncio.Event()
+    queue_entered = asyncio.Event()
+    shutdown_started = asyncio.Event()
+    original_shutdown = runtime.shutdown
+
+    async def shutdown_runtime():
+        shutdown_started.set()
+        await original_shutdown()
+
+    runtime.shutdown = shutdown_runtime
     original_init = GatewayOperation.__init__
     original_finish = GatewayOperation._finish
     original_reserve = runtime.admission.reserve
@@ -51,7 +62,11 @@ def run(path: Path) -> None:
             if len(arrivals) >= barrier_size:
                 reserve_barrier.set()
             await asyncio.wait_for(reserve_barrier.wait(), 5)
-        return await original_reserve(request)
+        pending = asyncio.create_task(original_reserve(request))
+        asyncio.get_running_loop().call_soon(
+            lambda: queue_entered.set() if runtime.admission.queued_count else None
+        )
+        return await pending
 
     GatewayOperation.__init__ = capture_operation
     GatewayOperation._finish = finish_operation
@@ -61,6 +76,9 @@ def run(path: Path) -> None:
 
     async def acquire(source, *, now):
         counts["identity"] += 1
+        acquire_entered.set()
+        if os.environ.get("GATEWAY_TEST_ACQUIRE_BARRIER") == "1":
+            await acquire_release.wait()
         return await original_acquire(source, now=now)
 
     EnvironmentCredentialSource.acquire = acquire
@@ -68,7 +86,7 @@ def run(path: Path) -> None:
     def resolve(host, port):
         assert host in {"llm.internal.example", "api.anthropic.com"}
         assert host == httpx.URL(snapshot.routes[0].upstream_origin).host
-        assert port == (httpx.URL(snapshot.routes[0].upstream_origin).port or 443)
+        assert port in {httpx.URL(route.upstream_origin).port or 443 for route in snapshot.routes}
         return ("10.111.0.10",) if host == "llm.internal.example" else ("93.184.216.34",)
 
     class LocalFixtureTransport(PinnedHTTPTransport):
@@ -104,6 +122,16 @@ def run(path: Path) -> None:
     runtime.dependencies.egress_policy = EgressPolicy(resolver=resolve)
     runtime.dependencies.clock = lambda: now[0]
     runtime.dependencies.qualified_cost_contracts = frozenset({"synthetic-http-v1"})
+    from headroom.proxy.gateway import websocket as gateway_websocket
+    from headroom.proxy.gateway.transport import websocket_connection
+
+    def fixture_websocket(destination, headers, context):
+        assert destination.addresses == resolve(destination.hostname, destination.port)
+        return websocket_connection(
+            replace(destination, addresses=("127.0.0.1",)), headers, context
+        )
+
+    gateway_websocket.websocket_connection = fixture_websocket
     runtime.dependencies.http_client = httpx.AsyncClient(
         transport=LocalFixtureTransport(
             verify=tls_context(snapshot),
@@ -146,11 +174,15 @@ def run(path: Path) -> None:
             "ledger": asdict(runtime.admission.snapshot()),
             "active": runtime.admission.active_count,
             "queued": runtime.admission.queued_count,
+            "owned": len(runtime.active_work),
+            "generation": runtime.generation,
             "reserve_arrivals": arrivals,
             "operations": [
                 {
                     "principal": operation.principal.id,
                     "route": operation.route.id,
+                    "generation": operation.generation.number,
+                    "tariff": operation.route.pricing.revision if operation.route.pricing else None,
                     "deadline": operation.deadline,
                     "finished": finished.get(operation.id),
                     "terminal": operation.terminal,
@@ -184,6 +216,36 @@ def run(path: Path) -> None:
             broker._leases[account] = replace(lease, expires_at=0)
         return {"expired": True}
 
+    @app.post("/__test/acquire-entered")
+    async def acquiring():
+        await asyncio.wait_for(acquire_entered.wait(), 5)
+        return {"entered": True}
+
+    @app.post("/__test/queue-entered")
+    async def queued():
+        await asyncio.wait_for(queue_entered.wait(), 5)
+        return {"queued": runtime.admission.queued_count}
+
+    @app.post("/__test/release-acquire")
+    async def release_acquire():
+        acquire_release.set()
+        return {"released": True}
+
+    @app.post("/__test/shutdown")
+    async def shutdown():
+        await runtime.shutdown()
+        return await probe()
+
+    @app.post("/__test/shutdown-started")
+    async def shutting_down():
+        await asyncio.wait_for(shutdown_started.wait(), 5)
+        return {"started": True}
+
+    @app.post("/__test/stop")
+    async def stop():
+        runner.should_exit = True
+        return {"stopping": True}
+
     @app.on_event("shutdown")
     async def close_fixture_client():
         await runtime.dependencies.http_client.aclose()
@@ -191,9 +253,13 @@ def run(path: Path) -> None:
     app.router.routes.sort(
         key=lambda route: 0 if getattr(route, "path", "").startswith("/__test/") else 1
     )
-    uvicorn.run(
-        app, host="127.0.0.1", port=snapshot.runtime.port, log_level="info", access_log=False
+    runner = GatewayServer(
+        uvicorn.Config(
+            app, host="127.0.0.1", port=snapshot.runtime.port, log_level="info", access_log=False
+        ),
+        runtime=runtime,
     )
+    runner.run()
 
 
 if __name__ == "__main__":

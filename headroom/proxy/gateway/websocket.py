@@ -1,4 +1,4 @@
-"""Gateway-owned OpenAI Responses WebSocket authorization and relay."""
+"""Owned affine Responses sessions with a separate ledger operation per turn."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import asyncio
 import contextlib
 import json
 import time
+import uuid
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
 from headroom.proxy.gateway.auth import GatewayAuthorizer
 from headroom.proxy.gateway.capabilities import requested_features
 from headroom.proxy.gateway.config import RouteConfig
@@ -18,8 +18,13 @@ from headroom.proxy.gateway.context import GatewayPrincipal, GatewayRequestConte
 from headroom.proxy.gateway.dispatch import route_target
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
 from headroom.proxy.gateway.errors import GatewayAuthorizationError, GatewayPublicError
+from headroom.proxy.gateway.execution import GatewayOperation
+from headroom.proxy.gateway.observability import FailureOrigin, TerminalResult
 from headroom.proxy.gateway.resources import ResourceBinding
+from headroom.proxy.gateway.runtime import GatewayRuntime, RuntimeGeneration
+from headroom.proxy.gateway.streaming import StreamObserver
 from headroom.proxy.gateway.transport import websocket_connection
+from headroom.proxy.gateway.usage import conservative_cost_bound
 
 _MAX_FRAME_BYTES = 1_048_576
 
@@ -28,9 +33,8 @@ def routed_response_create_frame(frame: str, route: RouteConfig) -> str:
     if route.body_contract == "strict-native" or route.public_model == route.upstream_model:
         return frame
     envelope = json.loads(frame)
-    payload = envelope.get("response", envelope)
-    payload["model"] = route.upstream_model
-    return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+    envelope.get("response", envelope)["model"] = route.upstream_model
+    return json.dumps(envelope, separators=(",", ":"))
 
 
 def authorize_response_create_frame(
@@ -39,36 +43,19 @@ def authorize_response_create_frame(
     authorizer: GatewayAuthorizer,
     *,
     expected_route_id: str | None = None,
-) -> tuple[Any, dict[str, Any]]:
-    """Parse and authorize exactly one generation frame."""
-
-    if len(frame.encode("utf-8")) > _MAX_FRAME_BYTES:
-        raise GatewayAuthorizationError(
-            status_code=400,
-            code="gateway_frame_too_large",
-            message="WebSocket generation frame exceeds the gateway bound",
-        )
+    maximum: int = _MAX_FRAME_BYTES,
+) -> tuple[RouteConfig, dict[str, Any]]:
+    if len(frame.encode("utf-8")) > maximum:
+        raise _invalid("gateway_frame_too_large")
     try:
         envelope = json.loads(frame)
-    except json.JSONDecodeError as exc:
-        raise GatewayAuthorizationError(
-            status_code=400,
-            code="gateway_request_invalid",
-            message="WebSocket generation frame is not valid JSON",
-        ) from exc
+    except (ValueError, RecursionError):
+        raise _invalid("gateway_request_invalid") from None
     if not isinstance(envelope, dict) or envelope.get("type") != "response.create":
-        raise GatewayAuthorizationError(
-            status_code=400,
-            code="gateway_frame_invalid",
-            message="Expected a response.create generation frame",
-        )
+        raise _invalid("gateway_frame_invalid")
     payload = envelope.get("response", envelope)
     if not isinstance(payload, dict) or not isinstance(payload.get("model"), str):
-        raise GatewayAuthorizationError(
-            status_code=400,
-            code="gateway_model_required",
-            message="A string model is required for every generation turn",
-        )
+        raise _invalid("gateway_model_required")
     route = authorizer.authorize(
         principal,
         scope="inference",
@@ -76,63 +63,107 @@ def authorize_response_create_frame(
         public_model=payload["model"],
         transport="websocket",
         features=requested_features("openai-responses", payload),
+        defer_cost_to_admission=True,
     )
     if expected_route_id is not None and route.id != expected_route_id:
-        raise GatewayAuthorizationError(
-            status_code=403,
-            code="gateway_websocket_affinity",
-            message="WebSocket generation route does not match session affinity",
-        )
+        raise _invalid("gateway_websocket_affinity", 403)
     return route, payload
 
 
-async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) -> None:
-    """Relay a bounded session while authorizing every response.create turn."""
+def _invalid(code: str, status: int = 400) -> GatewayAuthorizationError:
+    return GatewayAuthorizationError(
+        status_code=status, code=code, message="WebSocket operation unavailable"
+    )
 
-    runtime = websocket.app.state.gateway_runtime
-    generation = runtime.capture()
-    principal = websocket.scope.get("gateway_principal")
-    if not isinstance(principal, GatewayPrincipal):
-        await websocket.close(code=1008, reason="gateway authentication required")
-        return
-    session_principal_id = principal.id
-    await websocket.accept()
-    reservation: AdmissionReservation | None = None
-    try:
-        first_frame = await websocket.receive_text()
-        generation = runtime.capture()
-        current_principal = generation.authenticator.authenticate(websocket.headers)
-        if current_principal.id != principal.id:
-            raise GatewayAuthorizationError(
-                status_code=403, code="gateway_route_forbidden", message="Session identity changed"
-            )
-        principal = current_principal
-        route, first_payload = authorize_response_create_frame(
-            first_frame,
+
+class GatewayWebSocketSession:
+    """Own the socket and bounded relay tasks, including time between turns."""
+
+    def __init__(self, websocket: WebSocket, runtime: GatewayRuntime, principal: GatewayPrincipal):
+        self.websocket, self.runtime, self.principal = websocket, runtime, principal
+        self.id = "ws-" + uuid.uuid4().hex
+        self.owner_task = asyncio.current_task()
+        self.route: RouteConfig | None = None
+        self.generation: RuntimeGeneration | None = None
+        self.selected_account_key: str | None = None
+        self.binding: ResourceBinding | None = None
+        self.operation: GatewayOperation | None = None
+        self.observer: StreamObserver | None = None
+        self.upstream: Any = None
+        self.context: Any = None
+        self.tasks: set[asyncio.Task[Any]] = set()
+        self.finished = asyncio.Event()
+        self._cancel_requested = False
+        self._finish_task: asyncio.Task[None] | None = None
+        self.runtime.active_work[self.id] = self
+        self.runtime._work_empty.clear()
+
+    def spawn(self, coro: Any) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coro)
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return task
+
+    async def cancel(self, *, cancel_owner: bool = True) -> None:
+        if not cancel_owner:
+            return
+        if (
+            cancel_owner
+            and not self._cancel_requested
+            and self.owner_task is not None
+            and not self.owner_task.done()
+        ):
+            self._cancel_requested = True
+            self.owner_task.cancel()
+        # Revocation can be invoked by an owned child; don't join its ancestor.
+        if asyncio.current_task() not in {*self.tasks, self.owner_task}:
+            await self.finished.wait()
+
+    def authenticate(self) -> tuple[RuntimeGeneration, GatewayPrincipal]:
+        generation = self.runtime.capture()
+        principal = generation.authenticator.authenticate(self.websocket.headers)
+        if principal.id != self.principal.id:
+            raise _invalid("gateway_route_forbidden", 403)
+        return generation, principal
+
+    def authorize(
+        self, frame: str
+    ) -> tuple[RuntimeGeneration, GatewayPrincipal, RouteConfig, dict[str, Any]]:
+        generation, principal = self.authenticate()
+        route, payload = authorize_response_create_frame(
+            frame,
             principal,
             generation.authorizer,
+            expected_route_id=self.route.id if self.route else None,
+            maximum=generation.snapshot.limits.max_frame_bytes,
         )
-        previous = first_payload.get("previous_response_id")
-        binding = None
+        return generation, principal, route, payload
+
+    async def start_turn(
+        self,
+        frame: str,
+        generation: RuntimeGeneration,
+        principal: GatewayPrincipal,
+        route: RouteConfig,
+        payload: dict[str, Any],
+    ) -> None:
+        operation = self.operation
+        assert operation is not None
+        previous = payload.get("previous_response_id")
+        binding = self.binding
         if previous is not None:
             if not isinstance(previous, str):
-                raise GatewayAuthorizationError(
-                    status_code=400,
-                    code="gateway_request_invalid",
-                    message="previous_response_id must be a string",
-                )
-            binding = await runtime.resources.authorize(
-                previous,
-                principal_id=principal.id,
-                route_id=route.id,
-                now=time.time(),
+                raise _invalid("gateway_request_invalid")
+            owned = await self.runtime.resources.authorize(
+                previous, principal_id=principal.id, route_id=route.id, now=time.time()
             )
-        if binding is not None:
-            generation.validate_binding(binding)
-        reservation = await runtime.admission.reserve(
-            AdmissionRequest(principal.id, estimated_cost=None)
-        )
-        selection = runtime.router.select(
+            generation.validate_binding(owned)
+            if binding is not None and owned.account_ref != binding.account_ref:
+                raise _invalid("gateway_websocket_affinity", 403)
+            binding = owned
+        if self.binding is not None:
+            generation.validate_binding(self.binding)
+        selection = self.runtime.router.select(
             route,
             principal,
             resource_binding=binding,
@@ -140,228 +171,275 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                 route,
                 protocol="openai-responses",
                 transport="websocket",
-                features=requested_features("openai-responses", first_payload),
+                features=requested_features("openai-responses", payload),
             ),
             authority_keys=dict(generation.authorities),
             target_key=generation.target_key(route.id),
         )
-        broker = generation.broker
-        lease = await broker.acquire(
-            route,
-            account_ref=selection.account_ref,
+        attempt = await operation.start_attempt(
+            selection.account_ref,
+            conservative_cost_bound(
+                route,
+                payload,
+                qualified_contracts=self.runtime.dependencies.qualified_cost_contracts,
+            ),
         )
-        https_target = route_target(route, "/v1/responses")
-        destination = await asyncio.to_thread(
-            generation.egress_policy.authorize, lease, https_target, route=route
-        )
-        headers = build_managed_upstream_headers(
-            dict(websocket.headers.items()),
-            lease,
-            https_target,
-            method="GET",
-            resolved_addresses=destination.addresses,
-            route=route,
-        )
-        headers.pop("host", None)
-        async with websocket_connection(destination, headers, generation.tls_context) as upstream:
-            session_generation = generation
-            websocket.scope["gateway"] = GatewayRequestContext(
-                principal, route, "openai-responses", "", generation, generation.catalog, selection
+        self.selected_account_key = attempt.account_key
+        await attempt.check_current()
+        lease = await generation.broker.acquire(route, account_ref=selection.account_ref)
+        await attempt.check_current()
+        attempt.lease_generation = lease.generation
+        if self.upstream is None:
+            target = route_target(route, "/v1/responses")
+            destination = await asyncio.to_thread(
+                generation.egress_policy.authorize, lease, target, route=route
             )
-            first_frame = routed_response_create_frame(first_frame, route)
-            await upstream.send(first_frame)
+            await attempt.check_current()
+            headers = build_managed_upstream_headers(
+                {
+                    name: value
+                    for name, value in self.websocket.headers.items()
+                    if name.lower()
+                    not in {"connection", "upgrade", "content-length", "transfer-encoding"}
+                    and not name.lower().startswith("sec-websocket-")
+                },
+                lease,
+                target,
+                method="GET",
+                resolved_addresses=destination.addresses,
+                route=route,
+            )
+            headers.pop("host", None)
+            self.context = websocket_connection(destination, headers, generation.tls_context)
+            self.upstream = await self.context.__aenter__()
+            self.generation, self.route = generation, route
+            self.runtime.retain(generation)
+            self.binding = ResourceBinding(
+                provider_id=self.id,
+                principal_id=principal.id,
+                route_id=route.id,
+                account_ref=selection.account_ref,
+                adapter="openai-responses",
+                expires_at=None,
+                authority_fingerprint=attempt.account_key,
+                target_fingerprint=generation.target_key(route.id),
+                generation=generation.number,
+            )
+        self.websocket.scope["gateway"] = GatewayRequestContext(
+            principal,
+            route,
+            "openai-responses",
+            "",
+            generation,
+            generation.catalog,
+            selection,
+            operation=operation,
+        )
+        self.observer = StreamObserver(
+            "openai-responses", generation.snapshot.limits, operation.deadline
+        )
+        await attempt.check_current()
+        attempt.mark_sending()
+        await self.upstream.send(routed_response_create_frame(frame, route))
+        attempt.mark_accepted()
 
-            async def client_to_upstream() -> None:
-                nonlocal reservation, generation, principal
-                while True:
-                    frame = await websocket.receive_text()
+    async def observe(self, frame: Any) -> bool:
+        operation, observer = self.operation, self.observer
+        if operation is None or observer is None or operation.current_attempt is None:
+            raise _invalid("gateway_upstream_frame", 502)
+        attempt = operation.current_attempt
+        if (
+            not isinstance(frame, str)
+            or len(frame.encode("utf-8")) > operation.generation.snapshot.limits.max_frame_bytes
+        ):
+            raise _invalid("gateway_frame_too_large", 502)
+        try:
+            event = json.loads(frame)
+        except (ValueError, RecursionError):
+            raise _invalid("gateway_upstream_frame", 502) from None
+        if not isinstance(event, dict):
+            raise _invalid("gateway_upstream_frame", 502)
+        try:
+            observer.inspect(b"data: " + json.dumps(event).encode() + b"\n\n")
+        except GatewayPublicError:
+            raise GatewayPublicError(
+                status_code=502, code="gateway_upstream_error", message="Upstream request failed"
+            ) from None
+        finally:
+            attempt.usage = observer.usage
+        response = event.get("response")
+        if isinstance(response, dict) and isinstance(response.get("id"), str):
+            await self.runtime.resources.bind(
+                ResourceBinding(
+                    provider_id=response["id"],
+                    principal_id=operation.principal.id,
+                    route_id=operation.route.id,
+                    account_ref=attempt.account_ref,
+                    adapter="openai-responses",
+                    expires_at=time.time()
+                    + operation.generation.snapshot.limits.resource_ttl_seconds,
+                    authority_fingerprint=attempt.account_key,
+                    target_fingerprint=operation.generation.target_key(operation.route.id),
+                    generation=operation.generation.number,
+                )
+            )
+        attempt.mark_output()
+        terminal = observer.terminal is not None
+        if terminal:
+            await operation.close("success" if observer.terminal == "success" else "failed")
+            self.operation = None
+            self.observer = None
+        # Release the turn slot before a client can react to the terminal event.
+        await self.websocket.send_text(frame)
+        return terminal
+
+    async def run(self) -> None:
+        client = self.spawn(self.websocket.receive_text())
+        provider: asyncio.Task[Any] | None = None
+        starting: asyncio.Task[Any] | None = None
+        idle_deadline = time.monotonic() + self.runtime.snapshot.limits.websocket_idle_seconds
+        result: TerminalResult = "failed"
+        origin: FailureOrigin = "network"
+        try:
+            while True:
+                deadline = self.operation.deadline if self.operation is not None else idle_deadline
+                pending = {
+                    client,
+                    *([provider] if provider else []),
+                    *([starting] if starting else []),
+                }
+                done, _ = await asyncio.wait(
+                    pending,
+                    timeout=max(0, deadline - time.monotonic()),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    raise _invalid("gateway_websocket_timeout", 504)
+                if starting is not None and starting in done:
+                    starting.result()
+                    starting = None
+                    if provider is None:
+                        provider = self.spawn(anext(self.upstream.__aiter__()))
+                if provider is not None and provider in done:
+                    terminal = await self.observe(provider.result())
+                    if terminal:
+                        idle_deadline = (
+                            time.monotonic() + self.runtime.snapshot.limits.websocket_idle_seconds
+                        )
+                    provider = self.spawn(anext(self.upstream.__aiter__()))
+                if client in done:
+                    frame = client.result()
+                    if len(frame.encode("utf-8")) > self.runtime.snapshot.limits.max_frame_bytes:
+                        raise _invalid("gateway_frame_too_large")
                     try:
                         parsed = json.loads(frame)
-                    except json.JSONDecodeError as exc:
-                        raise GatewayAuthorizationError(
-                            status_code=400,
-                            code="gateway_request_invalid",
-                            message="WebSocket frame is not valid JSON",
-                        ) from exc
+                    except (ValueError, RecursionError):
+                        raise _invalid("gateway_request_invalid") from None
                     if isinstance(parsed, dict) and parsed.get("type") == "response.create":
-                        generation = runtime.capture()
-                        current_principal = generation.authenticator.authenticate(websocket.headers)
-                        if current_principal.id != session_principal_id:
-                            raise GatewayAuthorizationError(
-                                status_code=403,
-                                code="gateway_route_forbidden",
-                                message="Session identity changed",
-                            )
-                        principal = current_principal
-                        turn_route, turn_payload = authorize_response_create_frame(
-                            frame,
+                        generation, principal, route, payload = self.authorize(frame)
+                        if self.operation is not None or starting is not None:
+                            raise _invalid("gateway_generation_in_progress", 409)
+                        # Route ownership starts before queueing/acquisition, so
+                        # revocation can cancel a not-yet-connected session.
+                        self.route = route
+                        self.operation = GatewayOperation(
+                            self.runtime,
+                            generation=generation,
+                            principal=principal,
+                            route=route,
+                            ingress_protocol="openai-responses",
+                            target_protocol="openai-responses",
+                            dispatch_plan="native-websocket",
+                        )
+                        # The session owns cancellation of the relay; canceling
+                        # both owners must not interrupt the session finalizer.
+                        self.operation.owner_task = None
+                        starting = self.spawn(
+                            self.start_turn(frame, generation, principal, route, payload)
+                        )
+                    elif isinstance(parsed, dict) and parsed.get("type") == "response.cancel":
+                        generation, principal = self.authenticate()
+                        if (
+                            self.operation is None
+                            or self.operation.current_attempt is None
+                            or self.upstream is None
+                        ):
+                            raise _invalid("gateway_frame_invalid")
+                        generation.authorizer.authorize(
                             principal,
-                            generation.authorizer,
-                            expected_route_id=route.id,
+                            scope="inference",
+                            protocol="openai-responses",
+                            public_model=self.operation.route.public_model,
+                            transport="websocket",
+                            defer_cost_to_admission=True,
                         )
-                        if (
-                            generation.target_key(turn_route.id)
-                            != session_generation.target_key(route.id)
-                            or generation.account_key(lease.account_ref)
-                            != session_generation.account_key(lease.account_ref)
-                            or lease.account_ref
-                            not in generation.catalog.eligible_accounts(
-                                turn_route,
-                                protocol="openai-responses",
-                                transport="websocket",
-                                features=requested_features("openai-responses", turn_payload),
-                            )
-                        ):
-                            raise GatewayAuthorizationError(
-                                status_code=403,
-                                code="gateway_websocket_affinity",
-                                message="Session authority is unavailable",
-                            )
-                        websocket.scope["gateway"] = GatewayRequestContext(
-                            principal,
-                            turn_route,
-                            "openai-responses",
-                            "",
-                            generation,
-                            generation.catalog,
-                            selection,
+                        assert self.binding is not None
+                        generation.validate_binding(self.binding)
+                        await self.operation.current_attempt.check_current()
+                        await asyncio.wait_for(
+                            self.upstream.send(frame), max(0, deadline - time.monotonic())
                         )
-                        if reservation is not None:
-                            raise GatewayAuthorizationError(
-                                status_code=409,
-                                code="gateway_generation_in_progress",
-                                message="A WebSocket generation is already in progress",
-                            )
-                        previous_id = turn_payload.get("previous_response_id")
-                        if previous_id is not None:
-                            if not isinstance(previous_id, str):
-                                raise GatewayAuthorizationError(
-                                    status_code=400,
-                                    code="gateway_request_invalid",
-                                    message="previous_response_id must be a string",
-                                )
-                            owned = await runtime.resources.authorize(
-                                previous_id,
-                                principal_id=principal.id,
-                                route_id=turn_route.id,
-                                now=time.time(),
-                            )
-                            generation.validate_binding(owned)
-                            if owned.account_ref != lease.account_ref:
-                                raise GatewayAuthorizationError(
-                                    status_code=403,
-                                    code="gateway_websocket_affinity",
-                                    message="Stateful resource account does not match session affinity",
-                                )
-                        reservation = await runtime.admission.reserve(
-                            AdmissionRequest(principal.id, estimated_cost=None)
-                        )
-                    elif not isinstance(parsed, dict) or parsed.get("type") != "response.cancel":
-                        raise GatewayAuthorizationError(
-                            status_code=400,
-                            code="gateway_frame_invalid",
-                            message="Unsupported WebSocket client frame",
-                        )
-                    if (
-                        isinstance(parsed, dict)
-                        and parsed.get("type") == "response.create"
-                        and turn_route.body_contract == "routed-native"
-                    ):
-                        frame = routed_response_create_frame(frame, turn_route)
-                    await upstream.send(frame)
+                    else:
+                        raise _invalid("gateway_frame_invalid")
+                    client = self.spawn(self.websocket.receive_text())
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            result, origin = "cancelled", "gateway"
+        except GatewayPublicError as exc:
+            origin = "gateway" if exc.status_code < 500 else "upstream"
+            with contextlib.suppress(Exception):
+                await self.websocket.send_json(
+                    {"type": "error", "error": {"code": exc.code, "message": exc.message}}
+                )
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self.websocket.send_json(
+                    {
+                        "type": "error",
+                        "error": {
+                            "code": "gateway_upstream_error",
+                            "message": "Upstream request failed",
+                        },
+                    }
+                )
+        finally:
+            self._finish_task = asyncio.create_task(self.finish(result, origin))
+            await asyncio.shield(self._finish_task)
 
-            async def upstream_to_client() -> None:
-                nonlocal reservation
-                async for frame in upstream:
-                    if isinstance(frame, bytes):
-                        if len(frame) > _MAX_FRAME_BYTES:
-                            raise GatewayAuthorizationError(
-                                status_code=502,
-                                code="gateway_frame_too_large",
-                                message="Upstream WebSocket frame exceeded the gateway bound",
-                            )
-                        await websocket.send_bytes(frame)
-                        continue
-                    if len(frame.encode("utf-8")) > _MAX_FRAME_BYTES:
-                        raise GatewayAuthorizationError(
-                            status_code=502,
-                            code="gateway_frame_too_large",
-                            message="Upstream WebSocket frame exceeded the gateway bound",
-                        )
-                    with contextlib.suppress(json.JSONDecodeError):
-                        event = json.loads(frame)
-                        response = event.get("response") if isinstance(event, dict) else None
-                        if isinstance(event, dict) and (
-                            event.get("type") in {"error", "response.failed", "response.error"}
-                            or isinstance(response, dict)
-                            and response.get("error")
-                        ):
-                            raise GatewayPublicError(
-                                status_code=502,
-                                code="gateway_upstream_error",
-                                message="Upstream request failed",
-                            )
-                        if (
-                            isinstance(response, dict)
-                            and event.get("type") == "response.created"
-                            and isinstance(response.get("id"), str)
-                        ):
-                            await runtime.resources.bind(
-                                ResourceBinding(
-                                    provider_id=response["id"],
-                                    principal_id=principal.id,
-                                    route_id=route.id,
-                                    account_ref=lease.account_ref,
-                                    adapter="openai-responses",
-                                    expires_at=time.time()
-                                    + generation.snapshot.limits.resource_ttl_seconds,
-                                    authority_fingerprint=generation.account_key(lease.account_ref),
-                                    target_fingerprint=generation.target_key(route.id),
-                                    generation=generation.number,
-                                )
-                            )
-                        if (
-                            isinstance(event, dict)
-                            and event.get("type")
-                            in {"response.completed", "response.failed", "response.cancelled"}
-                            and reservation is not None
-                        ):
-                            await reservation.finalize(actual_cost=None)
-                            reservation = None
-                    await websocket.send_text(frame)
-
-            client_task = asyncio.create_task(client_to_upstream())
-            upstream_task = asyncio.create_task(upstream_to_client())
-            tasks = {client_task, upstream_task}
+    async def finish(self, result: TerminalResult, origin: FailureOrigin) -> None:
+        tasks = tuple(self.tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
             try:
-                done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    task.result()
+                if self.context is not None:
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(
+                            self.context.__aexit__(None, None, None),
+                            self.runtime.snapshot.limits.shutdown_cleanup_seconds,
+                        )
+                with contextlib.suppress(Exception):
+                    await self.websocket.close(code=1000 if result == "cancelled" else 1011)
             finally:
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-    except (WebSocketDisconnect, asyncio.CancelledError):
+                if self.operation is not None:
+                    await self.operation.close(result, failure_origin=origin)
+        finally:
+            try:
+                if self.generation is not None:
+                    await self.runtime.release(self.generation)
+            finally:
+                self.runtime.active_work.pop(self.id, None)
+                if not self.runtime.active_work:
+                    self.runtime._work_empty.set()
+                self.finished.set()
+
+
+async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) -> None:
+    runtime = websocket.app.state.gateway_runtime
+    principal = websocket.scope.get("gateway_principal")
+    if not isinstance(principal, GatewayPrincipal) or not runtime.status().ready:
+        await websocket.close(code=1008, reason="gateway authentication required")
         return
-    except GatewayPublicError as exc:
-        with contextlib.suppress(Exception):
-            await websocket.send_json(
-                {"type": "error", "error": {"code": exc.code, "message": exc.message}}
-            )
-            await websocket.close(code=1008, reason=exc.code)
-    except Exception:
-        with contextlib.suppress(Exception):
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": {
-                        "code": "gateway_upstream_error",
-                        "message": "Upstream request failed",
-                    },
-                }
-            )
-            await websocket.close(code=1011, reason="gateway_upstream_error")
-    finally:
-        if reservation is not None:
-            await reservation.release()
+    session = GatewayWebSocketSession(websocket, runtime, principal)
+    await websocket.accept()
+    await session.run()

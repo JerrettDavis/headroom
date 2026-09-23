@@ -3173,7 +3173,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 await _timed(
                     app.state.gateway_runtime.shutdown(),
                     label="gateway_runtime.shutdown",
-                    timeout=5.0,
+                    timeout=(
+                        app.state.gateway_runtime.snapshot.limits.shutdown_drain_seconds
+                        + app.state.gateway_runtime.snapshot.limits.shutdown_cleanup_seconds
+                        + 1
+                    ),
                 )
             await _timed(proxy.shutdown(), label="proxy.shutdown", timeout=5.0)
             shutdown_headroom_tracing()
@@ -6008,6 +6012,24 @@ def run_server(
     # incident could not see uvicorn's view of the traffic at all, with no env var
     # and no CLI flag to change it. Overridable now; the default is unchanged.
     uvicorn_log_level = _resolve_uvicorn_log_level()
+
+    if config.gateway is not None:
+        from headroom.proxy.gateway.lifecycle import GatewayServer
+
+        GatewayServer(
+            uvicorn.Config(
+                app_target,
+                host=config.host,
+                port=config.port,
+                log_level=uvicorn_log_level,
+                limit_concurrency=limit_concurrency,
+                proxy_headers=False,
+                timeout_graceful_shutdown=config.gateway.limits.shutdown_cleanup_seconds,
+                **uvicorn_kwargs,
+            ),
+            runtime=app_target.state.gateway_runtime,
+        ).run()
+        return
 
     uvicorn.run(
         app_target,
