@@ -89,7 +89,7 @@ def test_directed_translation_matches_independent_literal_oracle(
     assert translate(source_protocol, target_protocol, source) == expected
 
 
-def test_parallel_openai_tools_translate_to_anthropic_without_losing_association() -> None:
+def test_public_parallel_tool_translation_is_unavailable() -> None:
     source = {
         "model": "public-model",
         "messages": [
@@ -129,54 +129,14 @@ def test_parallel_openai_tools_translate_to_anthropic_without_losing_association
         ],
     }
 
-    translated = translate("openai-chat", "anthropic-messages", source)
-
-    assert translated == {
-        "model": "public-model",
-        "messages": [
-            {"role": "user", "content": [{"type": "text", "text": "Compare weather"}]},
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "id": "call_a",
-                        "name": "weather",
-                        "input": {"city": "Montréal"},
-                    },
-                    {
-                        "type": "tool_use",
-                        "id": "call_b",
-                        "name": "weather",
-                        "input": {"city": "Tokyo"},
-                    },
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "tool_result", "tool_use_id": "call_a", "content": "3 C"},
-                    {"type": "tool_result", "tool_use_id": "call_b", "content": "20 C"},
-                ],
-            },
-        ],
-        "tools": [
-            {
-                "name": "weather",
-                "description": "Get weather",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"city": {"type": "string"}},
-                    "required": ["city"],
-                },
-            }
-        ],
-    }
+    with pytest.raises(GatewayAuthorizationError):
+        translate("openai-chat", "anthropic-messages", source)
 
 
 def test_inline_image_and_text_order_survives_openai_to_anthropic() -> None:
     source = {
         "model": "public-model",
+        "max_tokens": 8,
         "messages": [
             {
                 "role": "user",
@@ -209,7 +169,7 @@ def test_inline_image_and_text_order_survives_openai_to_anthropic() -> None:
     ]
 
 
-def test_anthropic_tool_use_and_result_translate_to_openai_messages() -> None:
+def test_public_tool_use_and_result_translation_is_unavailable() -> None:
     source = {
         "model": "public-model",
         "messages": [
@@ -238,35 +198,8 @@ def test_anthropic_tool_use_and_result_translate_to_openai_messages() -> None:
         ],
     }
 
-    translated = translate("anthropic-messages", "openai-chat", source)
-
-    assert translated == {
-        "model": "public-model",
-        "messages": [
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call_a",
-                        "type": "function",
-                        "function": {"name": "weather", "arguments": '{"city":"Montréal"}'},
-                    }
-                ],
-            },
-            {"role": "tool", "tool_call_id": "call_a", "content": "3 C"},
-        ],
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "weather",
-                    "description": "Get weather",
-                    "parameters": {"type": "object"},
-                },
-            }
-        ],
-    }
+    with pytest.raises(GatewayAuthorizationError):
+        translate("anthropic-messages", "openai-chat", source)
 
 
 @pytest.mark.parametrize(
@@ -299,20 +232,12 @@ def test_anthropic_tool_use_and_result_translate_to_openai_messages() -> None:
             },
         ),
         (
-            "gemini-generate",
+            "anthropic-messages",
             "openai-chat",
             {
-                "candidates": [
-                    {
-                        "content": {"role": "model", "parts": [{"text": "Done"}]},
-                        "finishReason": "STOP",
-                    }
-                ],
-                "usageMetadata": {
-                    "promptTokenCount": 5,
-                    "candidatesTokenCount": 3,
-                    "totalTokenCount": 8,
-                },
+                "content": [{"type": "text", "text": "Done"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 5, "output_tokens": 3},
             },
             {
                 "id": None,

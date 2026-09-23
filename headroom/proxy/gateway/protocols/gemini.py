@@ -7,6 +7,8 @@ from typing import Any, Literal, cast
 from headroom.proxy.gateway.protocols.content import ContentBlock, Conversation, Message
 from headroom.proxy.gateway.protocols.openai import (
     _inline_image,
+    _optional_int,
+    _optional_number,
     _plain_text,
     _reject_unknown,
     _unsupported,
@@ -15,7 +17,7 @@ from headroom.proxy.gateway.protocols.openai import (
 _FIELDS = frozenset({"contents", "systemInstruction", "generationConfig"})
 
 
-def decode_gemini(payload: dict[str, Any]) -> Conversation:
+def _decode_gemini(payload: dict[str, Any]) -> Conversation:
     _reject_unknown(payload, _FIELDS)
     system_instruction = payload.get("systemInstruction")
     system: tuple[ContentBlock, ...] = ()
@@ -44,18 +46,22 @@ def decode_gemini(payload: dict[str, Any]) -> Conversation:
     if not isinstance(generation, dict):
         _unsupported("generationConfig")
     _reject_unknown(generation, frozenset({"maxOutputTokens", "temperature"}))
-    max_tokens = generation.get("maxOutputTokens")
-    temperature = generation.get("temperature")
+    max_tokens = _optional_int(generation, "maxOutputTokens")
+    temperature = _optional_number(generation, "temperature")
+    if "maxOutputTokens" in generation and (max_tokens is None or max_tokens < 1):
+        _unsupported("maxOutputTokens")
+    if "temperature" in generation and (temperature is None or not 0 <= temperature <= 2):
+        _unsupported("temperature")
     return Conversation(
         model=None,
         system=system,
         messages=tuple(messages),
-        max_tokens=max_tokens if isinstance(max_tokens, int) else None,
-        temperature=float(temperature) if isinstance(temperature, (int, float)) else None,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
 
 
-def encode_gemini(conversation: Conversation) -> dict[str, Any]:
+def _encode_gemini(conversation: Conversation) -> dict[str, Any]:
     result: dict[str, Any] = {
         "contents": [
             {

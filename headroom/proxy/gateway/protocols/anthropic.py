@@ -24,7 +24,7 @@ from headroom.proxy.gateway.protocols.openai import (
 _FIELDS = frozenset({"model", "system", "messages", "max_tokens", "temperature", "stream", "tools"})
 
 
-def decode_anthropic(payload: dict[str, Any]) -> Conversation:
+def _decode_anthropic(payload: dict[str, Any]) -> Conversation:
     _reject_unknown(payload, _FIELDS)
     if "stream" in payload and not isinstance(payload["stream"], bool):
         _unsupported("stream")
@@ -52,7 +52,7 @@ def decode_anthropic(payload: dict[str, Any]) -> Conversation:
     )
 
 
-def encode_anthropic(conversation: Conversation) -> dict[str, Any]:
+def _encode_anthropic(conversation: Conversation) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     for message in conversation.messages:
         blocks: list[dict[str, Any]] = []

@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from headroom.proxy.gateway.config import CapabilityConfig, GatewayConfigSnapshot
+from headroom.proxy.gateway.errors import GatewayPublicError
 from headroom.proxy.gateway.protocols.events import (
     StreamEvent,
     translate_event,
@@ -51,7 +52,7 @@ async def test_translation_accepts_crlf_multiline_and_many_bounded_events():
     assert received.endswith(b"data: [DONE]\n\n")
 
 
-def test_tool_argument_fragment_order_is_preserved() -> None:
+def test_standalone_tool_argument_translation_is_unavailable() -> None:
     source = StreamEvent(
         kind="tool_argument_delta",
         index=1,
@@ -60,15 +61,8 @@ def test_tool_argument_fragment_order_is_preserved() -> None:
         data='{"city":"Mon',
     )
 
-    translated = translate_event("openai-chat", "anthropic-messages", source)
-
-    assert translated == (
-        {
-            "type": "content_block_delta",
-            "index": 1,
-            "delta": {"type": "input_json_delta", "partial_json": '{"city":"Mon'},
-        },
-    )
+    with pytest.raises(GatewayPublicError):
+        translate_event("openai-chat", "anthropic-messages", source)
 
 
 @pytest.mark.asyncio

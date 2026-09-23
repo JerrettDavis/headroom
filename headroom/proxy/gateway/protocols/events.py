@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator, AsyncIterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from headroom.proxy.gateway.capabilities import implemented_features
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
 from headroom.proxy.gateway.protocols import mapped_usage
 from headroom.proxy.gateway.streaming import SSEFrames, parse_event, stream_error
@@ -28,20 +29,12 @@ class StreamEvent:
 def translate_event(
     source_protocol: str, target_protocol: str, event: StreamEvent
 ) -> tuple[dict[str, object], ...]:
-    """Standalone fragment mapping, not a qualified serving contract."""
-    if (source_protocol, target_protocol, event.kind) == (
-        "openai-chat",
-        "anthropic-messages",
-        "tool_argument_delta",
-    ):
-        return (
-            {
-                "type": "content_block_delta",
-                "index": event.index,
-                "delta": {"type": "input_json_delta", "partial_json": event.data},
-            },
-        )
-    raise stream_error("malformed")
+    """Standalone tool fragments lack a qualified lifecycle and are unavailable."""
+    raise GatewayAuthorizationError(
+        status_code=400,
+        code="gateway_unsupported_capability",
+        message="Standalone event translation is unsupported",
+    )
 
 
 def _sse(payload: dict[str, Any], *, named: bool = False) -> bytes:
@@ -60,11 +53,7 @@ def _sse(payload: dict[str, Any], *, named: bool = False) -> bytes:
 async def translate_sse_stream(
     source_protocol: str, target_protocol: str, chunks: AsyncIterable[bytes], *, public_model: str
 ) -> AsyncGenerator[bytes, None]:
-    if (source_protocol, target_protocol) not in {
-        ("anthropic-messages", "openai-chat"),
-        ("openai-chat", "anthropic-messages"),
-        ("openai-chat", "gemini-generate"),
-    }:
+    if not implemented_features(target_protocol, "http-stream", False, source_protocol):
         raise GatewayAuthorizationError(
             status_code=400,
             code="gateway_unsupported_capability",
@@ -73,12 +62,28 @@ async def translate_sse_stream(
     frames = SSEFrames(1_048_576)
     identifier = "gateway-translated"
     usage: dict[str, Any] = {}
+    source_usage: dict[str, Any] = {}
     finish: str | None = None
     started = False
     text_started = False
     terminal = False
     open_block: int | None = None
     next_block = 0
+
+    def observe_usage(raw: Any) -> None:
+        nonlocal source_usage, usage
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            raise stream_error("malformed")
+        merged = dict(source_usage)
+        for key, value in raw.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        usage = mapped_usage(source_protocol, target_protocol, merged)
+        source_usage = merged
 
     def chat(delta: dict[str, Any], reason: str | None = None) -> dict[str, Any]:
         return {
@@ -143,7 +148,7 @@ async def translate_sse_stream(
                     if not isinstance(message, dict) or message.get("content", []):
                         raise stream_error("malformed")
                     identifier = message.get("id", identifier)
-                    usage.update(message.get("usage", {}))
+                    observe_usage(message.get("usage"))
                     started = True
                     yield _sse(chat({"role": "assistant"}))
                 elif kind == "content_block_start":
@@ -208,11 +213,10 @@ async def translate_sse_stream(
                     finish = {
                         "end_turn": "stop",
                         "max_tokens": "length",
-                        "refusal": "content_filter",
                     }.get(raw_finish)
                     if finish is None:
                         raise stream_error("malformed")
-                    usage.update(event.get("usage", {}))
+                    observe_usage(event.get("usage"))
                 elif kind == "message_stop":
                     if finish is None:
                         raise stream_error("truncated")
@@ -220,7 +224,7 @@ async def translate_sse_stream(
                     if usage:
                         tail = chat({})
                         tail["choices"] = []
-                        tail["usage"] = mapped_usage(source_protocol, target_protocol, usage)
+                        tail["usage"] = usage
                         yield _sse(tail)
                     yield b"data: [DONE]\n\n"
                     terminal = True
@@ -243,11 +247,11 @@ async def translate_sse_stream(
             choices = event.get("choices", [])
             if not isinstance(choices, list) or len(choices) > 1:
                 raise stream_error("malformed")
-            if event.get("usage") is not None:
-                usage = mapped_usage(source_protocol, target_protocol, event["usage"])
+            observe_usage(event.get("usage"))
             for choice in choices:
                 if (
-                    not isinstance(choice, dict)
+                    finish is not None
+                    or not isinstance(choice, dict)
                     or choice.get("index", 0) != 0
                     or set(choice) - {"index", "delta", "finish_reason", "logprobs"}
                     or choice.get("logprobs") is not None
@@ -263,9 +267,7 @@ async def translate_sse_stream(
                 refusal = delta.get("refusal")
                 text = delta.get("content")
                 if refusal:
-                    if target_protocol != "anthropic-messages" or text:
-                        raise stream_error("malformed")
-                    text, finish = refusal, "refusal"
+                    raise stream_error("upstream_error")
                 if text is not None and not isinstance(text, str):
                     raise stream_error("malformed")
                 if not started and target_protocol == "anthropic-messages":
@@ -324,12 +326,12 @@ async def translate_sse_stream(
                 reason = choice.get("finish_reason")
                 if reason is not None:
                     mapping = (
-                        {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}
+                        {"stop": "end_turn", "length": "max_tokens"}
                         if target_protocol == "anthropic-messages"
-                        else {"stop": "STOP", "length": "MAX_TOKENS", "content_filter": "SAFETY"}
+                        else {"stop": "STOP", "length": "MAX_TOKENS"}
                     )
                     if reason not in mapping:
                         raise stream_error("malformed")
-                    finish = finish or mapping[reason]
+                    finish = mapping[reason]
     if frames.pending or not terminal:
         raise stream_error("truncated")

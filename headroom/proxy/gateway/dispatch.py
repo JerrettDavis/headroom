@@ -74,6 +74,35 @@ def route_target(route: RouteConfig, path: str) -> str:
     return route.upstream_origin.rstrip("/") + path
 
 
+def rewrite_native_model_path(
+    path: str, *, protocol: str, public_model: str, upstream_model: str
+) -> str:
+    """Patch only the authorized model span, never a structural URL component."""
+    if protocol in {"gemini-generate", "vertex-generate"}:
+        prefix, separator, endpoint = path.rpartition("/models/")
+        model, colon, method = endpoint.rpartition(":")
+        if (
+            separator
+            and colon
+            and model == public_model
+            and method in {"generateContent", "streamGenerateContent"}
+        ):
+            return prefix + separator + upstream_model + colon + method
+    elif protocol == "bedrock-invoke":
+        resource, slash, method = path.rpartition("/")
+        if (
+            resource == "/model/" + public_model
+            and slash
+            and method in {"invoke", "invoke-with-response-stream"}
+        ):
+            return "/model/" + upstream_model + slash + method
+    raise GatewayAuthorizationError(
+        status_code=400,
+        code="gateway_request_invalid",
+        message="Model endpoint cannot be represented",
+    )
+
+
 def _upstream_error() -> GatewayPublicError:
     return GatewayPublicError(
         status_code=502, code="gateway_upstream_error", message="Upstream request failed"
@@ -616,8 +645,7 @@ async def dispatch_native_http(
             public_model=requested_model,
             transport="http-stream"
             if payload.get("stream") is True
-            or "streamGenerateContent" in request.url.path
-            or "response-stream" in request.url.path
+            or request.url.path.endswith((":streamGenerateContent", "/invoke-with-response-stream"))
             else "http-json",
             features=requested_features(protocol, payload),
         )
@@ -642,8 +670,7 @@ async def dispatch_native_http(
         target_protocol = protocol
         streaming = bool(
             payload.get("stream")
-            or "streamGenerateContent" in request.url.path
-            or "response-stream" in request.url.path
+            or request.url.path.endswith((":streamGenerateContent", "/invoke-with-response-stream"))
         )
         translated = protocol not in route.native_protocols
         if translated:
@@ -694,7 +721,12 @@ async def dispatch_native_http(
             and public_model is not None
             and route.public_model != route.upstream_model
         ):
-            upstream_path = upstream_path.replace(route.public_model, route.upstream_model, 1)
+            upstream_path = rewrite_native_model_path(
+                upstream_path,
+                protocol=protocol,
+                public_model=route.public_model,
+                upstream_model=route.upstream_model,
+            )
         target = route_target(route, upstream_path)
         mutation_reasons: tuple[str, ...] = ()
         if not translated and urlparse(target).path != request.url.path:
@@ -730,11 +762,7 @@ async def dispatch_native_http(
                     code="gateway_unsupported_capability",
                     message="Candidate count is not supported",
                 )
-        transport = (
-            "http-stream"
-            if payload.get("stream") is True or "streamGenerateContent" in request.url.path
-            else "http-json"
-        )
+        transport = "http-stream" if streaming else "http-json"
         operation = GatewayOperation(
             runtime,
             generation=generation,

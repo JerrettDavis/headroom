@@ -5,23 +5,24 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, NoReturn
 
+from headroom.proxy.gateway.capabilities import implemented_features, requested_features
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
-from headroom.proxy.gateway.protocols.anthropic import decode_anthropic, encode_anthropic
-from headroom.proxy.gateway.protocols.gemini import decode_gemini, encode_gemini
-from headroom.proxy.gateway.protocols.openai import decode_openai, encode_openai
+from headroom.proxy.gateway.protocols.anthropic import _decode_anthropic, _encode_anthropic
+from headroom.proxy.gateway.protocols.gemini import _decode_gemini, _encode_gemini
+from headroom.proxy.gateway.protocols.openai import _decode_openai, _encode_openai
 
 Decoder = Callable[[dict[str, Any]], object]
 Encoder = Callable[[Any], dict[str, Any]]
 
 _DECODERS: dict[str, Decoder] = {
-    "openai-chat": decode_openai,
-    "anthropic-messages": decode_anthropic,
-    "gemini-generate": decode_gemini,
+    "openai-chat": _decode_openai,
+    "anthropic-messages": _decode_anthropic,
+    "gemini-generate": _decode_gemini,
 }
 _ENCODERS: dict[str, Encoder] = {
-    "openai-chat": encode_openai,
-    "anthropic-messages": encode_anthropic,
-    "gemini-generate": encode_gemini,
+    "openai-chat": _encode_openai,
+    "anthropic-messages": _encode_anthropic,
+    "gemini-generate": _encode_gemini,
 }
 
 
@@ -30,15 +31,12 @@ def translate(
     target_protocol: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    if (source_protocol, target_protocol) not in {
-        ("openai-chat", "anthropic-messages"),
-        ("anthropic-messages", "openai-chat"),
-        ("gemini-generate", "openai-chat"),
-    }:
+    admitted = implemented_features(source_protocol, "http-json", False, target_protocol)
+    if not admitted or not requested_features(source_protocol, payload) <= admitted:
         raise GatewayAuthorizationError(
             status_code=400,
             code="gateway_unsupported_capability",
-            message="Translation direction is unsupported",
+            message="Translation direction or feature is unsupported",
         )
     try:
         decoder = _DECODERS[source_protocol]
@@ -49,7 +47,14 @@ def translate(
             code="gateway_unsupported_capability",
             message="Translation direction is unsupported",
         ) from exc
-    return encoder(decoder(payload))
+    result = encoder(decoder(payload))
+    if target_protocol == "anthropic-messages" and result.get("max_tokens") is None:
+        raise GatewayAuthorizationError(
+            status_code=400,
+            code="gateway_unsupported_capability",
+            message="This route requires an explicit output token limit",
+        )
+    return result
 
 
 def translate_response(
@@ -60,6 +65,9 @@ def translate_response(
     public_model: str,
 ) -> dict[str, Any]:
     """Translate a qualified non-streaming response without inventing usage."""
+
+    if not implemented_features(target_protocol, "http-json", False, source_protocol):
+        _unsupported_response()
 
     if source_protocol == "openai-chat" and target_protocol == "gemini-generate":
         choices = payload.get("choices")
@@ -80,9 +88,7 @@ def translate_response(
         raw_finish = choice.get("finish_reason")
         if not isinstance(raw_finish, str):
             _unsupported_response()
-        finish = {"stop": "STOP", "length": "MAX_TOKENS", "content_filter": "SAFETY"}.get(
-            raw_finish
-        )
+        finish = {"stop": "STOP", "length": "MAX_TOKENS"}.get(raw_finish)
         if finish is None:
             _unsupported_response()
         if message.get("refusal"):
@@ -99,7 +105,7 @@ def translate_response(
             ],
         }
         usage = payload.get("usage")
-        if isinstance(usage, dict):
+        if usage is not None:
             result["usageMetadata"] = mapped_usage("openai-chat", "gemini-generate", usage)
         return result
 
@@ -117,11 +123,8 @@ def translate_response(
         if not isinstance(message, dict) or set(message) - {"role", "content", "refusal"}:
             _unsupported_response()
         content = message.get("content")
-        refusal = message.get("refusal")
-        if isinstance(refusal, str) and refusal:
-            if content:
-                _unsupported_response()
-            content = refusal
+        if message.get("refusal"):
+            _unsupported_response()
         if message.get("role") != "assistant" or not isinstance(content, str):
             _unsupported_response()
         raw_finish = choice.get("finish_reason")
@@ -130,12 +133,8 @@ def translate_response(
         stop_reason = (
             None
             if raw_finish is None
-            else {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}.get(
-                raw_finish
-            )
+            else {"stop": "end_turn", "length": "max_tokens"}.get(raw_finish)
         )
-        if refusal:
-            stop_reason = "refusal"
         if raw_finish is not None and stop_reason is None:
             _unsupported_response()
         openai_result: dict[str, Any] = {
@@ -148,68 +147,9 @@ def translate_response(
             "stop_sequence": None,
         }
         usage = payload.get("usage")
-        if isinstance(usage, dict):
+        if usage is not None:
             openai_result["usage"] = mapped_usage(source_protocol, target_protocol, usage)
         return openai_result
-
-    if source_protocol == "gemini-generate" and target_protocol == "openai-chat":
-        candidates = payload.get("candidates")
-        if not isinstance(candidates, list) or len(candidates) != 1:
-            _unsupported_response()
-        candidate = candidates[0]
-        if not isinstance(candidate, dict):
-            _unsupported_response()
-        content = candidate.get("content")
-        if not isinstance(content, dict) or set(content) != {"role", "parts"}:
-            _unsupported_response()
-        parts = content.get("parts")
-        if content.get("role") != "model" or not isinstance(parts, list):
-            _unsupported_response()
-        gemini_text_parts: list[str] = []
-        for part in parts:
-            if (
-                not isinstance(part, dict)
-                or set(part) != {"text"}
-                or not isinstance(part["text"], str)
-            ):
-                _unsupported_response()
-            gemini_text_parts.append(part["text"])
-        raw_finish = candidate.get("finishReason")
-        if raw_finish is not None and not isinstance(raw_finish, str):
-            _unsupported_response()
-        finish = (
-            None
-            if raw_finish is None
-            else {"STOP": "stop", "MAX_TOKENS": "length", "SAFETY": "content_filter"}.get(
-                raw_finish
-            )
-        )
-        if raw_finish is not None and finish is None:
-            _unsupported_response()
-        gemini_result: dict[str, Any] = {
-            "id": payload.get("responseId"),
-            "object": "chat.completion",
-            "model": public_model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "".join(gemini_text_parts)},
-                    "finish_reason": finish,
-                }
-            ],
-        }
-        usage = payload.get("usageMetadata")
-        if isinstance(usage, dict):
-            prompt = usage.get("promptTokenCount")
-            completion = usage.get("candidatesTokenCount")
-            total = usage.get("totalTokenCount")
-            if all(isinstance(value, int) for value in (prompt, completion, total)):
-                gemini_result["usage"] = {
-                    "prompt_tokens": prompt,
-                    "completion_tokens": completion,
-                    "total_tokens": total,
-                }
-        return gemini_result
 
     if source_protocol == "anthropic-messages" and target_protocol == "openai-chat":
         content = payload.get("content")
@@ -231,8 +171,6 @@ def translate_response(
             else {
                 "end_turn": "stop",
                 "max_tokens": "length",
-                "tool_use": "tool_calls",
-                "refusal": "content_filter",
             }.get(raw_stop_reason)
         )
         if raw_stop_reason is not None and stop_reason is None:
@@ -250,56 +188,155 @@ def translate_response(
             ],
         }
         usage = payload.get("usage")
-        if isinstance(usage, dict):
+        if usage is not None:
             anthropic_result["usage"] = mapped_usage(source_protocol, target_protocol, usage)
         return anthropic_result
     _unsupported_response()
 
 
 def mapped_usage(source: str, target: str, usage: dict[str, Any]) -> dict[str, Any]:
-    """Map documented token counts; absent counts stay absent, never zero-filled."""
+    """Preserve available token units or reject nonrepresentable observations."""
+    if not isinstance(usage, dict):
+        _unsupported_response()
     result: dict[str, Any] = {}
     if source == "openai-chat":
-        fields = (
-            {"prompt_tokens": "input_tokens", "completion_tokens": "output_tokens"}
-            if target == "anthropic-messages"
-            else {
+        _usage_fields(
+            usage,
+            {
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "prompt_tokens_details",
+                "completion_tokens_details",
+            },
+        )
+        counts = _usage_counts(
+            {
+                key: usage[key]
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                if key in usage
+            }
+        )
+        prompt = _usage_details(
+            usage.get("prompt_tokens_details"), {"cached_tokens", "audio_tokens"}
+        )
+        completion = _usage_details(
+            usage.get("completion_tokens_details"),
+            {
+                "reasoning_tokens",
+                "audio_tokens",
+                "accepted_prediction_tokens",
+                "rejected_prediction_tokens",
+            },
+        )
+        if prompt.get("audio_tokens", 0) or any(
+            completion.get(key, 0)
+            for key in ("audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens")
+        ):
+            _unsupported_response()
+        cached = prompt.get("cached_tokens")
+        reasoning = completion.get("reasoning_tokens")
+        if cached is not None and "prompt_tokens" in counts and cached > counts["prompt_tokens"]:
+            _unsupported_response()
+        if (
+            reasoning is not None
+            and "completion_tokens" in counts
+            and reasoning > counts["completion_tokens"]
+        ):
+            _unsupported_response()
+        if (
+            all(key in counts for key in ("prompt_tokens", "completion_tokens", "total_tokens"))
+            and counts["total_tokens"] != counts["prompt_tokens"] + counts["completion_tokens"]
+        ):
+            _unsupported_response()
+        if target == "gemini-generate":
+            for source_key, target_key in {
                 "prompt_tokens": "promptTokenCount",
                 "completion_tokens": "candidatesTokenCount",
                 "total_tokens": "totalTokenCount",
-            }
-        )
-    else:
-        fields = {"input_tokens": "prompt_tokens", "output_tokens": "completion_tokens"}
-    for source_key, target_key in fields.items():
-        if source_key in usage:
-            value = usage[source_key]
-            if type(value) is not int or value < 0:
-                _unsupported_response()
-            result[target_key] = value
-    if source == "anthropic-messages" and "prompt_tokens" in result:
-        for name in ("cache_read_input_tokens", "cache_creation_input_tokens"):
-            if name in usage:
-                value = usage[name]
-                if type(value) is not int or value < 0:
-                    _unsupported_response()
-                result["prompt_tokens"] += value
-        if "cache_read_input_tokens" in usage:
-            result["prompt_tokens_details"] = {"cached_tokens": usage["cache_read_input_tokens"]}
-        if "completion_tokens" in result:
-            result["total_tokens"] = result["prompt_tokens"] + result["completion_tokens"]
-    if source == "openai-chat":
-        details = usage.get("prompt_tokens_details", {})
-        cached = details.get("cached_tokens") if isinstance(details, dict) else None
-        if cached is not None:
-            if type(cached) is not int or cached < 0 or cached > usage.get("prompt_tokens", 0):
-                _unsupported_response()
-            if target == "gemini-generate":
+            }.items():
+                if source_key in counts:
+                    result[target_key] = counts[source_key]
+            if cached is not None:
                 result["cachedContentTokenCount"] = cached
-            else:
-                result["input_tokens"] -= cached
+            if reasoning is not None:
+                result["thoughtsTokenCount"] = reasoning
+                if "candidatesTokenCount" in result:
+                    result["candidatesTokenCount"] -= reasoning
+        elif target == "anthropic-messages":
+            # Anthropic has no reasoning/prediction usage breakdown or separate
+            # total counter. A complete total is derivable; a lone total is not.
+            if reasoning or (
+                "total_tokens" in counts
+                and not {"prompt_tokens", "completion_tokens"} <= counts.keys()
+            ):
+                _unsupported_response()
+            if "prompt_tokens" in counts:
+                result["input_tokens"] = counts["prompt_tokens"] - (cached or 0)
+            if "completion_tokens" in counts:
+                result["output_tokens"] = counts["completion_tokens"]
+            if cached is not None:
                 result["cache_read_input_tokens"] = cached
+        else:
+            _unsupported_response()
+    elif source == "anthropic-messages" and target == "openai-chat":
+        _usage_fields(
+            usage,
+            {
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+                "cache_creation",
+            },
+        )
+        counts = _usage_counts(
+            {key: value for key, value in usage.items() if key != "cache_creation"}
+        )
+        creation = _usage_details(
+            usage.get("cache_creation"), {"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"}
+        )
+        if counts.get("cache_creation_input_tokens", 0) or any(creation.values()):
+            # Chat cannot retain the distinct cache-write unit; folding it into
+            # inclusive prompt tokens would silently discard its meaning.
+            _unsupported_response()
+        cached = counts.get("cache_read_input_tokens")
+        if cached is not None:
+            result["prompt_tokens_details"] = {"cached_tokens": cached}
+        if "input_tokens" in counts:
+            result["prompt_tokens"] = counts["input_tokens"] + (cached or 0)
+        if "output_tokens" in counts:
+            result["completion_tokens"] = counts["output_tokens"]
+        if {"prompt_tokens", "completion_tokens"} <= result.keys():
+            result["total_tokens"] = result["prompt_tokens"] + result["completion_tokens"]
+    else:
+        _unsupported_response()
     return result
+
+
+def _usage_fields(value: dict[str, Any], allowed: set[str]) -> None:
+    if set(value) - allowed:
+        _unsupported_response()
+
+
+def _usage_counts(value: dict[str, Any]) -> dict[str, int]:
+    result = {}
+    for key, count in value.items():
+        if count is None:
+            continue
+        if type(count) is not int or count < 0:
+            _unsupported_response()
+        result[key] = count
+    return result
+
+
+def _usage_details(value: Any, allowed: set[str]) -> dict[str, int]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        _unsupported_response()
+    _usage_fields(value, allowed)
+    return _usage_counts(value)
 
 
 def _unsupported_response() -> NoReturn:
@@ -311,12 +348,6 @@ def _unsupported_response() -> NoReturn:
 
 
 __all__ = [
-    "decode_anthropic",
-    "decode_gemini",
-    "decode_openai",
-    "encode_anthropic",
-    "encode_gemini",
-    "encode_openai",
     "translate",
     "translate_response",
 ]

@@ -41,6 +41,8 @@ def test_responses_refusal_is_failed_and_keeps_usage(local_pki, tmp_path, stream
         assert response.status_code == (200 if streamed else 502)
         assert b"gateway_upstream_error" in response.content
         assert b"response.completed" not in response.content
+        assert b"Cannot comply" not in response.content
+        assert b"response.refusal" not in response.content
         probe = client.get("/__test/idle").json()
         assert len(calls) == 1
         assert probe["operations"][0]["terminal"] == "failed"

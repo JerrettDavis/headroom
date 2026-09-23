@@ -188,6 +188,9 @@ class StreamObserver:
                 index = choice.get("index", 0)
                 if not 0 <= index < 128:
                     raise stream_error("malformed")
+                if self._choices.get(index):
+                    self.terminal = "failed"
+                    raise stream_error("malformed")
                 self._choices[index] = choice.get("finish_reason") is not None
                 if choice.get("finish_reason") == "content_filter" or choice.get("delta", {}).get(
                     "refusal"
@@ -201,7 +204,20 @@ class StreamObserver:
                     and all(self._choices.values())
                 )
         elif self.protocol == "openai-responses":
-            if kind in {"response.refusal.delta", "response.refusal.done"}:
+            part = event.get("part")
+            item = event.get("item")
+            response = event.get("response")
+            if (
+                kind in {"response.refusal.delta", "response.refusal.done"}
+                or kind in {"response.content_part.added", "response.content_part.done"}
+                and isinstance(part, dict)
+                and part.get("type") == "refusal"
+                or kind in {"response.output_item.added", "response.output_item.done"}
+                and isinstance(item, dict)
+                and responses_refusal({"output": [item]})
+                or isinstance(response, dict)
+                and responses_refusal(response)
+            ):
                 self._refused = True
             if kind == "response.completed":
                 self._usage_final = direct.availability == "complete"
@@ -278,13 +294,19 @@ class StreamObserver:
                     self._partial_at = None
                     if self.inspect(frame):
                         self._content_at = time.monotonic()
-                    yield frame
+                    # Observe refusal streams to retain final usage, but never
+                    # expose refusal-bearing frames or later content to clients.
+                    if not self._refused:
+                        yield frame
                     self._check_absolute_deadline()
                     if self.terminal == "success":
                         return
                 if self.frames.pending and (not had_partial or self._partial_at is None):
                     self._partial_at = time.monotonic()
             self._check_absolute_deadline()
+            if self._refused:
+                self.terminal = "failed"
+                raise stream_error("upstream_error")
             if (
                 not self.frames.pending
                 and self.protocol in {"gemini-generate", "vertex-generate"}

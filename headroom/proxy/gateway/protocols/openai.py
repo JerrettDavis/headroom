@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 from typing import Any, NoReturn, cast
 
 from headroom.proxy.gateway.errors import GatewayAuthorizationError
@@ -20,7 +21,7 @@ from headroom.proxy.gateway.protocols.content import (
 _FIELDS = frozenset({"model", "messages", "max_tokens", "temperature", "stream", "tools"})
 
 
-def decode_openai(payload: dict[str, Any]) -> Conversation:
+def _decode_openai(payload: dict[str, Any]) -> Conversation:
     _reject_unknown(payload, _FIELDS)
     if "stream" in payload and not isinstance(payload["stream"], bool):
         _unsupported("stream")
@@ -74,7 +75,7 @@ def decode_openai(payload: dict[str, Any]) -> Conversation:
     )
 
 
-def encode_openai(conversation: Conversation) -> dict[str, Any]:
+def _encode_openai(conversation: Conversation) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     if conversation.system:
         messages.append({"role": "system", "content": _plain_text(conversation.system)})
@@ -275,9 +276,8 @@ def _openai_content(blocks: tuple[ContentBlock, ...]) -> str | list[dict[str, An
 
 
 def _reject_unknown(payload: dict[str, Any], fields: frozenset[str]) -> None:
-    unknown = sorted(set(payload) - fields)
-    if unknown:
-        _unsupported(unknown[0])
+    if set(payload) - fields:
+        _unsupported("unknown field")
 
 
 def _optional_int(payload: dict[str, Any], name: str) -> int | None:
@@ -295,7 +295,10 @@ def _optional_number(payload: dict[str, Any], name: str) -> float | None:
         return None
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         _unsupported(name)
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        _unsupported(name)
+    return number
 
 
 def _unsupported(feature: str) -> NoReturn:

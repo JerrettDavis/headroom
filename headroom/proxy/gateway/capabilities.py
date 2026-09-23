@@ -2,6 +2,14 @@
 
 from typing import Any
 
+QUALIFIED_TRANSLATIONS = frozenset(
+    {
+        ("openai-chat", "anthropic-messages"),
+        ("anthropic-messages", "openai-chat"),
+        ("gemini-generate", "openai-chat"),
+    }
+)
+
 
 def implemented_features(
     protocol: str, transport: str, native: bool, target: str | None = None
@@ -14,12 +22,7 @@ def implemented_features(
         return (
             frozenset({"text", "inline_images"})
             if transport in {"http-json", "http-stream"}
-            and (protocol, target)
-            in {
-                ("openai-chat", "anthropic-messages"),
-                ("anthropic-messages", "openai-chat"),
-                ("gemini-generate", "openai-chat"),
-            }
+            and (protocol, target) in QUALIFIED_TRANSLATIONS
             else frozenset()
         )
     return frozenset(
