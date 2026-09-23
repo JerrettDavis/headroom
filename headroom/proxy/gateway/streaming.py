@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, replace
 from typing import Any
 
 from headroom.proxy.gateway.config import LimitsConfig
@@ -41,34 +42,98 @@ class SSEFrames:
                 yield frame
 
 
-def event_data(frame: bytes) -> str:
+@dataclass(frozen=True, slots=True)
+class SSEEvent:
+    name: str
+    data: str
+
+
+def parse_event(frame: bytes) -> SSEEvent:
     try:
         lines = frame.decode("utf-8").splitlines()
     except UnicodeDecodeError:
         raise stream_error("malformed") from None
-    if any(
-        line.partition(":")[0] == "event" and line.partition(":")[2].removeprefix(" ") == "error"
-        for line in lines
-    ):
+    names = [
+        line.partition(":")[2].removeprefix(" ") for line in lines if line.startswith("event:")
+    ]
+    return SSEEvent(
+        names[-1] if names else "",
+        "\n".join(line[5:].removeprefix(" ") for line in lines if line.startswith("data:")),
+    )
+
+
+def event_data(frame: bytes) -> str:
+    event = parse_event(frame)
+    if event.name == "error":
         raise stream_error("upstream_error")
-    return "\n".join(line[5:].removeprefix(" ") for line in lines if line.startswith("data:"))
+    return event.data
+
+
+def responses_refusal(payload: dict[str, Any]) -> bool:
+    """Inspect documented output roles, never arbitrary nested user text."""
+    output = payload.get("output", [])
+    if not isinstance(output, list):
+        return False
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "refusal":
+            return True
+        content = item.get("content", [])
+        if isinstance(content, list) and any(
+            isinstance(part, dict) and part.get("type") == "refusal" for part in content
+        ):
+            return True
+    return False
 
 
 class StreamObserver:
-    def __init__(self, protocol: str, limits: LimitsConfig, deadline: float) -> None:
+    def __init__(
+        self,
+        protocol: str,
+        limits: LimitsConfig,
+        deadline: float,
+        *,
+        expected_candidates: int | None = None,
+    ) -> None:
+        if expected_candidates is not None and not 1 <= expected_candidates <= 8:
+            raise ValueError("unsupported candidate count")
         self.protocol, self.limits, self.deadline = protocol, limits, deadline
         self.frames = SSEFrames(limits.max_frame_bytes)
         self.usage = UsageObservation()
         self.terminal: str | None = None
         self.last_event: dict[str, Any] | None = None
-        self._choices: dict[int, bool] = {}
+        self._choices: dict[int, bool] = dict.fromkeys(range(expected_candidates or 0), False)
+        self._expected_candidates = expected_candidates
+        self._usage_final = False
+        self._chat_final_usage = False
+        self._refused = False
         self._content_at = time.monotonic()
         self._partial_at: float | None = None
 
+    def _apply_finality(self) -> None:
+        complete = all(
+            value is not None
+            for value in (
+                self.usage.input_tokens,
+                self.usage.output_tokens,
+                self.usage.cache_read_tokens,
+                self.usage.cache_create_tokens,
+            )
+        )
+        if self.usage.availability != "unknown":
+            self.usage = replace(
+                self.usage, availability="complete" if self._usage_final and complete else "partial"
+            )
+
     def inspect(self, frame: bytes) -> bool:
         self.last_event = None
-        data = event_data(frame)
+        parsed = parse_event(frame)
+        data = parsed.data
         if not data:
+            if parsed.name == "error":
+                self.terminal = "failed"
+                raise stream_error("upstream_error")
             return False
         if data == "[DONE]":
             if (
@@ -78,6 +143,8 @@ class StreamObserver:
             ):
                 raise stream_error("truncated")
             self.terminal = "success"
+            self._usage_final = self._chat_final_usage
+            self._apply_finality()
             return True
         try:
             event = json.loads(data)
@@ -86,16 +153,27 @@ class StreamObserver:
         if not isinstance(event, dict):
             raise stream_error("malformed")
         self.last_event = event
-        self.usage = normalize_usage(self.protocol, event, previous=self.usage)
         kind = event.get("type")
-        if event.get("error") or kind in {
-            "error",
-            "response.failed",
-            "response.error",
-            "response.incomplete",
-            "response.cancelled",
-            "refusal",
-        }:
+        failure = bool(
+            parsed.name == "error"
+            or event.get("error")
+            or kind
+            in {
+                "error",
+                "response.failed",
+                "response.error",
+                "response.incomplete",
+                "response.cancelled",
+                "refusal",
+            }
+        )
+        direct = normalize_usage(self.protocol, event)
+        self.usage = normalize_usage(self.protocol, event, previous=self.usage)
+        if direct.availability != "unknown":
+            # Complete fields in an intermediate snapshot are still lower bounds.
+            self._usage_final = failure and direct.availability == "complete"
+        self._apply_finality()
+        if failure:
             self.terminal = "failed"
             raise stream_error("upstream_error")
         if kind in {"ping", "heartbeat"}:
@@ -107,16 +185,44 @@ class StreamObserver:
             for choice in choices:
                 if not isinstance(choice, dict) or type(choice.get("index", 0)) is not int:
                     raise stream_error("malformed")
-                self._choices[choice.get("index", 0)] = choice.get("finish_reason") is not None
-                if choice.get("finish_reason") in {"content_filter", "length"} or choice.get(
+                index = choice.get("index", 0)
+                if not 0 <= index < 128:
+                    raise stream_error("malformed")
+                self._choices[index] = choice.get("finish_reason") is not None
+                if choice.get("finish_reason") in {"length", "content_filter"} or choice.get(
                     "delta", {}
                 ).get("refusal"):
                     self.terminal = "failed"
                     raise stream_error("upstream_error")
-        elif self.protocol == "openai-responses" and kind == "response.completed":
-            self.terminal = "success"
+            if direct.availability != "unknown":
+                self._chat_final_usage = (
+                    direct.availability == "complete"
+                    and bool(self._choices)
+                    and all(self._choices.values())
+                )
+        elif self.protocol == "openai-responses":
+            if kind in {"response.refusal.delta", "response.refusal.done"}:
+                self._refused = True
+            if kind == "response.completed":
+                self._usage_final = direct.availability == "complete"
+                self._apply_finality()
+                response = event.get("response", {})
+                if self._refused or (isinstance(response, dict) and responses_refusal(response)):
+                    self.terminal = "failed"
+                    raise stream_error("upstream_error")
+                self.terminal = "success"
         elif self.protocol == "anthropic-messages":
-            if event.get("delta", {}).get("stop_reason") in {
+            delta = event.get("delta", {})
+            if not isinstance(delta, dict):
+                raise stream_error("malformed")
+            if (
+                kind == "message_delta"
+                and delta.get("stop_reason") is not None
+                and direct.output_tokens is not None
+            ):
+                self._usage_final = True
+                self._apply_finality()
+            if delta.get("stop_reason") in {
                 "refusal",
                 "max_tokens",
                 "model_context_window_exceeded",
@@ -127,14 +233,30 @@ class StreamObserver:
                 self.terminal = "success"
         elif self.protocol in {"gemini-generate", "vertex-generate"}:
             candidates = event.get("candidates", [])
-            if candidates and all(
-                isinstance(c, dict) and c.get("finishReason") for c in candidates
-            ):
-                if any(c["finishReason"] != "STOP" for c in candidates):
+            if not isinstance(candidates, list):
+                raise stream_error("malformed")
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    raise stream_error("malformed")
+                index = candidate.get("index", 0)
+                if type(index) is not int or not 0 <= index < (self._expected_candidates or 8):
+                    raise stream_error("malformed")
+                finish = candidate.get("finishReason")
+                if finish is not None and finish != "STOP":
                     self.terminal = "failed"
                     raise stream_error("upstream_error")
+                self._choices[index] = finish == "STOP" or self._choices.get(index, False)
+            # A permitted usage-only tail must be consumed before closing.
+            if self._choices and all(self._choices.values()) and direct.availability == "complete":
+                self._usage_final = True
+                self._apply_finality()
                 self.terminal = "success"
         return True
+
+    def _check_absolute_deadline(self) -> None:
+        if time.monotonic() >= self.deadline:
+            self.terminal = "failed"
+            raise stream_error("timeout")
 
     async def observe(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
         iterator = chunks.__aiter__()
@@ -151,14 +273,24 @@ class StreamObserver:
                     raise stream_error("timeout") from None
                 had_partial = bool(self.frames.pending)
                 for frame in self.frames.feed(chunk):
+                    self._check_absolute_deadline()
                     self._partial_at = None
                     if self.inspect(frame):
                         self._content_at = time.monotonic()
                     yield frame
+                    self._check_absolute_deadline()
                     if self.terminal == "success":
                         return
                 if self.frames.pending and (not had_partial or self._partial_at is None):
                     self._partial_at = time.monotonic()
+            self._check_absolute_deadline()
+            if (
+                not self.frames.pending
+                and self.protocol in {"gemini-generate", "vertex-generate"}
+                and self._choices
+                and all(self._choices.values())
+            ):
+                self.terminal = "success"
             if self.frames.pending or self.terminal is None:
                 raise stream_error("truncated")
         finally:

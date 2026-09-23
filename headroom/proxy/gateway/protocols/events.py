@@ -94,6 +94,18 @@ async def translate_sse_stream(
                         + b"\n\n"
                     )
             elif event.get("type") == "message_stop":
+                # This direction is qualified for text only. The source observer
+                # has already rejected incomplete/refused provider termination.
+                payload = {
+                    "object": "chat.completion.chunk",
+                    "model": public_model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield (
+                    b"data: "
+                    + json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+                    + b"\n\n"
+                )
                 yield b"data: [DONE]\n\n"
     if frames.pending:
         raise GatewayAuthorizationError(

@@ -4,6 +4,7 @@ import concurrent.futures
 import copy
 import socket
 import threading
+import time
 
 import pytest
 
@@ -141,7 +142,10 @@ def test_overload_storm_respects_attempt_queue_and_deadline_bounds(
     retry_after,
     maximum,  # noqa: F811
 ):  # noqa: F811
+    release = threading.Event()
+
     def handler(upstream):
+        assert release.wait(10)
         body = b'{"error":{"type":"overloaded_error","message":"SECRET"}}'
         upstream.send_response(529)
         upstream.send_header("retry-after", retry_after)
@@ -150,18 +154,49 @@ def test_overload_storm_respects_attempt_queue_and_deadline_bounds(
         upstream.end_headers()
         upstream.wfile.write(body)
 
-    with http_process(local_pki, tmp_path, handler, public_provider=True) as (client, calls, _, _):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            responses = list(
-                pool.map(
-                    lambda _: client.post(
-                        "/v1/messages", json={"model": "fixture-model", "messages": []}
-                    ),
-                    range(8),
+    def configure(raw):
+        raw["admission"].update(max_concurrency=2, queue_limit=2, queue_timeout_seconds=4)
+        raw["client_auth"]["principals"][0]["admission"] = {
+            "max_concurrency": 2,
+            "queue_limit": 2,
+            "queue_timeout_seconds": 4,
+        }
+        raw["limits"].update(request_deadline_seconds=5, shutdown_cleanup_seconds=0.5)
+
+    with http_process(local_pki, tmp_path, handler, public_provider=True, configure=configure) as (
+        client,
+        calls,
+        _,
+        _,
+    ):
+        started = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            pending = [
+                pool.submit(
+                    client.post, "/v1/messages", json={"model": "fixture-model", "messages": []}
                 )
-            )
-        assert all(response.status_code in {502, 503} for response in responses)
+                for _ in range(8)
+            ]
+            try:
+                completed = concurrent.futures.as_completed(pending, timeout=4)
+                # Four local overflows prove all eight callers reached admission
+                # while two provider sockets and two queue positions remain held.
+                for _ in range(4):
+                    assert next(completed).result().status_code == 429
+                probe = client.get("/__test/probe").json()
+                assert probe["active"] == probe["queued"] == 2
+                assert len(calls) == 2
+            finally:
+                release.set()
+            responses = [task.result(timeout=6) for task in pending]
+        assert time.monotonic() - started < 6
+        assert all(response.status_code in {429, 502, 503} for response in responses)
         probe = client.get("/__test/idle").json()
         assert 1 <= len(calls) <= 8 * maximum
         assert probe["active"] == probe["queued"] == 0
         assert probe["ledger"]["unknown_charge_count"] == 0
+        # Four overflow requests are rejected before runtime registration.
+        assert len(probe["operations"]) == 4
+        for operation in probe["operations"]:
+            assert len(operation["attempts"]) <= maximum
+            assert operation["finished"] <= operation["deadline"] + 0.5

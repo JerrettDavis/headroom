@@ -112,8 +112,14 @@ async def test_error_events_never_expose_provider_text():
     [
         ("openai-responses", b'data: {"type":"response.completed"}\n\n'),
         ("anthropic-messages", b'data: {"type":"message_stop"}\n\n'),
-        ("gemini-generate", b'data: {"candidates":[{"finishReason":"STOP"}]}\n\n'),
-        ("vertex-generate", b'data: {"candidates":[{"finishReason":"STOP"}]}\n\n'),
+        (
+            "gemini-generate",
+            b'data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}\n\n',
+        ),
+        (
+            "vertex-generate",
+            b'data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}\n\n',
+        ),
     ],
 )
 async def test_terminal_closes_without_waiting_for_provider_eof(protocol, terminal):

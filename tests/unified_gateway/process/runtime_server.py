@@ -3,6 +3,7 @@
 import asyncio
 import os
 import sys
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from fastapi import Request
 from headroom.proxy.gateway.config import GatewayConfigSnapshot
 from headroom.proxy.gateway.credential_sources.environment import EnvironmentCredentialSource
 from headroom.proxy.gateway.egress import EgressPolicy
+from headroom.proxy.gateway.execution import GatewayOperation
 from headroom.proxy.gateway.transport import PinnedHTTPTransport, tls_context
 from headroom.proxy.models import ProxyConfig
 from headroom.proxy.server import create_app
@@ -24,6 +26,36 @@ def run(path: Path) -> None:
     runtime = app.state.gateway_runtime
     observations = []
     counts = {"identity": 0}
+    operations = []
+    finished = {}
+    arrivals = []
+    reserve_barrier = asyncio.Event()
+    original_init = GatewayOperation.__init__
+    original_finish = GatewayOperation._finish
+    original_reserve = runtime.admission.reserve
+
+    def capture_operation(operation, *args, **kwargs):
+        original_init(operation, *args, **kwargs)
+        operations.append(operation)
+
+    async def finish_operation(operation, *args, **kwargs):
+        try:
+            return await original_finish(operation, *args, **kwargs)
+        finally:
+            finished[operation.id] = time.monotonic()
+
+    async def reserve(request):
+        arrivals.append({"principal": request.principal_id, "route": request.route_id})
+        barrier_size = int(os.environ.get("GATEWAY_TEST_RESERVE_BARRIER", "0"))
+        if barrier_size:
+            if len(arrivals) >= barrier_size:
+                reserve_barrier.set()
+            await asyncio.wait_for(reserve_barrier.wait(), 5)
+        return await original_reserve(request)
+
+    GatewayOperation.__init__ = capture_operation
+    GatewayOperation._finish = finish_operation
+    runtime.admission.reserve = reserve
     now = [1000.0]
     original_acquire = EnvironmentCredentialSource.acquire
 
@@ -114,6 +146,18 @@ def run(path: Path) -> None:
             "ledger": asdict(runtime.admission.snapshot()),
             "active": runtime.admission.active_count,
             "queued": runtime.admission.queued_count,
+            "reserve_arrivals": arrivals,
+            "operations": [
+                {
+                    "principal": operation.principal.id,
+                    "route": operation.route.id,
+                    "deadline": operation.deadline,
+                    "finished": finished.get(operation.id),
+                    "terminal": operation.terminal,
+                    "attempts": [asdict(attempt) for attempt in operation.attempts],
+                }
+                for operation in operations
+            ],
         }
 
     @app.get("/__test/idle")

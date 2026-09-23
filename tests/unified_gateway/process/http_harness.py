@@ -18,7 +18,14 @@ from tests.unified_gateway.process.harness import _unused_loopback_port
 
 @contextmanager
 def http_process(
-    local_pki, tmp_path, handler, *, configure=None, fail_connect=False, public_provider=False
+    local_pki,
+    tmp_path,
+    handler,
+    *,
+    configure=None,
+    fail_connect=False,
+    public_provider=False,
+    reserve_barrier=0,
 ):
     context, raw = local_pki
     calls = []
@@ -115,6 +122,7 @@ def http_process(
     env.update(HOME=str(private_home), USERPROFILE=str(private_home))
     env["HEADROOM_GATEWAY_CLIENT_TOKEN_B"] = "client-b"
     env["GATEWAY_TEST_RUNTIME_HTTP"] = "1"
+    env["GATEWAY_TEST_RESERVE_BARRIER"] = str(reserve_barrier)
     if public_provider:
         env["GATEWAY_TEST_UPSTREAM_PORT"] = str(server.server_port)
     if fail_connect:

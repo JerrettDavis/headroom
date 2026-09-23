@@ -88,6 +88,10 @@ async def test_anthropic_text_delta_becomes_openai_chunk_before_stream_completio
         b'"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}\n\n'
     )
     completion_released = True
+    assert await anext(iterator) == (
+        b'data: {"object":"chat.completion.chunk","model":"public-claude",'
+        b'"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+    )
     assert await anext(iterator) == b"data: [DONE]\n\n"
 
 
@@ -155,5 +159,7 @@ def test_gateway_dispatch_uses_incremental_translated_stream(
     assert response.content == (
         b'data: {"object":"chat.completion.chunk","model":"public-claude",'
         b'"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n\n'
+        b'data: {"object":"chat.completion.chunk","model":"public-claude",'
+        b'"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
         b"data: [DONE]\n\n"
     )

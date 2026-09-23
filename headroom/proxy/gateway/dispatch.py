@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode
 import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.types import Receive, Scope, Send
 
 from headroom.proxy.gateway.capabilities import requested_features
 from headroom.proxy.gateway.config import Protocol, RouteConfig
@@ -31,7 +32,13 @@ from headroom.proxy.gateway.routing import (
     RetryDecision,
     TransportFailure,
 )
-from headroom.proxy.gateway.streaming import SSEFrames, StreamObserver, event_data, observed_body
+from headroom.proxy.gateway.streaming import (
+    SSEFrames,
+    StreamObserver,
+    event_data,
+    observed_body,
+    responses_refusal,
+)
 from headroom.proxy.gateway.transport import private_transport
 from headroom.proxy.gateway.usage import (
     CostEvaluation,
@@ -405,17 +412,43 @@ async def _run_attempts(
         )
 
 
+class OwnedStreamingResponse(StreamingResponse):
+    """Own admission/upstream even when ASGI never starts body iteration."""
+
+    def __init__(
+        self, operation: GatewayOperation, content: AsyncIterator[bytes], **kwargs: Any
+    ) -> None:
+        super().__init__(content, **kwargs)
+        self.operation = operation
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await asyncio.wait_for(
+                super().__call__(scope, receive, send),
+                max(0, self.operation.deadline - time.monotonic()),
+            )
+        finally:
+            try:
+                await cast(Any, self.body_iterator).aclose()
+            finally:
+                await self.operation.close("cancelled", failure_origin="network")
+
+
 async def _owned_stream(
     request: Request,
     operation: GatewayOperation,
     upstream: Any,
     *,
     translated: bool,
+    expected_candidates: int | None = None,
 ) -> AsyncIterator[bytes]:
     attempt = operation.current_attempt
     assert attempt is not None
     observer = StreamObserver(
-        operation.target_protocol, operation.generation.snapshot.limits, operation.deadline
+        operation.target_protocol,
+        operation.generation.snapshot.limits,
+        operation.deadline,
+        expected_candidates=expected_candidates,
     )
     result: TerminalResult = "failed"
     operation.owner_task = asyncio.current_task()
@@ -603,7 +636,11 @@ async def dispatch_native_http(
             "anthropic-messages": "/v1/messages",
             "gemini-generate": f"/v1beta/models/{route.upstream_model}:generateContent",
         }
-        upstream_path = upstream_paths.get(target_protocol, request.url.path)
+        upstream_path = (
+            upstream_paths.get(target_protocol, request.url.path)
+            if translated
+            else request.url.path
+        )
         if (
             not translated
             and public_model is not None
@@ -628,6 +665,18 @@ async def dispatch_native_http(
             outbound_body = plan.body
         generation = request.state.gateway_generation
         runtime = request.app.state.gateway_runtime
+        expected_candidates = None
+        if target_protocol in {"gemini-generate", "vertex-generate"}:
+            options = payload.get("generationConfig", {})
+            expected_candidates = (
+                options.get("candidateCount", 1) if isinstance(options, dict) else None
+            )
+            if type(expected_candidates) is not int or not 1 <= expected_candidates <= 8:
+                raise GatewayAuthorizationError(
+                    status_code=400,
+                    code="gateway_unsupported_capability",
+                    message="Candidate count is not supported",
+                )
         transport = (
             "http-stream"
             if payload.get("stream") is True or "streamGenerateContent" in request.url.path
@@ -664,8 +713,15 @@ async def dispatch_native_http(
             ):
                 raise _upstream_error()
             handed_off = True
-            return StreamingResponse(
-                _owned_stream(request, operation, upstream, translated=translated),
+            return OwnedStreamingResponse(
+                operation,
+                _owned_stream(
+                    request,
+                    operation,
+                    upstream,
+                    translated=translated,
+                    expected_candidates=expected_candidates,
+                ),
                 status_code=upstream.status_code,
                 headers=response_headers,
                 media_type=None,
@@ -687,7 +743,10 @@ async def dispatch_native_http(
             response_payload.get("error")
             or (
                 target_protocol == "openai-responses"
-                and response_payload.get("status") in {"failed", "incomplete", "cancelled"}
+                and (
+                    response_payload.get("status") in {"failed", "incomplete", "cancelled"}
+                    or responses_refusal(response_payload)
+                )
             )
             or (
                 target_protocol == "openai-chat"
