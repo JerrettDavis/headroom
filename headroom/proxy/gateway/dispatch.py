@@ -167,7 +167,11 @@ async def _iter_upstream_bytes(upstream: Any) -> AsyncIterator[bytes]:
 
     try:
         is_sse = (
-            getattr(upstream, "headers", {}).get("content-type", "").split(";", 1)[0]
+            getattr(upstream, "headers", {})
+            .get("content-type", "")
+            .split(";", 1)[0]
+            .strip()
+            .lower()
             == "text/event-stream"
         )
         pending = b""
@@ -184,11 +188,13 @@ async def _iter_upstream_bytes(upstream: Any) -> AsyncIterator[bytes]:
                 ]
                 separator = min(separators, key=pending.index)
                 event, pending = pending.split(separator, 1)
-                if any(line.strip() == b"event: error" for line in event.splitlines()):
+                fields = []
+                for line in event.splitlines():
+                    name, _, value = line.partition(b":")
+                    fields.append((name, value.removeprefix(b" ")))
+                if any(name == b"event" and value == b"error" for name, value in fields):
                     raise _upstream_error()
-                data = b"\n".join(
-                    line[5:].lstrip() for line in event.splitlines() if line.startswith(b"data:")
-                )
+                data = b"\n".join(value for name, value in fields if name == b"data")
                 if data and data != b"[DONE]":
                     parsed = json.loads(data)
                     if isinstance(parsed, dict) and (

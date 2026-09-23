@@ -550,6 +550,43 @@ async def test_native_sse_provider_error_is_not_forwarded_even_when_fragmented()
     assert output == []
 
 
+@pytest.mark.parametrize(
+    ("content_type", "event_field"),
+    [
+        ("Text/Event-Stream", b"event: error"),
+        ("text/event-stream ", b"event: error"),
+        ("text/event-stream", b"event:error"),
+    ],
+)
+def test_real_dispatch_redacts_sse_error_for_valid_wire_variants(
+    monkeypatch, content_type, event_field
+):
+    reached = []
+
+    async def upstream(request):
+        reached.append(str(request.url))
+        return httpx.Response(
+            200,
+            headers={"content-type": content_type},
+            content=event_field + b'\ndata: {"message":"provider-secret-sentinel"}\n\n',
+        )
+
+    app = app_with_transport(monkeypatch, upstream)
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/v1/chat/completions",
+        headers={
+            "host": "127.0.0.1:8787",
+            "authorization": "Bearer client-secret-sentinel",
+        },
+        json={"model": "REPLACE_WITH_ENABLED_OPENAI_MODEL", "messages": [], "stream": True},
+    )
+    assert reached == ["https://api.openai.com/v1/chat/completions"]
+    # HTTP headers are committed before iteration; the failed stream closes without its error body.
+    assert response.status_code == 200
+    assert "provider-secret-sentinel" not in response.text
+    assert response.content == b""
+
+
 @pytest.mark.parametrize("failure", ["body-read", "credential-source"])
 def test_dispatch_sanitizes_late_body_and_source_exceptions(monkeypatch, caplog, failure):
     class BrokenBody(httpx.AsyncByteStream):
