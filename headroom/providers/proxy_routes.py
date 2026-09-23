@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from headroom.providers.cloudcode import normalize_cloudcode_passthrough_path
 from headroom.providers.codex.endpoints import codex_backend_url
@@ -153,6 +153,16 @@ def _register_provider_handler_route(app: FastAPI, proxy: Any, spec: ProviderHan
                     protocol,
                     public_model=model or None,
                 )
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "type": "gateway_error",
+                        "code": "gateway_unsupported_capability",
+                        "message": "Requested capability is unavailable",
+                    }
+                },
+            )
         handler = getattr(proxy, spec.handler_name)
         if spec.path_param is None:
             return await handler(request)

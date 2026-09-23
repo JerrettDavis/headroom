@@ -116,6 +116,29 @@ def test_native_provider_routes_share_gateway_dispatch(
     assert b"public-" not in captured[0].content
 
 
+def test_unqualified_batch_route_is_rejected_before_legacy_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEADROOM_GATEWAY_CLIENT_TOKEN", "client-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-provider-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-provider-secret")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-provider-secret")
+    app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
+
+    response = TestClient(app, raise_server_exceptions=False).request(
+        "GET",
+        "/v1/messages/batches/missing",
+        headers={
+            "host": "127.0.0.1:8787",
+            "authorization": "Bearer client-secret",
+        },
+        json={"model": "public-anthropic"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "gateway_unsupported_capability"
+
+
 @pytest.mark.asyncio
 async def test_native_sse_response_releases_first_chunk_before_completion(
     monkeypatch: pytest.MonkeyPatch,
