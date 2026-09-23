@@ -48,6 +48,8 @@ class AwsChainCredentialSource:
             expires_at=expires_at,
             generation=self._generation,
             secret=SecretHandle(credentials),
+            source_kind="aws-chain",
+            region=self._source.region,
         )
 
     async def invalidate(self, lease: CredentialLease, reason: str) -> None:

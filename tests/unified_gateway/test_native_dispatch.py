@@ -235,6 +235,9 @@ def test_cloud_native_routes_use_gateway_identity_and_exact_target(
                 expires_at=None,
                 generation=1,
                 secret=SecretHandle(secret),
+                source_kind="aws-chain" if route.provider == "bedrock" else "gcp-adc",
+                project="REPLACE_WITH_AUTHORIZED_PROJECT" if route.provider == "vertex" else None,
+                region="us-east-1" if route.provider == "bedrock" else None,
             )
 
     app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(CLOUD_EXAMPLE)))
@@ -289,7 +292,7 @@ def test_openai_responses_uses_provider_key_and_preserves_entity_bytes(monkeypat
 
     assert response.status_code == 200
     assert response.content == response_bytes
-    assert response.headers["x-upstream"] == "preserved"
+    assert "x-upstream" not in response.headers
     assert len(captured) == 1
     assert captured[0].content == request_bytes
     assert captured[0].headers["authorization"] == "Bearer provider-secret"

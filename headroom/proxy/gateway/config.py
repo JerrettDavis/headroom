@@ -5,9 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Annotated, Literal, cast
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from headroom.proxy.gateway.destinations import (
+    SOURCE_KINDS,
+    https_destination,
+    normalized_origin,
+    path_within,
+    validate_audience,
+    validate_path,
+)
 
 Identifier = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
 Protocol = Literal[
@@ -102,6 +110,8 @@ class CredentialConfig(FrozenModel):
 
     @model_validator(mode="after")
     def validate_source_contract(self) -> CredentialConfig:
+        if SOURCE_KINDS.get(self.provider) != self.source.kind:
+            raise ValueError("provider credential source is not admitted")
         if self.source.kind in {"gcp-adc", "aws-chain"} and self.refresh_owner != "sdk":
             raise ValueError(f"{self.source.kind} requires refresh_owner='sdk'")
         if self.source.kind in {"env", "none"} and self.refresh_owner != "none":
@@ -115,9 +125,17 @@ class CredentialConfig(FrozenModel):
         _require_unique("allowed origins", self.allowed_origins)
         _require_unique("allowed path prefixes", self.allowed_path_prefixes)
         for origin in self.allowed_origins:
-            parsed = urlsplit(origin)
-            if parsed.scheme != "https" or not parsed.hostname or parsed.path not in {"", "/"}:
-                raise ValueError(f"invalid credential origin: {origin}")
+            parsed = https_destination(origin)
+            if parsed.path or parsed.query:
+                raise ValueError("credential origin must contain only an HTTPS authority")
+            for prefix in self.allowed_path_prefixes:
+                validate_path(prefix)
+                validate_audience(
+                    self.provider,
+                    origin + prefix,
+                    project=getattr(self.source, "project", None),
+                    region=getattr(self.source, "region", None),
+                )
         return self
 
 
@@ -149,6 +167,12 @@ class RouteConfig(FrozenModel):
 
     @model_validator(mode="after")
     def unique_values(self) -> RouteConfig:
+        parsed = https_destination(self.upstream_origin)
+        if parsed.path or parsed.query:
+            raise ValueError("route origin must contain only an HTTPS authority")
+        validate_path(self.upstream_path_prefix)
+        if self.private_network and self.provider != "compatible":
+            raise ValueError("private destinations require a compatible environment credential")
         _require_unique("route credentials", self.credentials)
         _require_unique("ingress protocols", self.ingress_protocols)
         _require_unique("native protocols", self.native_protocols)
@@ -225,12 +249,14 @@ class GatewayConfigSnapshot(FrozenModel):
                         f"route {route.id} provider {route.provider} does not match "
                         f"credential {credential_id} provider {credential.provider}"
                     )
-                if route.upstream_origin not in credential.allowed_origins:
+                if normalized_origin(route.upstream_origin) not in {
+                    normalized_origin(origin) for origin in credential.allowed_origins
+                }:
                     raise ValueError(
                         f"route {route.id} origin is outside credential {credential_id} origins"
                     )
                 if not any(
-                    route.upstream_path_prefix.startswith(prefix)
+                    path_within(route.upstream_path_prefix, prefix)
                     for prefix in credential.allowed_path_prefixes
                 ):
                     raise ValueError(

@@ -49,6 +49,8 @@ class GcpAdcCredentialSource:
             expires_at=expires_at,
             generation=self._generation,
             secret=SecretHandle(token),
+            source_kind="gcp-adc",
+            project=self._source.project,
         )
 
     async def invalidate(self, lease: CredentialLease, reason: str) -> None:

@@ -22,7 +22,7 @@ class ProviderAdmissionCatalog:
             ("gemini", "api-key"),
             ("vertex", "workload"),
             ("bedrock", "workload"),
-            ("compatible", "none"),
+            ("compatible", "api-key"),
         }
     )
 

@@ -5,12 +5,22 @@ from __future__ import annotations
 import hashlib
 import hmac
 import ipaddress
-from collections.abc import Iterable, Mapping
+import socket
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import NoReturn
 from urllib.parse import parse_qsl, quote, urlsplit
 
+from headroom.proxy.gateway.config import RouteConfig
 from headroom.proxy.gateway.credentials import CredentialLease
+from headroom.proxy.gateway.destinations import (
+    SOURCE_KINDS,
+    https_destination,
+    normalized_origin,
+    path_within,
+    validate_audience,
+)
 from headroom.proxy.gateway.errors import GatewayEgressDenied
 
 _CLIENT_AUTH_HEADERS = frozenset(
@@ -24,38 +34,83 @@ _CLIENT_AUTH_HEADERS = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class AuthorizedDestination:
+    hostname: str
+    port: int
+    addresses: tuple[str, ...]
+    url: str
+
+
+def resolve_addresses(hostname: str, port: int) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            str(record[4][0])
+            for record in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        )
+    )
+
+
 class EgressPolicy:
     """Authorize the final URL and resolved addresses before revealing a secret."""
+
+    def __init__(self, resolver: Callable[[str, int], Iterable[str]] | None = None) -> None:
+        self._resolver = resolver or resolve_addresses
 
     def authorize(
         self,
         lease: CredentialLease,
         url: str,
         *,
-        resolved_addresses: Iterable[str] = (),
-    ) -> None:
-        parsed = urlsplit(url)
-        if parsed.scheme != "https" or parsed.username is not None or parsed.password is not None:
-            self._deny()
-        if not parsed.hostname:
-            self._deny()
-        port = parsed.port or 443
-        origin = f"https://{parsed.hostname.lower()}:{port}"
-        if origin not in lease.allowed_origins:
-            self._deny()
-        if not any(parsed.path.startswith(prefix) for prefix in lease.allowed_path_prefixes):
-            self._deny()
-        for raw_address in resolved_addresses:
-            address = ipaddress.ip_address(raw_address)
-            if (
-                address.is_private
-                or address.is_loopback
-                or address.is_link_local
-                or address.is_reserved
-                or address.is_multicast
-                or address.is_unspecified
-            ):
+        resolved_addresses: Iterable[str] | None = None,
+        route: RouteConfig | None = None,
+    ) -> AuthorizedDestination:
+        try:
+            parsed = https_destination(url)
+            validate_audience(lease.provider, url, project=lease.project, region=lease.region)
+            if SOURCE_KINDS.get(lease.provider) != lease.source_kind:
                 self._deny()
+            origin = normalized_origin(url)
+            if origin not in {normalized_origin(value) for value in lease.allowed_origins}:
+                self._deny()
+            if not any(path_within(parsed.path, prefix) for prefix in lease.allowed_path_prefixes):
+                self._deny()
+            private = False
+            if route is not None:
+                if (
+                    route.provider != lease.provider
+                    or origin != normalized_origin(route.upstream_origin)
+                    or not path_within(parsed.path, route.upstream_path_prefix)
+                ):
+                    self._deny()
+                private = (
+                    route.private_network
+                    and lease.provider == "compatible"
+                    and lease.source_kind == "env"
+                )
+            addresses = (
+                tuple(resolved_addresses)
+                if resolved_addresses is not None
+                else tuple(self._resolver(parsed.hostname or "", parsed.port or 443))
+            )
+            if not addresses:
+                self._deny()
+            for raw_address in addresses:
+                address = ipaddress.ip_address(raw_address)
+                if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+                    address = address.ipv4_mapped
+                if (
+                    address.is_loopback
+                    or address.is_link_local
+                    or address.is_multicast
+                    or address.is_unspecified
+                    or address.is_reserved
+                    or (not address.is_global and not (private and address.is_private))
+                ):
+                    self._deny()
+            return AuthorizedDestination(parsed.hostname or "", parsed.port or 443, addresses, url)
+        except (ValueError, OSError):
+            self._deny()
 
     @staticmethod
     def _deny() -> NoReturn:
@@ -71,17 +126,20 @@ def build_managed_upstream_headers(
     lease: CredentialLease,
     url: str,
     *,
-    resolved_addresses: Iterable[str] = (),
+    resolved_addresses: Iterable[str] | None = None,
+    route: RouteConfig | None = None,
     method: str = "GET",
     body: bytes = b"",
 ) -> dict[str, str]:
     """Strip every caller credential before attaching one authorized lease."""
 
-    EgressPolicy().authorize(lease, url, resolved_addresses=resolved_addresses)
+    EgressPolicy().authorize(lease, url, resolved_addresses=resolved_addresses, route=route)
     result = {
         name.lower(): value
         for name, value in client_headers.items()
         if name.lower() not in _CLIENT_AUTH_HEADERS
+        and name.lower() not in {"host", "cookie", "forwarded", "proxy-connection"}
+        and not name.lower().startswith(("x-headroom-", "x-forwarded-", "x-amz-", "x-goog-"))
     }
     if lease.provider == "bedrock":
         result.update(_aws_sigv4_headers(lease, method, url, result, body))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import time
@@ -15,12 +16,15 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
-from headroom.proxy.gateway.config import Protocol
+from headroom.proxy.gateway.config import Protocol, RouteConfig
 from headroom.proxy.gateway.context import GatewayRequestContext
+from headroom.proxy.gateway.credentials import CredentialLease
+from headroom.proxy.gateway.destinations import path_within, validate_path
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
 from headroom.proxy.gateway.errors import GatewayAuthorizationError, GatewayPublicError
 from headroom.proxy.gateway.models import Capability
 from headroom.proxy.gateway.resources import ResourceBinding
+from headroom.proxy.gateway.transport import private_transport
 
 _REQUEST_HEADER_DENYLIST = frozenset(
     {"host", "content-length", "connection", "transfer-encoding", "upgrade"}
@@ -33,6 +37,70 @@ _QUERY_CREDENTIAL_NAMES = frozenset(
 )
 
 DispatchContract = Literal["strict-native", "routed-native", "translated"]
+
+
+def route_target(route: RouteConfig, path: str) -> str:
+    validate_path(path)
+    if route.provider == "compatible" and not path_within(path, route.upstream_path_prefix):
+        if not path.startswith("/v1/"):
+            raise ValueError("unsupported compatible route path")
+        path = route.upstream_path_prefix.rstrip("/") + "/" + path.removeprefix("/v1/")
+    return route.upstream_origin.rstrip("/") + path
+
+
+def _upstream_error() -> GatewayPublicError:
+    return GatewayPublicError(
+        status_code=502, code="gateway_upstream_error", message="Upstream request failed"
+    )
+
+
+def _safe_response_headers(upstream: Any) -> dict[str, str]:
+    content_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    return (
+        {"content-type": content_type}
+        if content_type in {"application/json", "text/event-stream", "application/octet-stream"}
+        else {}
+    )
+
+
+async def _send_managed(
+    request: Request,
+    proxy: Any,
+    route: RouteConfig,
+    lease: CredentialLease,
+    target: str,
+    client_headers: dict[str, str],
+    body: bytes,
+) -> Any:
+    destination = await asyncio.to_thread(
+        request.app.state.gateway_egress_policy.authorize, lease, target, route=route
+    )
+    headers = build_managed_upstream_headers(
+        client_headers,
+        lease,
+        target,
+        resolved_addresses=destination.addresses,
+        route=route,
+        method=request.method,
+        body=body,
+    )
+    if proxy.http_client is None:
+        raise _upstream_error()
+    upstream_request = proxy.http_client.build_request(
+        request.method, target, headers=headers, content=body
+    )
+    upstream_request.extensions["gateway_destination"] = destination
+    try:
+        with private_transport():
+            upstream = await proxy.http_client.send(
+                upstream_request, stream=True, follow_redirects=False
+            )
+    except Exception:
+        raise _upstream_error() from None
+    if not 200 <= upstream.status_code < 300:
+        await upstream.aclose()
+        raise _upstream_error()
+    return upstream
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +158,49 @@ class GatewayDispatcher:
 async def _iter_upstream_bytes(upstream: Any) -> AsyncIterator[bytes]:
     """Yield preloaded test responses or live transport chunks exactly once."""
 
-    if upstream.is_stream_consumed:
-        yield upstream.content
-        return
-    async for chunk in upstream.aiter_raw():
-        yield chunk
+    async def chunks() -> AsyncIterator[bytes]:
+        if upstream.is_stream_consumed:
+            yield upstream.content
+        else:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+
+    try:
+        is_sse = (
+            getattr(upstream, "headers", {}).get("content-type", "").split(";", 1)[0]
+            == "text/event-stream"
+        )
+        pending = b""
+        async for chunk in chunks():
+            if not is_sse:
+                yield chunk
+                continue
+            pending += chunk
+            if len(pending) > 1_048_576:
+                raise _upstream_error()
+            while b"\n\n" in pending or b"\r\n\r\n" in pending:
+                separators = [
+                    separator for separator in (b"\n\n", b"\r\n\r\n") if separator in pending
+                ]
+                separator = min(separators, key=pending.index)
+                event, pending = pending.split(separator, 1)
+                if any(line.strip() == b"event: error" for line in event.splitlines()):
+                    raise _upstream_error()
+                data = b"\n".join(
+                    line[5:].lstrip() for line in event.splitlines() if line.startswith(b"data:")
+                )
+                if data and data != b"[DONE]":
+                    parsed = json.loads(data)
+                    if isinstance(parsed, dict) and (
+                        parsed.get("error")
+                        or parsed.get("type") in {"error", "response.failed", "response.error"}
+                    ):
+                        raise _upstream_error()
+                yield event + separator
+        if pending:
+            raise _upstream_error()
+    except Exception:
+        raise _upstream_error() from None
 
 
 async def _bind_response_stream(
@@ -278,7 +384,7 @@ async def dispatch_native_http(
             and route.public_model != route.upstream_model
         ):
             upstream_path = upstream_path.replace(route.public_model, route.upstream_model, 1)
-        target = route.upstream_origin.rstrip("/") + upstream_path
+        target = route_target(route, upstream_path)
         safe_query = [
             (name, value)
             for name, value in parse_qsl(request.url.query, keep_blank_values=True)
@@ -311,13 +417,6 @@ async def dispatch_native_http(
             for name, value in request.headers.items()
             if name.lower() not in _REQUEST_HEADER_DENYLIST
         }
-        outbound_headers = build_managed_upstream_headers(
-            client_headers,
-            lease,
-            target,
-            method=request.method,
-            body=outbound_body,
-        )
         request.state.gateway = GatewayRequestContext(
             principal=principal,
             route=route,
@@ -325,24 +424,10 @@ async def dispatch_native_http(
             request_id=request.headers.get("x-request-id", ""),
             account_selection=selection,
         )
-        if proxy.http_client is None:
-            raise RuntimeError("gateway HTTP transport is not initialized")
-        upstream_request = proxy.http_client.build_request(
-            request.method,
-            target,
-            headers=outbound_headers,
-            content=outbound_body,
+        upstream = await _send_managed(
+            request, proxy, route, lease, target, client_headers, outbound_body
         )
-        upstream = await proxy.http_client.send(
-            upstream_request,
-            stream=True,
-            follow_redirects=False,
-        )
-        response_headers = {
-            name: value
-            for name, value in upstream.headers.items()
-            if name.lower() not in _RESPONSE_HEADER_DENYLIST
-        }
+        response_headers = _safe_response_headers(upstream)
         if translated and translated_stream:
             from headroom.proxy.gateway.protocols.events import translate_sse_stream
 
@@ -443,6 +528,17 @@ async def dispatch_native_http(
                 }
             },
         )
+    except Exception:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "type": "gateway_error",
+                    "code": "gateway_upstream_error",
+                    "message": "Upstream request failed",
+                }
+            },
+        )
     finally:
         if reservation is not None and not handed_off:
             await reservation.release()
@@ -514,33 +610,15 @@ async def dispatch_stateful_response_http(
             route,
             account_ref=selection.account_ref,
         )
-        target = route.upstream_origin.rstrip("/") + request.url.path
+        target = route_target(route, request.url.path)
         client_headers = {
             name: value
             for name, value in request.headers.items()
             if name.lower() not in _REQUEST_HEADER_DENYLIST
         }
         body = await request.body()
-        outbound_headers = build_managed_upstream_headers(
-            client_headers,
-            lease,
-            target,
-            method=request.method,
-            body=body,
-        )
-        if proxy.http_client is None:
-            raise RuntimeError("gateway HTTP transport is not initialized")
-        upstream_request = proxy.http_client.build_request(
-            request.method, target, headers=outbound_headers, content=body
-        )
-        upstream = await proxy.http_client.send(
-            upstream_request, stream=True, follow_redirects=False
-        )
-        response_headers = {
-            name: value
-            for name, value in upstream.headers.items()
-            if name.lower() not in _RESPONSE_HEADER_DENYLIST
-        }
+        upstream = await _send_managed(request, proxy, route, lease, target, client_headers, body)
+        response_headers = _safe_response_headers(upstream)
         upstream_body = await upstream.aread()
         await upstream.aclose()
         if request.method == "DELETE" and 200 <= upstream.status_code < 300:
@@ -564,6 +642,17 @@ async def dispatch_stateful_response_http(
                     "type": "gateway_error",
                     "code": exc.code,
                     "message": exc.message,
+                }
+            },
+        )
+    except Exception:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "type": "gateway_error",
+                    "code": "gateway_upstream_error",
+                    "message": "Upstream request failed",
                 }
             },
         )

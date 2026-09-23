@@ -32,7 +32,7 @@ def test_unadmitted_native_provider_is_not_advertised(provider: str) -> None:
         ("gemini", "api-key"),
         ("vertex", "workload"),
         ("bedrock", "workload"),
-        ("compatible", "none"),
+        ("compatible", "api-key"),
     ],
 )
 def test_only_explicit_public_api_and_workload_identities_are_admitted(

@@ -1953,9 +1953,16 @@ class HeadroomProxy(
         # Resolve TLS verification: a custom CA bundle (corporate PKI) if one
         # is configured, else a strict-relaxed default context when
         # HEADROOM_TLS_STRICT=0, else httpx's default strict verification.
-        _verify = build_httpx_verify()
-        _http2, _client_kwargs = _provider_httpx_client_options(self.config, _verify)
-        self.http_client = httpx.AsyncClient(http2=_http2, **_client_kwargs)
+        if self.config.gateway is not None:
+            from headroom.proxy.gateway.transport import http_client as gateway_http_client
+
+            self.http_client = gateway_http_client(self.config.gateway)
+            _http2 = False
+            _client_kwargs = {}
+        else:
+            _verify = build_httpx_verify()
+            _http2, _client_kwargs = _provider_httpx_client_options(self.config, _verify)
+            self.http_client = httpx.AsyncClient(http2=_http2, **_client_kwargs)
         # Reuse the primary client when HTTP/2 is already off; otherwise keep a
         # dedicated HTTP/1.1 client for ChatGPT passthrough.
         self.http_client_h1 = (
@@ -3030,10 +3037,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         app.state.rust_core_status = _rust_core_status
         app.state.rust_core_error = _rust_core_error
 
-        configure_otel_metrics(OTelMetricsConfig.from_env(default_service_name="headroom-proxy"))
-        configure_langfuse_tracing(
-            LangfuseTracingConfig.from_env(default_service_name="headroom-proxy")
-        )
+        if proxy.config.gateway is None:
+            configure_otel_metrics(OTelMetricsConfig.from_env(default_service_name="headroom-proxy"))
+            configure_langfuse_tracing(
+                LangfuseTracingConfig.from_env(default_service_name="headroom-proxy")
+            )
 
         app.state.started_at = time.time()
         app.state.ready = False

@@ -105,16 +105,19 @@ class BrowserAuthorizationTransaction:
         current = time.monotonic() if now is None else now
         if current > self.expires_at:
             raise OAuthValidationError("OAuth callback expired")
-        expected = urlsplit(self.redirect_uri)
         callback = urlsplit(callback_uri)
-        if (callback.scheme, callback.hostname, callback.port, callback.path) != (
-            expected.scheme,
-            expected.hostname,
-            expected.port,
-            expected.path,
+        if (
+            callback_uri.split("?", 1)[0] != self.redirect_uri
+            or callback.fragment
+            or "#" in callback_uri
+            or callback.username is not None
+            or callback.password is not None
         ):
             raise OAuthValidationError("OAuth callback URI mismatch")
         values = parse_qs(callback.query, keep_blank_values=True)
+        names = {part.partition("=")[0] for part in callback.query.split("&")}
+        if names != {"state", "issuer", "account", "code"} or set(values) != names:
+            raise OAuthValidationError("OAuth callback query mismatch")
         if values.get("state") != [self.state]:
             raise OAuthValidationError("OAuth state mismatch")
         if values.get("issuer") != [self.issuer]:
@@ -132,6 +135,11 @@ class BrowserAuthorizationTransaction:
         parsed = urlsplit(redirect_uri)
         if (
             parsed.scheme != "http"
+            or not redirect_uri.startswith("http://")
+            or parsed.username is not None
+            or parsed.password is not None
+            or any(character in redirect_uri for character in "%\\#")
+            or any(ord(character) <= 32 or ord(character) >= 127 for character in redirect_uri)
             or parsed.hostname not in {"127.0.0.1", "::1", "localhost"}
             or parsed.port is None
             or not parsed.path.startswith("/")

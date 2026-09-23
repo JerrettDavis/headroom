@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from headroom.proxy.gateway.config import CredentialConfig, GatewayConfigSnapshot, RouteConfig
@@ -37,6 +37,9 @@ class CredentialLease:
     expires_at: float | None
     generation: int
     secret: SecretHandle = field(repr=False)
+    source_kind: str = "env"
+    project: str | None = None
+    region: str | None = None
 
     def redacted_dict(self) -> dict[str, object]:
         return {
@@ -74,6 +77,7 @@ class CredentialBroker:
     def __init__(self, sources: Mapping[str, CredentialSource]) -> None:
         self._sources = dict(sources)
         self._leases: dict[str, CredentialLease] = {}
+        self._generations: dict[str, int] = {}
         self._locks: dict[str, asyncio.Lock] = {
             credential_id: asyncio.Lock() for credential_id in self._sources
         }
@@ -93,6 +97,7 @@ class CredentialBroker:
 
         sources: dict[str, CredentialSource] = {}
         for config in snapshot.credentials:
+            config = CredentialConfig.model_validate(config.model_dump())
             if config.source.kind == "env":
                 sources[config.id] = EnvironmentCredentialSource(config, environ)
             elif config.source.kind == "gcp-adc":
@@ -108,7 +113,6 @@ class CredentialBroker:
         route: RouteConfig,
         account_ref: str | None = None,
     ) -> CredentialLease:
-        now = time.time()
         unavailable = False
         for credential_id in route.credentials:
             source = self._sources.get(credential_id)
@@ -118,6 +122,7 @@ class CredentialBroker:
             if account_ref is not None and credential_id != account_ref:
                 continue
             async with self._locks[credential_id]:
+                now = time.time()
                 cached = self._leases.get(credential_id)
                 if cached is not None and (
                     cached.expires_at is None or cached.expires_at > now + 30.0
@@ -128,6 +133,15 @@ class CredentialBroker:
                 except GatewayCredentialUnavailable:
                     unavailable = True
                     continue
+                if lease.provider != route.provider or lease.credential_id != credential_id:
+                    raise GatewayCredentialUnavailable(
+                        status_code=503,
+                        code="credential_unavailable",
+                        message="Provider credential identity mismatch",
+                    )
+                generation = self._generations.get(credential_id, 0) + 1
+                lease = replace(lease, generation=generation)
+                self._generations[credential_id] = generation
                 self._leases[credential_id] = lease
                 return lease
         raise GatewayCredentialUnavailable(
@@ -138,8 +152,13 @@ class CredentialBroker:
 
     async def invalidate(self, lease: CredentialLease, reason: str) -> None:
         source = self._sources.get(lease.credential_id)
-        self._leases.pop(lease.credential_id, None)
-        if source is not None:
+        if source is None:
+            return
+        async with self._locks[lease.credential_id]:
+            current = self._leases.get(lease.credential_id)
+            if current is not lease:
+                return
+            self._leases.pop(lease.credential_id)
             await source.invalidate(lease, reason)
 
 

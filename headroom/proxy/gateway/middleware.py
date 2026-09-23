@@ -9,8 +9,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from headroom.proxy.gateway.auth import validate_gateway_browser_request
+from headroom.proxy.gateway.egress import EgressPolicy
 from headroom.proxy.gateway.errors import GatewayPublicError
 from headroom.proxy.gateway.runtime import GatewayRuntime
+from headroom.proxy.gateway.transport import tls_context
 
 if TYPE_CHECKING:
     from headroom.proxy.gateway.config import GatewayConfigSnapshot
@@ -36,6 +38,8 @@ def install_gateway_auth_middleware(
     """Install mandatory gateway auth while leaving readiness locally observable."""
 
     runtime = GatewayRuntime(snapshot, environ=environ)
+    app.state.gateway_egress_policy = EgressPolicy()
+    app.state.gateway_tls_context = tls_context(snapshot)
     app.state.gateway_runtime = runtime
     app.state.gateway_authenticator = runtime.authenticator
     app.state.gateway_authorizer = runtime.authorizer

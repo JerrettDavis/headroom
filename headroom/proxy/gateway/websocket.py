@@ -13,9 +13,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
 from headroom.proxy.gateway.auth import GatewayAuthorizer
 from headroom.proxy.gateway.context import GatewayPrincipal
+from headroom.proxy.gateway.dispatch import route_target
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
 from headroom.proxy.gateway.errors import GatewayAuthorizationError, GatewayPublicError
 from headroom.proxy.gateway.resources import ResourceBinding
+from headroom.proxy.gateway.transport import websocket_connection
 
 _MAX_FRAME_BYTES = 1_048_576
 
@@ -115,24 +117,21 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
             route,
             account_ref=selection.account_ref,
         )
-        https_target = route.upstream_origin.rstrip("/") + "/v1/responses"
+        https_target = route_target(route, "/v1/responses")
+        destination = await asyncio.to_thread(
+            websocket.app.state.gateway_egress_policy.authorize, lease, https_target, route=route
+        )
         headers = build_managed_upstream_headers(
             dict(websocket.headers.items()),
             lease,
             https_target,
             method="GET",
+            resolved_addresses=destination.addresses,
+            route=route,
         )
         headers.pop("host", None)
-        ws_target = "wss://" + https_target.removeprefix("https://")
-
-        import websockets
-
-        async with websockets.connect(
-            ws_target,
-            additional_headers=headers,
-            max_size=_MAX_FRAME_BYTES,
-            ping_interval=20,
-            ping_timeout=None,
+        async with websocket_connection(
+            destination, headers, websocket.app.state.gateway_tls_context
         ) as upstream:
             await upstream.send(first_frame)
 
@@ -213,6 +212,16 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                     with contextlib.suppress(json.JSONDecodeError):
                         event = json.loads(frame)
                         response = event.get("response") if isinstance(event, dict) else None
+                        if isinstance(event, dict) and (
+                            event.get("type") in {"error", "response.failed", "response.error"}
+                            or isinstance(response, dict)
+                            and response.get("error")
+                        ):
+                            raise GatewayPublicError(
+                                status_code=502,
+                                code="gateway_upstream_error",
+                                message="Upstream request failed",
+                            )
                         if (
                             isinstance(response, dict)
                             and event.get("type") == "response.created"
@@ -258,6 +267,18 @@ async def dispatch_native_responses_websocket(websocket: WebSocket, proxy: Any) 
                 {"type": "error", "error": {"code": exc.code, "message": exc.message}}
             )
             await websocket.close(code=1008, reason=exc.code)
+    except Exception:
+        with contextlib.suppress(Exception):
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": {
+                        "code": "gateway_upstream_error",
+                        "message": "Upstream request failed",
+                    },
+                }
+            )
+            await websocket.close(code=1011, reason="gateway_upstream_error")
     finally:
         if reservation is not None:
             await reservation.release()
