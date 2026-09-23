@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import parse_qsl, urlencode
 
+import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
 
-from headroom.proxy.gateway.admission import AdmissionRequest, AdmissionReservation
 from headroom.proxy.gateway.capabilities import requested_features
 from headroom.proxy.gateway.config import Protocol, RouteConfig
 from headroom.proxy.gateway.context import GatewayRequestContext
@@ -24,9 +22,23 @@ from headroom.proxy.gateway.credentials import CredentialLease
 from headroom.proxy.gateway.destinations import path_within, validate_path
 from headroom.proxy.gateway.egress import build_managed_upstream_headers
 from headroom.proxy.gateway.errors import GatewayAuthorizationError, GatewayPublicError
+from headroom.proxy.gateway.execution import GatewayAttempt, GatewayOperation
 from headroom.proxy.gateway.models import Capability
+from headroom.proxy.gateway.observability import RetryReason, TerminalResult
 from headroom.proxy.gateway.resources import ResourceBinding
+from headroom.proxy.gateway.routing import (
+    ProviderContract,
+    RetryDecision,
+    TransportFailure,
+)
+from headroom.proxy.gateway.streaming import SSEFrames, StreamObserver, event_data, observed_body
 from headroom.proxy.gateway.transport import private_transport
+from headroom.proxy.gateway.usage import (
+    CostEvaluation,
+    UsageObservation,
+    conservative_cost_bound,
+    normalize_usage,
+)
 
 _REQUEST_HEADER_DENYLIST = frozenset(
     {"host", "content-length", "connection", "transfer-encoding", "upgrade"}
@@ -73,6 +85,7 @@ async def _send_managed(
     target: str,
     client_headers: dict[str, str],
     body: bytes,
+    attempt: GatewayAttempt,
 ) -> Any:
     destination = await asyncio.to_thread(
         request.state.gateway_generation.egress_policy.authorize, lease, target, route=route
@@ -92,16 +105,13 @@ async def _send_managed(
         request.method, target, headers=headers, content=body
     )
     upstream_request.extensions["gateway_destination"] = destination
-    try:
-        with private_transport():
-            upstream = await request.state.gateway_generation.http_client.send(
-                upstream_request, stream=True, follow_redirects=False
-            )
-    except Exception:
-        raise _upstream_error() from None
-    if not 200 <= upstream.status_code < 300:
-        await upstream.aclose()
-        raise _upstream_error()
+    await attempt.check_current()
+    attempt.mark_sending()
+    with private_transport():
+        upstream = await request.state.gateway_generation.http_client.send(
+            upstream_request, stream=True, follow_redirects=False
+        )
+    attempt.upstream_close = upstream.aclose
     return upstream
 
 
@@ -157,128 +167,324 @@ class GatewayDispatcher:
         )
 
 
-async def _iter_upstream_bytes(upstream: Any) -> AsyncIterator[bytes]:
-    """Yield preloaded test responses or live transport chunks exactly once."""
+async def _iter_upstream_bytes(
+    upstream: Any, *, frame_security: bool = True
+) -> AsyncIterator[bytes]:
+    """Yield original, undecoded HTTP entity chunks once."""
 
-    async def chunks() -> AsyncIterator[bytes]:
+    async def raw() -> AsyncIterator[bytes]:
         if upstream.is_stream_consumed:
             yield upstream.content
         else:
             async for chunk in upstream.aiter_raw():
                 yield chunk
 
+    is_sse = (
+        frame_security
+        and getattr(upstream, "headers", {})
+        .get("content-type", "")
+        .split(";", 1)[0]
+        .strip()
+        .lower()
+        == "text/event-stream"
+    )
+    frames = SSEFrames(1_048_576)
     try:
-        is_sse = (
-            getattr(upstream, "headers", {})
-            .get("content-type", "")
-            .split(";", 1)[0]
-            .strip()
-            .lower()
-            == "text/event-stream"
-        )
-        pending = b""
-        async for chunk in chunks():
+        async for chunk in raw():
             if not is_sse:
                 yield chunk
                 continue
-            pending += chunk
-            if len(pending) > 1_048_576:
-                raise _upstream_error()
-            while b"\n\n" in pending or b"\r\n\r\n" in pending:
-                separators = [
-                    separator for separator in (b"\n\n", b"\r\n\r\n") if separator in pending
-                ]
-                separator = min(separators, key=pending.index)
-                event, pending = pending.split(separator, 1)
-                fields = []
-                for line in event.splitlines():
-                    name, _, value = line.partition(b":")
-                    fields.append((name, value.removeprefix(b" ")))
-                if any(name == b"event" and value == b"error" for name, value in fields):
-                    raise _upstream_error()
-                data = b"\n".join(value for name, value in fields if name == b"data")
-                if data and data != b"[DONE]":
-                    parsed = json.loads(data)
-                    if isinstance(parsed, dict) and (
-                        parsed.get("error")
-                        or parsed.get("type") in {"error", "response.failed", "response.error"}
+            for frame in frames.feed(chunk):
+                data = event_data(frame)
+                if data and data != "[DONE]":
+                    payload = json.loads(data)
+                    if isinstance(payload, dict) and (
+                        payload.get("error")
+                        or payload.get("type") in {"error", "response.failed", "response.error"}
                     ):
                         raise _upstream_error()
-                yield event + separator
-        if pending:
+                yield frame
+        if frames.pending:
             raise _upstream_error()
     except Exception:
         raise _upstream_error() from None
 
 
-async def _bind_response_stream(
-    chunks: AsyncIterator[bytes],
+async def _bind_response(
+    request: Request, operation: GatewayOperation, payload: dict[str, Any]
+) -> None:
+    response = payload.get("response", payload)
+    if not isinstance(response, dict) or not isinstance(response.get("id"), str):
+        return
+    attempt = operation.current_attempt
+    assert attempt is not None
+    await operation.runtime.resources.bind(
+        ResourceBinding(
+            provider_id=response["id"],
+            principal_id=operation.principal.id,
+            route_id=operation.route.id,
+            account_ref=attempt.account_ref,
+            adapter="openai-responses",
+            expires_at=time.time() + operation.generation.snapshot.limits.resource_ttl_seconds,
+            authority_fingerprint=operation.generation.account_key(attempt.account_ref),
+            target_fingerprint=operation.generation.target_key(operation.route.id),
+            generation=operation.generation.number,
+        )
+    )
+
+
+def _retry_contract(route: RouteConfig) -> ProviderContract:
+    # Only documented API rejection shapes below can prove rejection. Compatible
+    # endpoints do not inherit public-provider billing/acceptance guarantees.
+    rejected = (
+        frozenset({"rate_limit", "unavailable"}) if route.provider == "anthropic" else frozenset()
+    )
+    return ProviderContract(
+        max_attempts=3,
+        retryable_failures=frozenset({"connect_failed"}) | rejected,
+        rejected_failures=rejected,
+        max_retry_after=60,
+    )
+
+
+def _rejection(route: RouteConfig, status: int, payload: dict[str, Any]) -> str | None:
+    error = payload.get("error")
+    if route.provider == "anthropic" and isinstance(error, dict):
+        if status == 429 and error.get("type") == "rate_limit_error":
+            return "rate_limit"
+        if status == 529 and error.get("type") == "overloaded_error":
+            return "unavailable"
+    return None
+
+
+async def _run_attempts(
+    request: Request,
+    proxy: Any,
+    operation: GatewayOperation,
     *,
-    registry: Any,
-    principal_id: str,
-    route_id: str,
-    account_ref: str,
-    generation: Any,
-) -> AsyncIterator[bytes]:
-    """Observe bounded complete SSE events while forwarding each chunk unchanged."""
-
-    buffer = bytearray()
-    async for chunk in chunks:
-        buffer.extend(chunk)
-        if len(buffer) > 1_048_576:
-            raise GatewayAuthorizationError(
-                status_code=502,
-                code="gateway_stream_event_too_large",
-                message="Upstream stream event exceeded the gateway bound",
+    target: str,
+    body: bytes,
+    cost: CostEvaluation,
+    transport: str,
+    features: frozenset[str],
+    binding: ResourceBinding | None,
+) -> Any:
+    generation, route, runtime = operation.generation, operation.route, operation.runtime
+    contract = _retry_contract(route)
+    retry = None
+    while True:
+        # Every attempt repeats authorization against the admitted catalog and
+        # current revocation epochs; it never recaptures tariff/semantic policy.
+        generation.authorizer.authorize(
+            operation.principal,
+            scope="inference",
+            protocol=operation.ingress_protocol,
+            defer_cost_to_admission=True,
+            public_model=route.public_model,
+            transport=transport,
+            features=features,
+        )
+        selection = runtime.router.select(
+            route,
+            operation.principal,
+            resource_binding=binding,
+            eligible_accounts=generation.catalog.eligible_accounts(
+                route,
+                protocol=operation.ingress_protocol,
+                transport=transport,
+                features=features,
+            ),
+            authority_keys=dict(generation.authorities),
+            target_key=generation.target_key(route.id),
+        )
+        attempt = await operation.start_attempt(selection.account_ref, cost, retry=retry)
+        if cost.provider_contract == "openai-responses-resource-v1":
+            attempt.usage = UsageObservation(
+                charge_free=True, availability="complete", provenance="resource-control"
             )
-        while b"\n\n" in buffer:
-            raw_event, remainder = bytes(buffer).split(b"\n\n", 1)
-            buffer = bytearray(remainder)
-            data = b"\n".join(
-                line.removeprefix(b"data: ")
-                for line in raw_event.splitlines()
-                if line.startswith(b"data:")
+        request.state.gateway = GatewayRequestContext(
+            principal=operation.principal,
+            route=route,
+            ingress_protocol=operation.ingress_protocol,
+            request_id=request.headers.get("x-request-id", ""),
+            generation=generation,
+            catalog=generation.catalog,
+            account_selection=selection,
+            operation=operation,
+        )
+        retry = None
+        try:
+            lease = await asyncio.wait_for(
+                generation.broker.acquire(route, account_ref=selection.account_ref),
+                max(0, operation.deadline - time.monotonic()),
             )
-            if data and data != b"[DONE]":
-                with contextlib.suppress(UnicodeDecodeError, json.JSONDecodeError):
-                    event = json.loads(data)
-                    response = event.get("response") if isinstance(event, dict) else None
-                    if (
-                        isinstance(response, dict)
-                        and event.get("type") == "response.created"
-                        and isinstance(response.get("id"), str)
-                    ):
-                        await registry.bind(
-                            ResourceBinding(
-                                provider_id=response["id"],
-                                principal_id=principal_id,
-                                route_id=route_id,
-                                account_ref=account_ref,
-                                adapter="openai-responses",
-                                expires_at=time.time()
-                                + generation.snapshot.limits.resource_ttl_seconds,
-                                authority_fingerprint=generation.account_key(account_ref),
-                                target_fingerprint=generation.target_key(route_id),
-                                generation=generation.number,
-                            )
-                        )
-        yield chunk
+            attempt.lease_generation = lease.generation
+            await attempt.check_current()
+            headers = {
+                name: value
+                for name, value in request.headers.items()
+                if name.lower() not in _REQUEST_HEADER_DENYLIST
+            }
+            upstream = await asyncio.wait_for(
+                _send_managed(request, proxy, route, lease, target, headers, body, attempt),
+                max(0, operation.deadline - time.monotonic()),
+            )
+            if 200 <= upstream.status_code < 300:
+                attempt.mark_accepted()
+                return upstream
+            raw = await observed_body(
+                _iter_upstream_bytes(upstream),
+                maximum=generation.snapshot.limits.max_observed_json_bytes,
+                deadline=operation.deadline,
+            )
+            try:
+                payload = json.loads(raw)
+            except (ValueError, RecursionError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            if cost.provider_contract != "openai-responses-resource-v1":
+                attempt.usage = normalize_usage(operation.target_protocol, payload)
+            failure = _rejection(route, upstream.status_code, payload)
+            if failure is not None:
+                attempt.mark_rejected(failure, contract)
+                # These rejections are pre-generation. Preserve any reported
+                # usage instead of discarding contradictory charge evidence.
+                if attempt.usage.availability == "unknown":
+                    attempt.usage = UsageObservation(
+                        charge_free=True, availability="complete", provenance="provider-rejection"
+                    )
+                retry = RetryDecision.decide(
+                    TransportFailure(failure, upstream.headers.get("retry-after")),
+                    attempt.exposure.value,
+                    contract,
+                    attempt_count=len(operation.attempts) + 1,
+                    deadline=operation.deadline,
+                    now=time.monotonic(),
+                    policy=route.retry,
+                )
+                runtime.router.cool_down(
+                    selection.account_ref,
+                    quota_key=route.selection.quota_group or route.id,
+                    until=time.time()
+                    + (retry.delay if retry.allowed else route.retry.max_retry_after_seconds),
+                )
+            await attempt.close(
+                "rejected",
+                failure_origin="upstream",
+                retry_reason=cast(RetryReason, retry.reason)
+                if retry is not None and retry.allowed
+                else "none",
+            )
+            if retry is None or not retry.allowed:
+                raise _upstream_error()
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # HTTPX connect/TLS establishment failure proves no request write.
+            attempt.mark_unsent_connect_failure()
+            retry = RetryDecision.decide(
+                TransportFailure("connect_failed", None),
+                attempt.exposure.value,
+                contract,
+                attempt_count=len(operation.attempts) + 1,
+                deadline=operation.deadline,
+                now=time.monotonic(),
+                policy=route.retry,
+            )
+            await attempt.close(
+                "failed",
+                failure_origin="network",
+                retry_reason="connect" if retry.allowed else "none",
+            )
+            if not retry.allowed:
+                raise _upstream_error() from None
+        if retry is None or not retry.allowed:
+            raise _upstream_error()
+        # The completed attempt owns no socket/reservation during bounded backoff.
+        await asyncio.wait_for(
+            asyncio.sleep(retry.delay), max(0, operation.deadline - time.monotonic())
+        )
 
 
-async def _finalize_stream(
-    chunks: AsyncIterator[bytes],
-    reservation: AdmissionReservation,
+async def _owned_stream(
+    request: Request,
+    operation: GatewayOperation,
+    upstream: Any,
+    *,
+    translated: bool,
 ) -> AsyncIterator[bytes]:
-    completed = False
+    attempt = operation.current_attempt
+    assert attempt is not None
+    observer = StreamObserver(
+        operation.target_protocol, operation.generation.snapshot.limits, operation.deadline
+    )
+    result: TerminalResult = "failed"
+    operation.owner_task = asyncio.current_task()
+
+    async def observed() -> AsyncGenerator[bytes, None]:
+        try:
+            async for frame in observer.observe(
+                _iter_upstream_bytes(upstream, frame_security=False)
+            ):
+                attempt.usage = observer.usage
+                if (
+                    operation.target_protocol == "openai-responses"
+                    and observer.last_event is not None
+                ):
+                    if observer.last_event.get("type") in {
+                        "response.created",
+                        "response.completed",
+                    }:
+                        await _bind_response(request, operation, observer.last_event)
+                yield frame
+        finally:
+            if not attempt.closed:
+                attempt.usage = observer.usage
+
+    source = observed()
+    output = source
+    if translated:
+        from headroom.proxy.gateway.protocols.events import translate_sse_stream
+
+        output = translate_sse_stream(
+            operation.target_protocol,
+            operation.ingress_protocol,
+            source,
+            public_model=operation.route.public_model,
+        )
     try:
-        async for chunk in chunks:
+        async for chunk in output:
+            attempt.mark_output()
             yield chunk
-        completed = True
+        result = "success"
+    except asyncio.CancelledError:
+        result = "cancelled"
+        raise
+    except Exception:
+        # ASGI middleware may convert an aborted body to normal HTTP EOF. Emit
+        # a protocol error (never a success terminal) so clients see the failure.
+        error: dict[str, Any] = {
+            "error": {
+                "type": "gateway_error",
+                "code": "gateway_upstream_error",
+                "message": "Upstream request failed",
+            }
+        }
+        if operation.ingress_protocol in {"anthropic-messages", "openai-responses"}:
+            error["type"] = "error"
+        prefix = (
+            b"event: error\n"
+            if operation.ingress_protocol in {"anthropic-messages", "openai-responses"}
+            else b""
+        )
+        yield prefix + b"data: " + json.dumps(error, separators=(",", ":")).encode() + b"\n\n"
     finally:
-        if completed:
-            await reservation.finalize(actual_cost=None)
-        else:
-            await reservation.release()
+        try:
+            await output.aclose()
+            await source.aclose()
+        finally:
+            await operation.close(
+                result, failure_origin="none" if result == "success" else "network"
+            )
 
 
 def rewrite_routed_native_model(
@@ -318,7 +524,7 @@ async def dispatch_native_http(
 ) -> Response:
     """Authorize, lease, and forward one native HTTP entity without optimization."""
 
-    reservation: AdmissionReservation | None = None
+    operation: GatewayOperation | None = None
     handed_off = False
     try:
         body = await request.body()
@@ -341,6 +547,7 @@ async def dispatch_native_http(
         principal = request.state.gateway_principal
         route = request.state.gateway_generation.authorizer.authorize(
             principal,
+            defer_cost_to_admission=True,
             scope="inference",
             protocol=protocol,
             public_model=requested_model,
@@ -371,7 +578,6 @@ async def dispatch_native_http(
             request.state.gateway_generation.validate_binding(resource_binding)
         target_protocol = protocol
         translated = protocol not in route.native_protocols
-        translated_stream = False
         if translated:
             if route.translation != "qualified" or len(route.native_protocols) != 1:
                 raise GatewayAuthorizationError(
@@ -383,7 +589,6 @@ async def dispatch_native_http(
             from headroom.proxy.gateway.protocols import translate
 
             translated_payload = translate(protocol, target_protocol, payload)
-            translated_stream = translated_payload.get("stream") is True
             if target_protocol in ("openai-chat", "anthropic-messages"):
                 translated_payload["model"] = route.upstream_model
             outbound_body = json.dumps(
@@ -421,156 +626,112 @@ async def dispatch_native_http(
                 declared_contract=route.body_contract,
             )
             outbound_body = plan.body
-        reservation = await request.app.state.gateway_runtime.admission.reserve(
-            AdmissionRequest(principal.id, estimated_cost=None)
+        generation = request.state.gateway_generation
+        runtime = request.app.state.gateway_runtime
+        transport = (
+            "http-stream"
+            if payload.get("stream") is True or "streamGenerateContent" in request.url.path
+            else "http-json"
         )
-        selection = request.app.state.gateway_runtime.router.select(
-            route,
-            principal,
-            resource_binding=resource_binding,
-            eligible_accounts=request.state.gateway_generation.catalog.eligible_accounts(
-                route,
-                protocol=protocol,
-                transport="http-stream"
-                if payload.get("stream") is True
-                or "streamGenerateContent" in request.url.path
-                or "response-stream" in request.url.path
-                else "http-json",
-                features=requested_features(protocol, payload),
-            ),
-            authority_keys=dict(request.state.gateway_generation.authorities),
-            target_key=request.state.gateway_generation.target_key(route.id),
-        )
-        lease = await request.state.gateway_generation.broker.acquire(
-            route,
-            account_ref=selection.account_ref,
-        )
-        client_headers = {
-            name: value
-            for name, value in request.headers.items()
-            if name.lower() not in _REQUEST_HEADER_DENYLIST
-        }
-        request.state.gateway = GatewayRequestContext(
+        operation = GatewayOperation(
+            runtime,
+            generation=generation,
             principal=principal,
             route=route,
             ingress_protocol=protocol,
-            request_id=request.headers.get("x-request-id", ""),
-            generation=request.state.gateway_generation,
-            catalog=request.state.gateway_generation.catalog,
-            account_selection=selection,
+            target_protocol=target_protocol,
+            dispatch_plan=outbound_body,
         )
-        upstream = await _send_managed(
-            request, proxy, route, lease, target, client_headers, outbound_body
+        cost = conservative_cost_bound(
+            route, payload, qualified_contracts=runtime.dependencies.qualified_cost_contracts
+        )
+        upstream = await _run_attempts(
+            request,
+            proxy,
+            operation,
+            target=target,
+            body=outbound_body,
+            cost=cost,
+            transport=transport,
+            features=requested_features(protocol, payload),
+            binding=resource_binding,
         )
         response_headers = _safe_response_headers(upstream)
-        if translated and translated_stream:
-            from headroom.proxy.gateway.protocols.events import translate_sse_stream
-
+        if transport == "http-stream":
+            if (
+                upstream.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                != "text/event-stream"
+            ):
+                raise _upstream_error()
             handed_off = True
             return StreamingResponse(
-                _finalize_stream(
-                    translate_sse_stream(
-                        target_protocol,
-                        protocol,
-                        _iter_upstream_bytes(upstream),
-                        public_model=route.public_model,
-                    ),
-                    reservation,
-                ),
-                status_code=upstream.status_code,
-                headers=response_headers,
-                media_type="text/event-stream",
-                background=BackgroundTask(upstream.aclose),
-            )
-        if translated:
-            from headroom.proxy.gateway.protocols import translate_response
-
-            upstream_body = await upstream.aread()
-            upstream_payload = json.loads(upstream_body)
-            if not isinstance(upstream_payload, dict):
-                raise GatewayAuthorizationError(
-                    status_code=502,
-                    code="gateway_upstream_invalid",
-                    message="Upstream response must be a JSON object",
-                )
-            translated_response = translate_response(
-                target_protocol,
-                protocol,
-                upstream_payload,
-                public_model=route.public_model,
-            )
-            await upstream.aclose()
-            await reservation.finalize(actual_cost=None)
-            return JSONResponse(
-                translated_response,
-                status_code=upstream.status_code,
-                headers=response_headers,
-            )
-        native_stream = payload.get("stream") is True
-        if protocol == "openai-responses" and not native_stream:
-            upstream_body = await upstream.aread()
-            if 200 <= upstream.status_code < 300:
-                try:
-                    response_payload = json.loads(upstream_body)
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    response_payload = None
-                if isinstance(response_payload, dict) and isinstance(
-                    response_payload.get("id"), str
-                ):
-                    await request.app.state.gateway_runtime.resources.bind(
-                        ResourceBinding(
-                            provider_id=response_payload["id"],
-                            principal_id=principal.id,
-                            route_id=route.id,
-                            account_ref=lease.account_ref,
-                            adapter="openai-responses",
-                            expires_at=time.time()
-                            + request.state.gateway_generation.snapshot.limits.resource_ttl_seconds,
-                            authority_fingerprint=request.state.gateway_generation.account_key(
-                                lease.account_ref
-                            ),
-                            target_fingerprint=request.state.gateway_generation.target_key(
-                                route.id
-                            ),
-                            generation=request.state.gateway_generation.number,
-                        )
-                    )
-            await upstream.aclose()
-            await reservation.finalize(actual_cost=None)
-            return Response(
-                content=upstream_body,
+                _owned_stream(request, operation, upstream, translated=translated),
                 status_code=upstream.status_code,
                 headers=response_headers,
                 media_type=None,
             )
-        response_chunks: AsyncIterator[bytes] = _iter_upstream_bytes(upstream)
-        if protocol == "openai-responses":
-            response_chunks = _bind_response_stream(
-                response_chunks,
-                registry=request.app.state.gateway_runtime.resources,
-                principal_id=principal.id,
-                route_id=route.id,
-                account_ref=lease.account_ref,
-                generation=request.state.gateway_generation,
-            )
-        handed_off = True
-        return StreamingResponse(
-            _finalize_stream(response_chunks, reservation),
-            status_code=upstream.status_code,
-            headers=response_headers,
-            media_type=None,
-            background=BackgroundTask(upstream.aclose),
+        upstream_body = await observed_body(
+            _iter_upstream_bytes(upstream),
+            maximum=generation.snapshot.limits.max_observed_json_bytes,
+            deadline=operation.deadline,
         )
+        try:
+            response_payload = json.loads(upstream_body)
+        except (ValueError, RecursionError):
+            raise _upstream_error() from None
+        if not isinstance(response_payload, dict):
+            raise _upstream_error()
+        assert operation.current_attempt is not None
+        operation.current_attempt.usage = normalize_usage(target_protocol, response_payload)
+        if (
+            response_payload.get("error")
+            or (
+                target_protocol == "openai-responses"
+                and response_payload.get("status") in {"failed", "incomplete", "cancelled"}
+            )
+            or (
+                target_protocol == "openai-chat"
+                and any(
+                    choice.get("finish_reason") in {"length", "content_filter"}
+                    or choice.get("message", {}).get("refusal")
+                    for choice in response_payload.get("choices", [])
+                )
+            )
+            or (
+                target_protocol == "anthropic-messages"
+                and response_payload.get("stop_reason")
+                in {"refusal", "max_tokens", "model_context_window_exceeded"}
+            )
+            or (
+                target_protocol in {"gemini-generate", "vertex-generate"}
+                and any(
+                    candidate.get("finishReason") not in {None, "STOP"}
+                    for candidate in response_payload.get("candidates", [])
+                )
+            )
+        ):
+            raise _upstream_error()
+        if protocol == "openai-responses":
+            await _bind_response(request, operation, response_payload)
+        if translated:
+            from headroom.proxy.gateway.protocols import translate_response
+
+            response: Response = JSONResponse(
+                translate_response(
+                    target_protocol, protocol, response_payload, public_model=route.public_model
+                ),
+                status_code=upstream.status_code,
+            )
+        else:
+            response = Response(
+                content=upstream_body, status_code=upstream.status_code, headers=response_headers
+            )
+        await operation.close("success")
+        return response
     except GatewayPublicError as exc:
         return JSONResponse(
             status_code=exc.status_code,
-            content={
-                "error": {
-                    "type": "gateway_error",
-                    "code": exc.code,
-                    "message": exc.message,
-                }
-            },
+            content={"error": {"type": "gateway_error", "code": exc.code, "message": exc.message}},
         )
     except Exception:
         return JSONResponse(
@@ -584,8 +745,8 @@ async def dispatch_native_http(
             },
         )
     finally:
-        if reservation is not None and not handed_off:
-            await reservation.release()
+        if operation is not None and not handed_off:
+            await operation.close("failed", failure_origin="network")
 
 
 def gateway_model_catalog(
@@ -679,82 +840,80 @@ async def dispatch_stateful_response_http(
     proxy: Any,
     sub_path: str,
 ) -> Response:
-    """Authorize an existing Responses resource before any credential or I/O."""
-
-    reservation: AdmissionReservation | None = None
+    """Affine metadata/control work owns concurrency but no new generation charge."""
+    operation: GatewayOperation | None = None
     try:
         response_id = sub_path.split("/", 1)[0]
         principal = request.state.gateway_principal
+        generation = request.state.gateway_generation
+        runtime = request.app.state.gateway_runtime
         if "inference" not in principal.scopes:
             raise GatewayAuthorizationError(
-                status_code=403,
-                code="gateway_scope_denied",
-                message="Gateway scope denied",
+                status_code=403, code="gateway_scope_denied", message="Gateway scope denied"
             )
-        binding = await request.app.state.gateway_runtime.resources.authorize(
+        binding = await runtime.resources.authorize(
             response_id,
             principal_id=principal.id,
             route_id=None,
             allowed_route_ids=principal.routes,
             now=time.time(),
         )
-        route = request.state.gateway_generation.catalog.route_for_id(binding.route_id)
+        route = generation.catalog.route_for_id(binding.route_id)
         if route is None:
             raise GatewayAuthorizationError(
                 status_code=404,
                 code="gateway_resource_not_found",
                 message="Stateful resource not found",
             )
-        request.state.gateway_generation.validate_binding(binding)
-        reservation = await request.app.state.gateway_runtime.admission.reserve(
-            AdmissionRequest(principal.id, estimated_cost=None)
+        generation.validate_binding(binding)
+        operation = GatewayOperation(
+            runtime,
+            generation=generation,
+            principal=principal,
+            route=route,
+            ingress_protocol="openai-responses",
+            target_protocol="openai-responses",
+            dispatch_plan="resource-control",
         )
-        selection = request.app.state.gateway_runtime.router.select(
-            route,
-            principal,
-            resource_binding=binding,
-            eligible_accounts=request.state.gateway_generation.catalog.eligible_accounts(route),
-            authority_keys=dict(request.state.gateway_generation.authorities),
-            target_key=request.state.gateway_generation.target_key(route.id),
+        upstream = await _run_attempts(
+            request,
+            proxy,
+            operation,
+            target=route_target(route, request.url.path),
+            body=await request.body(),
+            cost=CostEvaluation(
+                known_micro_usd=0,
+                reserved_upper_micro_usd=0,
+                complete=True,
+                basis="provider_reported",
+                provider_contract="openai-responses-resource-v1",
+                qualified_bound=True,
+            ),
+            transport="http-json",
+            features=frozenset({"text"}),
+            binding=binding,
         )
-        lease = await request.state.gateway_generation.broker.acquire(
-            route,
-            account_ref=selection.account_ref,
+        body = await observed_body(
+            _iter_upstream_bytes(upstream),
+            maximum=generation.snapshot.limits.max_observed_json_bytes,
+            deadline=operation.deadline,
         )
-        target = route_target(route, request.url.path)
-        client_headers = {
-            name: value
-            for name, value in request.headers.items()
-            if name.lower() not in _REQUEST_HEADER_DENYLIST
-        }
-        body = await request.body()
-        upstream = await _send_managed(request, proxy, route, lease, target, client_headers, body)
-        response_headers = _safe_response_headers(upstream)
-        upstream_body = await upstream.aread()
-        await upstream.aclose()
-        if request.method == "DELETE" and 200 <= upstream.status_code < 300:
-            await request.app.state.gateway_runtime.resources.delete(
-                response_id,
-                principal_id=principal.id,
-                route_id=route.id,
+        assert operation.current_attempt is not None
+        operation.current_attempt.usage = UsageObservation(
+            charge_free=True, availability="complete", provenance="resource-control"
+        )
+        if request.method == "DELETE":
+            await runtime.resources.delete(
+                response_id, principal_id=principal.id, route_id=route.id
             )
-        await reservation.finalize(actual_cost=None)
+        await operation.close("success")
         return Response(
-            content=upstream_body,
-            status_code=upstream.status_code,
-            headers=response_headers,
-            media_type=None,
+            content=body, status_code=upstream.status_code, headers=_safe_response_headers(upstream)
         )
     except GatewayPublicError as exc:
         return JSONResponse(
             status_code=exc.status_code,
-            content={
-                "error": {
-                    "type": "gateway_error",
-                    "code": exc.code,
-                    "message": exc.message,
-                }
-            },
+            content={"error": {"type": "gateway_error", "code": exc.code, "message": exc.message}},
         )
     except Exception:
         return JSONResponse(
@@ -768,5 +927,5 @@ async def dispatch_stateful_response_http(
             },
         )
     finally:
-        if reservation is not None:
-            await reservation.release()
+        if operation is not None:
+            await operation.close("failed", failure_origin="network")

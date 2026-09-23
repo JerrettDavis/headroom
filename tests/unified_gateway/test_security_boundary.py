@@ -596,7 +596,7 @@ def test_real_dispatch_redacts_sse_error_for_valid_wire_variants(
     # HTTP headers are committed before iteration; the failed stream closes without its error body.
     assert response.status_code == 200
     assert "provider-secret-sentinel" not in response.text
-    assert response.content == b""
+    assert b'"code":"gateway_upstream_error"' in response.content
 
 
 @pytest.mark.parametrize("failure", ["body-read", "credential-source"])

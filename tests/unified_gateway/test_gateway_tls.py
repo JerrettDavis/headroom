@@ -61,7 +61,10 @@ def local_pki(tmp_path):
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=1))
         .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName("llm.internal.example")]), critical=False
+            x509.SubjectAlternativeName(
+                [x509.DNSName("llm.internal.example"), x509.DNSName("api.anthropic.com")]
+            ),
+            critical=False,
         )
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(

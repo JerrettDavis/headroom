@@ -130,7 +130,7 @@ async def test_native_sse_response_releases_first_chunk_before_completion(
         async def __aiter__(self):
             yield b'data: {"type":"response.created"}\n\n'
             assert completion_released
-            yield b"data: [DONE]\n\n"
+            yield b'data: {"type":"response.completed"}\n\n'
 
     async def upstream(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -182,7 +182,9 @@ async def test_native_sse_response_releases_first_chunk_before_completion(
     iterator = response.body_iterator.__aiter__()
     assert await anext(iterator) == b'data: {"type":"response.created"}\n\n'
     completion_released = True
-    assert await anext(iterator) == b"data: [DONE]\n\n"
+    assert await anext(iterator) == b'data: {"type":"response.completed"}\n\n'
+    with pytest.raises(StopAsyncIteration):
+        await anext(iterator)
 
 
 @pytest.mark.parametrize(

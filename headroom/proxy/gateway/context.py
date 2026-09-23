@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from headroom.proxy.gateway.config import Protocol, RouteConfig
 
 if TYPE_CHECKING:
+    from headroom.proxy.gateway.execution import GatewayOperation
     from headroom.proxy.gateway.models import CatalogSnapshot
     from headroom.proxy.gateway.routing import AccountSelection
     from headroom.proxy.gateway.runtime import RuntimeGeneration
@@ -29,6 +30,7 @@ class GatewayRequestContext:
     generation: RuntimeGeneration
     catalog: CatalogSnapshot
     account_selection: AccountSelection | None = None
+    operation: GatewayOperation | None = None
 
     @property
     def snapshot_generation(self) -> int:

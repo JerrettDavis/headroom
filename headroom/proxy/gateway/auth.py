@@ -96,6 +96,7 @@ class GatewayAuthorizer:
         public_model: str,
         transport: str = "http-json",
         features: frozenset[str] = frozenset({"text"}),
+        defer_cost_to_admission: bool = False,
     ) -> RouteConfig:
         if scope not in principal.scopes:
             raise GatewayAuthorizationError(
@@ -124,9 +125,13 @@ class GatewayAuthorizer:
                 code="gateway_unsupported_capability",
                 message="Requested capability is unavailable",
             )
-        # This publication batch has no qualified cost evaluator yet. Keep strict
-        # policies closed until the atomic-ledger batch supplies a proven bound.
-        if scope == "inference" and principal.id in self._unpriced_blocked:
+        # HTTP delegates qualified cost admission to its operation owner.
+        # Other transports remain closed under strict budgets until integrated.
+        if (
+            scope == "inference"
+            and principal.id in self._unpriced_blocked
+            and not defer_cost_to_admission
+        ):
             raise GatewayAuthorizationError(
                 status_code=429,
                 code="gateway_admission_unknown_cost",

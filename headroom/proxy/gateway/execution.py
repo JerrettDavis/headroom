@@ -307,6 +307,12 @@ class GatewayAttempt:
             raise ValueError("invalid attempt exposure transition")
         self.exposure = ExposureState.ACCEPTED
 
+    def mark_unsent_connect_failure(self) -> None:
+        """Only the HTTP pre-write connect/TLS failure classifier calls this."""
+        if self.exposure != ExposureState.ACCEPTANCE_UNKNOWN or self._close_task is not None:
+            raise ValueError("invalid acceptance transition")
+        self.exposure = ExposureState.UNSENT
+
     def mark_output(self) -> None:
         if (
             self.exposure

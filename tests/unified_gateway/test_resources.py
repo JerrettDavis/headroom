@@ -229,7 +229,7 @@ def test_streamed_response_id_is_bound_before_later_lookup(
                 content=(
                     b'data: {"type":"response.created","response":'
                     b'{"id":"resp_streamed","object":"response"}}\n\n'
-                    b"data: [DONE]\n\n"
+                    b'data: {"type":"response.completed"}\n\n'
                 ),
             )
         return httpx.Response(200, json={"id": "resp_streamed", "object": "response"})

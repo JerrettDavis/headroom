@@ -1,7 +1,9 @@
 """Actual Uvicorn test process, with one explicit fake-server destination pin."""
 
+import asyncio
+import os
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import httpx
@@ -32,25 +34,44 @@ def run(path: Path) -> None:
     EnvironmentCredentialSource.acquire = acquire
 
     def resolve(host, port):
-        assert host == "llm.internal.example"
-        assert port == httpx.URL(snapshot.routes[0].upstream_origin).port
-        return ("10.111.0.10",)
+        assert host in {"llm.internal.example", "api.anthropic.com"}
+        assert host == httpx.URL(snapshot.routes[0].upstream_origin).host
+        assert port == (httpx.URL(snapshot.routes[0].upstream_origin).port or 443)
+        return ("10.111.0.10",) if host == "llm.internal.example" else ("93.184.216.34",)
 
     class LocalFixtureTransport(PinnedHTTPTransport):
         async def handle_async_request(self, request):
             destination = request.extensions["gateway_destination"]
-            assert destination.hostname == "llm.internal.example"
-            assert destination.addresses == ("10.111.0.10",)
+            assert destination.hostname in {"llm.internal.example", "api.anthropic.com"}
+            assert destination.addresses == resolve(destination.hostname, destination.port)
             # The real policy/header boundary has approved the configured private
             # destination. Only this test transport maps that exact endpoint to
             # the fixture socket; TLS still verifies llm.internal.example.
             request.extensions["gateway_destination"] = replace(
                 destination, addresses=("127.0.0.1",)
             )
+            fixture_port = os.environ.get("GATEWAY_TEST_UPSTREAM_PORT")
+            if fixture_port:
+                assert destination.hostname == "api.anthropic.com" and destination.port == 443
+                request.url = request.url.copy_with(port=int(fixture_port))
+                request.extensions["gateway_destination"] = replace(
+                    request.extensions["gateway_destination"],
+                    port=int(fixture_port),
+                    url=str(request.url),
+                )
+            fail_port = os.environ.pop("GATEWAY_TEST_CONNECT_FAIL_PORT", None)
+            if fail_port:
+                request.url = request.url.copy_with(port=int(fail_port))
+                request.extensions["gateway_destination"] = replace(
+                    request.extensions["gateway_destination"],
+                    port=int(fail_port),
+                    url=str(request.url),
+                )
             return await super().handle_async_request(request)
 
     runtime.dependencies.egress_policy = EgressPolicy(resolver=resolve)
     runtime.dependencies.clock = lambda: now[0]
+    runtime.dependencies.qualified_cost_contracts = frozenset({"synthetic-http-v1"})
     runtime.dependencies.http_client = httpx.AsyncClient(
         transport=LocalFixtureTransport(
             verify=tls_context(snapshot),
@@ -71,13 +92,41 @@ def run(path: Path) -> None:
                     "generation": context.generation.number,
                     "catalog_revision": context.catalog.revision,
                     "tariff": context.route.pricing.revision if context.route.pricing else None,
+                    **(
+                        {
+                            "account": context.account_selection.account_ref
+                            if context.account_selection
+                            else None
+                        }
+                        if os.environ.get("GATEWAY_TEST_RUNTIME_HTTP")
+                        else {}
+                    ),
                 }
             )
         return response
 
     @app.get("/__test/probe")
     async def probe():
-        return {**counts, "observations": observations}
+        return {
+            **counts,
+            "observations": observations,
+            "totals": dict(runtime.observability._totals),
+            "ledger": asdict(runtime.admission.snapshot()),
+            "active": runtime.admission.active_count,
+            "queued": runtime.admission.queued_count,
+        }
+
+    @app.get("/__test/idle")
+    async def idle():
+        await asyncio.wait_for(runtime._work_empty.wait(), 10)
+        return await probe()
+
+    @app.post("/__test/cool/{account}/{quota}")
+    async def cool(account: str, quota: str):
+        import time
+
+        runtime.router.cool_down(account, quota_key=quota, until=time.time() + 60)
+        return {"cooled": True}
 
     @app.post("/__test/clock/{value}")
     async def advance(value: float):
@@ -99,7 +148,7 @@ def run(path: Path) -> None:
         key=lambda route: 0 if getattr(route, "path", "").startswith("/__test/") else 1
     )
     uvicorn.run(
-        app, host="127.0.0.1", port=snapshot.runtime.port, log_level="error", access_log=False
+        app, host="127.0.0.1", port=snapshot.runtime.port, log_level="info", access_log=False
     )
 
 

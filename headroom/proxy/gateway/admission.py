@@ -387,6 +387,18 @@ class AdmissionController:
     @staticmethod
     def _has_qualified_bound(request: AdmissionRequest) -> bool:
         bound, pricing, model = request.cost_bound, request.pricing, request.model_bounds
+        if (
+            bound is not None
+            and bound.provider_contract == "openai-responses-resource-v1"
+            and bound.qualified_bound
+            and bound.complete
+            and bound.basis == "provider_reported"
+            and bound.known_micro_usd
+            == bound.reserved_upper_micro_usd
+            == request.reserved_upper_micro_usd
+            == 0
+        ):
+            return True
         return bool(
             bound is not None
             and pricing is not None

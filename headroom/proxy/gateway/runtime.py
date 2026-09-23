@@ -95,6 +95,7 @@ class RuntimeDependencies:
     egress_policy: EgressPolicy = field(default_factory=EgressPolicy)
     http_client: Any = None
     broker: Any = None
+    qualified_cost_contracts: frozenset[str] = frozenset()
     metadata_reader: (
         Callable[[Any, RouteConfig, str], Awaitable[tuple[ProviderModelMetadata, ...]]] | None
     ) = None

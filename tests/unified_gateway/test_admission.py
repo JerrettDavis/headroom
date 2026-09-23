@@ -120,13 +120,11 @@ def test_http_admission_denial_precedes_credential_acquisition(
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
-    app = create_app(ProxyConfig(gateway=GatewayConfigSnapshot.load(EXAMPLE)))
-    app.state.gateway_runtime.admission = AdmissionController(
-        budget_limit=0.0,
-        max_concurrency=1,
-        queue_limit=0,
-        unknown_cost_policy="block",
+    snapshot = GatewayConfigSnapshot.load(EXAMPLE)
+    snapshot = snapshot.model_copy(
+        update={"admission": snapshot.admission.model_copy(update={"unknown_cost_policy": "block"})}
     )
+    app = create_app(ProxyConfig(gateway=snapshot))
 
     class Broker:
         async def acquire(self, *_args, **_kwargs):

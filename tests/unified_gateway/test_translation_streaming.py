@@ -25,6 +25,26 @@ EXAMPLE = (
 )
 
 
+@pytest.mark.asyncio
+async def test_translation_accepts_crlf_multiline_and_many_bounded_events():
+    async def upstream():
+        yield (
+            b": ping\r\n\r\n" * 100000
+            + b'data: {"type":"content_block_delta",\r\ndata: "delta":{"type":"text_delta","text":"hello"}}\r\n\r\ndata: {"type":"message_stop"}\r\n\r\n'
+        )
+
+    received = b"".join(
+        [
+            part
+            async for part in translate_sse_stream(
+                "anthropic-messages", "openai-chat", upstream(), public_model="alias"
+            )
+        ]
+    )
+    assert b'"content":"hello"' in received
+    assert received.endswith(b"data: [DONE]\n\n")
+
+
 def test_tool_argument_fragment_order_is_preserved() -> None:
     source = StreamEvent(
         kind="tool_argument_delta",

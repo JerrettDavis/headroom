@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.unified_gateway.process.harness import GatewayProcess, start_gateway_process
+from tests.unified_gateway.test_gateway_tls import local_pki  # noqa: F401
 
 
 @pytest.fixture(scope="module")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterable, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -49,7 +49,7 @@ async def translate_sse_stream(
     chunks: AsyncIterable[bytes],
     *,
     public_model: str,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     """Translate complete SSE events while retaining only one bounded partial event."""
 
     if (source_protocol, target_protocol) != ("anthropic-messages", "openai-chat"):
@@ -58,23 +58,12 @@ async def translate_sse_stream(
             code="gateway_unsupported_capability",
             message="Streaming translation direction is unsupported",
         )
-    buffer = bytearray()
+    from headroom.proxy.gateway.streaming import SSEFrames, event_data
+
+    frames = SSEFrames(1_048_576)
     async for chunk in chunks:
-        buffer.extend(chunk)
-        if len(buffer) > 1_048_576:
-            raise GatewayAuthorizationError(
-                status_code=502,
-                code="gateway_stream_event_too_large",
-                message="Upstream stream event exceeded the gateway bound",
-            )
-        while b"\n\n" in buffer:
-            raw_event, remainder = bytes(buffer).split(b"\n\n", 1)
-            buffer = bytearray(remainder)
-            data = b"\n".join(
-                line.removeprefix(b"data: ")
-                for line in raw_event.splitlines()
-                if line.startswith(b"data:")
-            )
+        for raw_event in frames.feed(chunk):
+            data = event_data(raw_event)
             if not data:
                 continue
             try:
@@ -106,7 +95,7 @@ async def translate_sse_stream(
                     )
             elif event.get("type") == "message_stop":
                 yield b"data: [DONE]\n\n"
-    if buffer.strip():
+    if frames.pending:
         raise GatewayAuthorizationError(
             status_code=502,
             code="gateway_upstream_truncated",
