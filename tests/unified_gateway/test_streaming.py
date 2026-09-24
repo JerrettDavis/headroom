@@ -157,6 +157,29 @@ async def test_content_idle_budget_starts_when_observation_starts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_first_read_idle_budget_starts_when_provider_wait_begins(monkeypatch) -> None:
+    import headroom.proxy.gateway.streaming as streaming
+
+    class PreemptedClock:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def monotonic(self) -> float:
+            self.calls += 1
+            return 100.0 if self.calls < 3 else 100.021
+
+    monkeypatch.setattr(streaming, "time", PreemptedClock())
+    terminal = b'data: {"type":"message_stop"}\n\n'
+    observer = streaming.StreamObserver(
+        "anthropic-messages",
+        LimitsConfig(stream_content_idle_seconds=0.02),
+        101.0,
+    )
+
+    assert b"".join([part async for part in observer.observe(chunks(terminal))]) == terminal
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "protocol,terminal",
     [

@@ -276,15 +276,19 @@ class StreamObserver:
             raise stream_error("timeout")
 
     async def observe(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-        self._content_at = time.monotonic()
         iterator = chunks.__aiter__()
+        first_read = True
         try:
             while True:
+                now = time.monotonic()
+                if first_read:
+                    self._content_at = now
+                    first_read = False
                 due = min(self.deadline, self._content_at + self.limits.stream_content_idle_seconds)
                 if self._partial_at is not None:
                     due = min(due, self._partial_at + self.limits.partial_frame_seconds)
                 try:
-                    chunk = await asyncio.wait_for(anext(iterator), max(0, due - time.monotonic()))
+                    chunk = await asyncio.wait_for(anext(iterator), max(0, due - now))
                 except StopAsyncIteration:
                     break
                 except TimeoutError:
