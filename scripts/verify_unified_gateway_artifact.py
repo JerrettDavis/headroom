@@ -39,13 +39,13 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="headroom-wheel-verify-") as directory:
         root = Path(directory)
         environment_path = root / "venv"
-        venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment_path)
+        venv.EnvBuilder(with_pip=True).create(environment_path)
         python = environment_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         environment = dict(os.environ)
         environment.pop("PYTHONPATH", None)
         environment["PYTHONNOUSERSITE"] = "1"
         subprocess.run(
-            [str(python), "-m", "pip", "install", "--no-deps", str(wheel)],
+            [str(python), "-m", "pip", "install", f"{wheel}[proxy]"],
             cwd=root,
             env=environment,
             check=True,
