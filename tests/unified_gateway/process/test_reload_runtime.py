@@ -158,8 +158,10 @@ def test_revoke_denies_waiters_and_cancels_http_ws_and_acquire(
                         assert json.loads(ws.recv(timeout=3))["type"] == "error"
                     except ConnectionClosed:
                         pass
-                client.post("/__test/release-acquire", headers=ADMIN)
-                probe = client.get("/__test/idle", headers=ADMIN).json()
+                with httpx.Client(base_url=client.base_url, timeout=12) as control:
+                    release_response = control.post("/__test/release-acquire", headers=ADMIN)
+                    assert release_response.status_code == 200, release_response.text
+                    probe = control.get("/__test/idle", headers=ADMIN).json()
                 assert probe["active"] == probe["queued"] == probe["owned"] == 0
                 assert len(calls) == (1 if phase == "queued" else 0)
                 assert probe["ledger"]["unknown_charge_count"] == (1 if phase == "queued" else 0)
