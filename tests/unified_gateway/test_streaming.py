@@ -142,6 +142,21 @@ async def test_terminal_closes_without_waiting_for_provider_eof(protocol, termin
 
 
 @pytest.mark.asyncio
+async def test_content_idle_budget_starts_when_observation_starts() -> None:
+    from headroom.proxy.gateway.streaming import StreamObserver
+
+    terminal = b'data: {"type":"message_stop"}\n\n'
+    observer = StreamObserver(
+        "anthropic-messages",
+        LimitsConfig(stream_content_idle_seconds=0.01),
+        time.monotonic() + 1,
+    )
+    await asyncio.sleep(0.02)
+
+    assert b"".join([part async for part in observer.observe(chunks(terminal))]) == terminal
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "protocol,terminal",
     [

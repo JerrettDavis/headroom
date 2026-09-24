@@ -276,6 +276,7 @@ class StreamObserver:
             raise stream_error("timeout")
 
     async def observe(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+        self._content_at = time.monotonic()
         iterator = chunks.__aiter__()
         try:
             while True:
