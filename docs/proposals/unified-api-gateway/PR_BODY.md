@@ -31,29 +31,29 @@ The implementation is closed by default for provider identities that have not be
 ### Test Output
 
 ```text
-Qualified source: e45c97fd5
-Base: 94206e265203acfd72a3b939e9a964e29175ad50
+Qualified source: 10481bda908a0c24e3f26e325fcbae93ce5e12a1
+Base: 5ff4ea1ef948563304c9e8f4b9ccff0e2ae3aedd
 Artifact: headroom_ai-0.38.0-cp310-abi3-win_amd64.whl
-SHA-256: f9982fd52df59f03a1f376b6db038d1adf928ed1df74038b132cb43aa3ae02eb
+SHA-256: 16b95caf23c1116431e80bb8330f36000af62c06e8c00aabc666a70a9e1297cc
 
-Gateway suite: 134 passed
+Gateway suite: 819 passed, 0 failed, 0 skipped
 Ruff check/format: passed
 Gateway mypy: passed
-Cargo fmt/tests: passed
-Exact installed-wheel smoke: passed
+Cargo fmt/tests: passed (primary crate: 935 passed, 0 failed, 1 ignored)
+Exact clean installed-wheel smoke: passed
+Hosted CI at 44934b26a: 20/20 jobs passed; PR rollup 58 successful,
+10 skipped, 0 failed/pending
 
-The full Python suite collected 13,448 tests but did not terminate after
-reaching 20% in an existing CLI-proxy test. Pre-existing bundled-tools
-Windows wrapper failures also appeared. See LOCAL_QUALIFICATION.md for the
-exact commands, scopes, and boundaries.
+See LOCAL_QUALIFICATION.md for exact commands, provenance digests, requirement
+mapping, and explicit external-not-run boundaries.
 ```
 
 ## Real Behavior Proof
 
-- Environment: Windows, CPython 3.13, installed `cp310-abi3-win_amd64` wheel built from `e45c97fd5`, plus repository test environment.
-- Exact command / steps: Built the wheel, verified its exact SHA-256 with `scripts/verify_unified_gateway_artifact.py`, installed it with `--no-deps`, ran the gateway unit/process suites and SDK parser smoke tests, and ran Ruff, mypy, Cargo formatting/tests, and the broader Python suite. Exact command lines are recorded in `docs/proposals/unified-api-gateway/LOCAL_QUALIFICATION.md`.
-- Observed result: 134 gateway tests passed; real-process OpenAI, Anthropic, and Gemini SDK/wire-shape tests passed; the exact installed-wheel smoke passed; static and Rust checks passed. The broader suite reached 20% before hanging in an existing CLI-proxy test.
-- Not tested: Paid or live-provider requests; native subscription identities; provider entitlement; real token expiry/refresh; OS keychain behavior; official retained release-artifact qualification; production activation.
+- Environment: Windows amd64, CPython 3.13, installed `cp310-abi3-win_amd64` wheel built from `10481bda9`, plus repository test environment.
+- Exact command / steps: Built the wheel, recorded its SHA-256 and config/fixture digests, installed that exact wheel with its declared `proxy` dependencies into a clean temporary environment, ran the installed CLI/runtime smoke outside the source tree, ran all 819 gateway unit/process tests, Ruff, mypy, and Cargo formatting/workspace tests. Exact commands and boundaries are recorded in `docs/proposals/unified-api-gateway/LOCAL_QUALIFICATION.md`.
+- Observed result: 819 gateway tests passed with no failures or skips; real-process OpenAI, Anthropic, and Gemini SDK/wire-shape tests passed; clean exact-wheel smoke passed; static and Rust gates passed. Hosted CI at `44934b26a` passed 20/20 jobs; the PR rollup reported 58 successful, 10 skipped, and 0 failed or pending checks.
+- Not tested: Paid or live-provider requests; native subscription identities; provider entitlement; real token expiry/refresh; OS keychain behavior; official retained release-artifact qualification; release publication; production activation.
 
 ## Runtime Rollout Safety
 
