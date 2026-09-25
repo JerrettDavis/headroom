@@ -720,4 +720,3 @@ jobs:
           venv\Scripts\python.exe -m pip install --quiet "$($whl.FullName)"
           # Same staged smoke script as the other host/container paths.
           venv\Scripts\python.exe "$env:RUNNER_TEMP\smoke_import.py"
-
