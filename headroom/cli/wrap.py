@@ -61,6 +61,7 @@ from headroom._version import normalize_release_version as _normalize_release_ve
 from headroom.agent_savings import (
     apply_agent_savings_env_defaults,
 )
+from headroom.cli.port_discovery import proxy_port_option, warn_codex_provider_port_change
 from headroom.cli.proxy import ensure_proxy_dependencies
 from headroom.copilot_auth import (
     _API_TOKEN_ENV_VARS,
@@ -1670,14 +1671,40 @@ def _selfheal_dead_wrap_base_url() -> None:
     """
     try:
         settings_path = Path.cwd() / ".claude" / "settings.local.json"
+        marker_before = _read_wrap_marker(settings_path)
         for key in (
             _claude_wrap_base_url_env_key(),
             _claude_wrap_base_url_env_key(foundry_mode=True),
             _claude_wrap_base_url_env_key(vertex_mode=True),
         ):
             _check_and_clear_dead_wrap_marker(settings_path, key=key)
+        # The prior value a clear restores may itself be None, so detect the
+        # clear by the marker changing rather than by the return value.
+        if marker_before is not None and _read_wrap_marker(settings_path) != marker_before:
+            _warn_live_proxy_after_selfheal(marker_before)
     except Exception:  # noqa: BLE001 - hook must never break session startup
         pass
+
+
+def _warn_live_proxy_after_selfheal(dead_marker: dict[str, Any] | None) -> None:
+    """After clearing a dead wrap route, point at a live proxy if one exists.
+
+    Deliberately warn-only: repointing settings at another session's proxy
+    would silently adopt a proxy this project never chose (different backend,
+    mode, or owner). The message names the exact command instead.
+    """
+    from headroom.cli.port_discovery import find_live_proxy_elsewhere
+
+    dead_port = dead_marker.get("port") if isinstance(dead_marker, dict) else None
+    requested = dead_port if isinstance(dead_port, int) else 8787
+    live = find_live_proxy_elsewhere(requested)
+    if live is None:
+        return
+    click.echo(
+        f"headroom: a Headroom proxy is running on port {live}; route this project "
+        f"through it with: headroom wrap claude --port {live}",
+        err=True,
+    )
 
 
 def _wrap_selfheal_hook_command() -> str:
@@ -2636,10 +2663,9 @@ _CODEX_CONFIG_BACKUP_SUFFIX = ".headroom-backup"
 
 def _codex_home_dir() -> Path:
     """Return Codex's config directory, respecting ``CODEX_HOME`` when set."""
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        return Path(codex_home).expanduser()
-    return Path.home() / ".codex"
+    from headroom.install.paths import codex_home_dir
+
+    return codex_home_dir()
 
 
 def _codex_profile_from_args(codex_args: tuple[str, ...]) -> str | None:
@@ -3147,6 +3173,9 @@ def _inject_codex_provider_config(port: int) -> str | None:
     """
     config_file, backup_file = _codex_config_paths()
     config_dir = config_file.parent
+    # Never repoint an existing headroom provider to another port silently: a
+    # different live proxy (or a persistent install) may own the old route.
+    warn_codex_provider_port_change(config_file, port)
 
     # Detect an existing custom OpenAI-compatible provider BEFORE building the
     # injected block below, so it can be preserved as the upstream the proxy
@@ -5266,13 +5295,8 @@ def wrap_selfheal(marker: str | None) -> None:
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
 @_serena_instructions_option
-@click.option(
-    # no "-p" short alias here: claude's own -p/--print must fall through to CLAUDE_ARGS
-    "--port",
-    default=8787,
-    type=click.IntRange(1, 65535),
-    help="Proxy port (default: 8787)",
-)
+# no "-p" short alias here: claude's own -p/--print must fall through to CLAUDE_ARGS
+@proxy_port_option("--port")
 @click.option(
     "--no-mcp",
     is_flag=True,
@@ -5849,9 +5873,7 @@ def _require_copilot_subscription_resolution() -> CopilotSubscriptionTokenResolu
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
 @click.option(
     "--backend",
@@ -6189,7 +6211,7 @@ def copilot(
 
 
 @wrap.command("vscode")
-@click.option("--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port")
+@proxy_port_option()
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
     "--settings-file",
@@ -6272,7 +6294,7 @@ def unwrap_vscode_copilot(settings_file: Path | None) -> None:
 
 
 @wrap.command("vscode-claude")
-@click.option("--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port")
+@proxy_port_option()
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
     "--settings-file",
@@ -6594,9 +6616,7 @@ def _run_codex_wrap(
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
 @_serena_instructions_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option(
     "--no-mcp",
     is_flag=True,
@@ -6706,9 +6726,7 @@ def codex(
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option(
     "--code-graph",
     is_flag=True,
@@ -6788,9 +6806,7 @@ def aider(
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option(
     "--code-graph",
     is_flag=True,
@@ -6859,9 +6875,7 @@ def vibe(
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option(
     "--code-graph",
     is_flag=True,
@@ -6953,9 +6967,7 @@ def kimi(
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
 @_serena_instructions_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-mcp", is_flag=True, help="Skip headroom MCP server registration")
 @_code_memory_option
 @click.option(
@@ -7084,9 +7096,7 @@ def grok(
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
 @click.option(
     "--learn", is_flag=True, help="Enable live traffic learning (patterns saved to .cursor/rules/)"
@@ -7143,9 +7153,7 @@ def cursor(
 
 @wrap.command("grok-build", context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
@@ -7213,9 +7221,7 @@ def grok_build(
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
@@ -7278,9 +7284,7 @@ def cline(
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
@@ -7344,9 +7348,7 @@ def zcode(
 
 @wrap.command("continue", context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
@@ -7444,8 +7446,8 @@ def continue_dev(
     is_flag=True,
     help="Install by copying plugin path instead of using --link",
 )
-@click.option(
-    "--proxy-port", default=8787, type=click.IntRange(1, 65535), help="Headroom proxy port"
+@proxy_port_option(
+    "--proxy-port", help_text="Headroom proxy port (default: $HEADROOM_PORT, else 8787)"
 )
 @click.option("--startup-timeout-ms", default=20000, type=int, help="Proxy startup timeout")
 @click.option(
@@ -7686,9 +7688,7 @@ def openclaw(
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
 @_serena_instructions_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option("--no-mcp", is_flag=True, help="Skip headroom MCP server registration")
 @click.option("--no-serena", is_flag=True, help="Skip Serena MCP server registration")
 @click.option(
@@ -8220,9 +8220,7 @@ def unwrap_codex(port: int, no_stop_proxy: bool) -> None:
 
 @wrap.command(context_settings={"ignore_unknown_options": True})
 @_retired_context_tool_option
-@click.option(
-    "--port", "-p", default=8787, type=click.IntRange(1, 65535), help="Proxy port (default: 8787)"
-)
+@proxy_port_option()
 @click.option(
     "--code-graph",
     is_flag=True,
@@ -8494,13 +8492,7 @@ def _make_registry_command(target: WrapTarget) -> click.Command:
             is_flag=True,
             help="Enable code graph indexing via codebase-memory-mcp (optional)",
         ),
-        click.option(
-            "--port",
-            "-p",
-            default=8787,
-            type=click.IntRange(1, 65535),
-            help="Proxy port (default: 8787)",
-        ),
+        proxy_port_option(),
         _retired_context_tool_option,
     ):
         command = decorator(command)
