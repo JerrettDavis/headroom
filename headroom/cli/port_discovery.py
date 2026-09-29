@@ -263,7 +263,7 @@ def proxy_port_option(*param_decls: str, help_text: str | None = None) -> Callab
     detects a live Headroom proxy on another recorded port (see module docs).
     """
     decls = param_decls or ("--port", "-p")
-    return click.option(
+    option: Callable[[Any], Any] = click.option(
         *decls,
         default=DEFAULT_PROXY_PORT,
         envvar=PORT_ENV,
@@ -276,6 +276,7 @@ def proxy_port_option(*param_decls: str, help_text: str | None = None) -> Callab
             "Headroom proxy on another port is detected and offered)"
         ),
     )
+    return option
 
 
 _CODEX_HEADROOM_TABLE_RE = re.compile(
