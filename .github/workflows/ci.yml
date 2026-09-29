@@ -291,6 +291,9 @@ jobs:
         shard: [1, 2, 3, 4]
     env:
       TRANSFORMERS_OFFLINE: "1"
+      # The production watchdog intentionally hard-exits the whole process.
+      # CI's job timeout must report stalls without erasing pytest diagnostics.
+      HEADROOM_HARD_WATCHDOG_SECS: "0"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
