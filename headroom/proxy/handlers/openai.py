@@ -4362,6 +4362,19 @@ class OpenAIHandlerMixin:
                 confirmed_frozen_count=_openai_confirmed_frozen,
             ).messages
 
+        # Both replays above forward earlier turns' messages byte-identical,
+        # including the cache_control each carried back then. Chat Completions
+        # clients mark the message dict and an assistant's tool_calls, which the
+        # block-level normalizer does not see, so without this the markers
+        # accumulate turn over turn and an Anthropic-backed gateway rejects the
+        # request (more than four breakpoints). Content is untouched: only the
+        # markers move.
+        from headroom.cache.prefix_tracker import mirror_client_message_cache_control
+
+        optimized_messages = mirror_client_message_cache_control(
+            optimized_messages, original_client_messages
+        )
+
         # Memory: inject context and tools for OpenAI requests.
         #
         # PR-A3 follow-up to A2: memory context now routes exclusively to
