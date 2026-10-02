@@ -15,11 +15,22 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from .compiler import Compiler, load_sources
 from .emit import render
+
+
+def tool_command(name: str, *arguments: str) -> list[str]:
+    """Return an executable argv, including Windows command shims."""
+    executable = shutil.which(name)
+    if executable is None:
+        raise SystemExit(f"Required conformance tool not available: {name}")
+    if os.name == "nt" and executable.lower().endswith((".cmd", ".bat")):
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", executable, *arguments]
+    return [executable, *arguments]
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -43,6 +54,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
     def reply(self, key):
         self.seen.append({"method": self.command, "path": self.path, "key": key})
+        if key == "slow":
+            time.sleep(0.25)
         status = 200; media = "application/json"
         value = {"hash": key, "original_content": '{"snake_case":"世界"}', "original_tokens": 100,
                  "original_item_count": 10, "compressed_item_count": 2, "tool_name": None,
@@ -60,7 +73,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if status == 302: self.send_header("Location", "/must-not-follow")
         self.end_headers()
         try: self.wfile.write(raw)
-        except (BrokenPipeError, ConnectionResetError): pass
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError): pass
 
 
 def write_tree(root, files):
@@ -132,7 +145,7 @@ func TestPresenceStates(t *testing.T) {
 }
 ''', encoding="utf-8")
     subprocess.run(["go", "test", "-v", "./..."], cwd=root / "go", env=env, check=True)
-    subprocess.run(["tsc", "-p", str(root / "typescript/tsconfig.json"), "--outDir", str(root / "tsbuild")], env=env, check=True)
+    subprocess.run(tool_command("tsc", "-p", str(root / "typescript/tsconfig.json"), "--outDir", str(root / "tsbuild")), env=env, check=True)
     print("Optional/nullable generated-model compile and Go roundtrip checks passed", flush=True)
 
 
@@ -140,7 +153,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd()); parser.add_argument("--fixture", action="store_true")
     args = parser.parse_args(); root = args.root.resolve()
-    for binary in ("node", "tsc", "go"):
+    for binary in ("node", "tsc", "go", "cargo", "dotnet"):
         if not shutil.which(binary): raise SystemExit(f"Required conformance tool not available: {binary}")
     config = json.loads((root / "sdk/codegen/config.json").read_text())
     files = render(Compiler(load_sources(root, config["fixture_sources" if args.fixture else "sources"])).compile())
@@ -154,19 +167,45 @@ def main():
             output = Path(td) / "pilot"; write_tree(output, files)
             python_tests(output, url)
             tsbuild = Path(td) / "typescript-build"
-            subprocess.run(["tsc", "-p", str(output / "typescript/tsconfig.json"), "--outDir", str(tsbuild)], env=env, check=True)
+            subprocess.run(tool_command("tsc", "-p", str(output / "typescript/tsconfig.json"), "--outDir", str(tsbuild)), env=env, check=True)
             (tsbuild / "package.json").write_text('{"type":"module"}\n')
             subprocess.run(["node", str(root / "tests/sdkgen/typescript_wire_test.mjs"), str(tsbuild)], env=env, check=True)
             shutil.copyfile(root / "tests/sdkgen/go_wire_test.go", output / "go/wire_test.go")
             subprocess.run(["go", "test", "-v", "./..."], cwd=output / "go", env=env, check=True)
             subprocess.run(["go", "vet", "./..."], cwd=output / "go", env=env, check=True)
+            rust_tests = output / "rust/tests"
+            rust_tests.mkdir(parents=True)
+            shutil.copyfile(root / "tests/sdkgen/rust_wire_test.rs", rust_tests / "wire.rs")
+            rust_env = {**env, "CARGO_TARGET_DIR": str(Path(td) / "rust-target")}
+            subprocess.run(
+                ["cargo", "test", "--manifest-path", str(output / "rust/Cargo.toml"), "--locked"],
+                env=rust_env,
+                check=True,
+            )
+            dotnet_tests = Path(td) / "dotnet-wire"
+            shutil.copytree(root / "tests/sdkgen/dotnet_wire", dotnet_tests)
+            project = dotnet_tests / "Headroom.GeneratedPilot.WireTests.csproj"
+            project.write_text(
+                project.read_text(encoding="utf-8").replace(
+                    "../../../sdk/generated-pilot/dotnet/Headroom.GeneratedPilot.csproj",
+                    (output / "dotnet/Headroom.GeneratedPilot.csproj").as_posix(),
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "dotnet", "run", "--project", str(project), "--configuration", "Release",
+                    "--artifacts-path", str(Path(td) / "dotnet-artifacts"),
+                ],
+                env=env,
+                check=True,
+            )
             optional_model_tests(Path(td) / "presence", env)
             assert all("must-not-follow" not in request["path"] for request in FixtureHandler.seen)
-            print(f"PASS: three-language conformance; {len(FixtureHandler.seen)} observed HTTP requests; no provider calls", flush=True)
+            print(f"PASS: five-language conformance; {len(FixtureHandler.seen)} observed HTTP requests; no provider calls", flush=True)
     finally:
         server.shutdown(); server.server_close(); worker.join(timeout=5)
 
 
 if __name__ == "__main__":
     main()
-

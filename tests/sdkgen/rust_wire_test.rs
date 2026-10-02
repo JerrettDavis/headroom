@@ -1,10 +1,15 @@
 use headroom_generated_pilot::{Client, Error, Options, RetrieveRequest};
 use serde_json::{Map, Value};
+use std::time::Duration;
 
 fn client() -> Client {
+    client_with(Options::default())
+}
+
+fn client_with(options: Options) -> Client {
     Client::new(
         &std::env::var("HEADROOM_WIRE_TEST_URL").expect("HEADROOM_WIRE_TEST_URL"),
-        Options::default(),
+        options,
     )
     .expect("valid fixture URL")
 }
@@ -47,4 +52,72 @@ async fn http_error_retains_body_without_displaying_it() {
         }
         other => panic!("expected API error, got {other}"),
     }
+}
+
+#[tokio::test]
+async fn malformed_redirect_and_bounded_responses_fail_closed() {
+    for key in ["missing_field", "wrong_type", "notjson"] {
+        let error = client()
+            .retrieve(&RetrieveRequest {
+                hash: key.into(),
+                additional_properties: Map::new(),
+            })
+            .await
+            .expect_err("malformed response must fail");
+        assert!(matches!(error, Error::Protocol(_)), "unexpected error: {error}");
+    }
+
+    let wide = client()
+        .retrieve(&RetrieveRequest {
+            hash: "unsafe_int".into(),
+            additional_properties: Map::new(),
+        })
+        .await
+        .expect("i64 wire value is supported");
+    assert_eq!(wide.original_tokens, 9_007_199_254_740_993);
+
+    let redirect = client()
+        .retrieve(&RetrieveRequest {
+            hash: "redirect".into(),
+            additional_properties: Map::new(),
+        })
+        .await
+        .expect_err("redirect must not be followed");
+    assert!(matches!(redirect, Error::API(error) if error.status == 302));
+
+    let bounded = client_with(Options {
+        timeout: Duration::from_secs(30),
+        max_response_bytes: 16,
+    });
+    let oversized = bounded
+        .retrieve(&RetrieveRequest {
+            hash: "ok".into(),
+            additional_properties: Map::new(),
+        })
+        .await
+        .expect_err("oversized response must fail");
+    assert!(matches!(oversized, Error::Protocol(_)));
+}
+
+#[tokio::test]
+async fn invalid_paths_base_urls_and_timeout_fail_closed() {
+    let dot = client().retrieve_get("..").await.expect_err("dot segment must fail");
+    assert!(matches!(dot, Error::Protocol(_)));
+
+    for base in ["file:///tmp", "http://user:pass@localhost", "http://localhost/?secret=1"] {
+        assert!(Client::new(base, Options::default()).is_err(), "accepted {base}");
+    }
+
+    let timed = client_with(Options {
+        timeout: Duration::from_millis(50),
+        max_response_bytes: 1024,
+    });
+    let timeout = timed
+        .retrieve(&RetrieveRequest {
+            hash: "slow".into(),
+            additional_properties: Map::new(),
+        })
+        .await
+        .expect_err("slow response must time out");
+    assert!(matches!(timeout, Error::Transport(_)));
 }

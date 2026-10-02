@@ -63,3 +63,13 @@
 - GREEN: generated-output tests passed; `dotnet build` completed with zero warnings/errors; the executable model test accepted explicit-null `tool_name`, rejected omission, and preserved an unknown nested field.
 - `dotnet format --verify-no-changes` formatted 0 of 6 files. Its local `bin`/`obj` build artifacts were removed after an exact `git clean -ndx` preview; all later .NET commands use an external artifacts directory to keep generated ownership exact.
 - Source drift checking now matches 30 generated files byte-for-byte.
+
+## 2026-10-01 — Task 6: Five-Language Wire Conformance
+
+- Extended the shared loopback harness to require Node/TypeScript, Go, Cargo/Rust, and .NET and to execute all five generated clients against the same HTTP fixture.
+- Added a cross-platform tool launcher so Windows `.cmd` shims such as `tsc.cmd` run without a shell-dependent failure.
+- Rust and .NET now exercise successful POST/GET exchange, required-nullable fields, Unicode and reserved path characters, unknown response fields, retained raw HTTP errors, malformed/non-JSON response rejection, wide integers, redirect blocking, bounded reads, invalid base URLs, dot-segment rejection, and timeout/cancellation.
+- Added a delayed fixture response so cancellation/timeout behavior is exercised rather than merely compiled. Client disconnects are treated as expected fixture behavior without noisy server tracebacks.
+- RED: the original harness stopped at Python because Windows could locate but not execute the `tsc.cmd` shim directly. The first timeout run also exposed an uncaught Windows `ConnectionAbortedError` in the fixture server.
+- GREEN: the conformance command completed successfully for Python, TypeScript, Go, Rust, and .NET; it observed 47 loopback requests, followed no redirect, and made no provider calls.
+- The exact TypeScript 5.8.3 compiler was installed in a temporary tool directory for local qualification; no repository dependency or generated artifact was changed by that installation.

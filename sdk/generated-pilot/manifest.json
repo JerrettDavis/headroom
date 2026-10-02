@@ -32,7 +32,7 @@
     "typescript/tsconfig.json": "ec00519c4c98c24be051bc798f754bcea9395f7d41b87f7e6aef91399cc7b13d"
   },
   "format_version": 1,
-  "generator_inputs_sha256": "f1c39788a6005fd28cc9c144175718bb0c57fbf3c7ea038840b3f2934fa46047",
+  "generator_inputs_sha256": "a5eae7380c1ac1243e2bb20779aff02c46b245101d2ac086bad27d989eacbe7b",
   "generator_version": "0.1.0",
   "schema_sha256": "d4f19c37e89c76921c00e6f14654a18991f387261496e077d45fcc378d841195"
 }
