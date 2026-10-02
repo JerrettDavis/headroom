@@ -183,13 +183,13 @@ from headroom.proxy.rate_limiter import TokenBucketRateLimiter  # noqa: F401
 from headroom.proxy.request_body_limit import RequestBodyLimitMiddleware
 from headroom.proxy.request_logger import RequestLogger  # noqa: F401
 from headroom.proxy.savings_tracker import LITELLM_AVAILABLE
-from headroom.proxy.semantic_cache import SemanticCache  # noqa: F401
 from headroom.proxy.sdk_contracts import (
     RetrievalError,
     RetrieveRequest,
     RetrieveResponse,
     sdk_operation,
 )
+from headroom.proxy.semantic_cache import SemanticCache  # noqa: F401
 from headroom.proxy.ssl_context import (
     build_httpx_verify,
     describe_trust_policy,

@@ -33,7 +33,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/headroom-sdkgen-rust-target
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
     steps:
@@ -68,6 +67,8 @@ jobs:
           python -m tools.sdkgen check
           python -m unittest discover -s tests/sdkgen -p 'test_*.py' -v
       - name: Verify native generated clients
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/headroom-sdkgen-rust-target
         run: |
           cargo test --manifest-path sdk/generated-pilot/rust/Cargo.toml --locked
           cargo clippy --manifest-path sdk/generated-pilot/rust/Cargo.toml --locked -- -D warnings

@@ -62,8 +62,7 @@ A build-time marker identifies reviewed operations:
     access="loopback-same-origin",
     errors={400: RetrievalError, 404: RetrievalError},
 )
-async def ccr_retrieve(request: Request):
-    ...  # existing body unchanged
+async def ccr_retrieve(request: Request): ...  # existing body unchanged
 ```
 
 `@sdk_operation` returns the exact same function object. It does not wrap the handler, register routes, validate bodies, alter annotations, or set FastAPI's `response_model`. This is intentional: adding a return annotation alone can change FastAPI response validation and filtering. The generation proposal must not silently change production behavior as a side effect of adding metadata.
