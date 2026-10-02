@@ -3,10 +3,11 @@
 The marker returns the original handler unchanged: it does not wrap, validate,
 register, or alter FastAPI response_model behavior. tools.sdkgen reads its AST.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeVar, TypedDict
+from typing import Any, TypedDict, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -20,8 +21,10 @@ def sdk_operation(
     errors: dict[int, type] | None = None,
 ) -> Callable[[F], F]:
     """Declare a reviewed wire contract without changing the decorated handler."""
+
     def mark(function: F) -> F:
         return function
+
     return mark
 
 
@@ -42,4 +45,3 @@ class RetrieveResponse(TypedDict):
 
 class RetrievalError(TypedDict):
     detail: str
-

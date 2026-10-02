@@ -73,3 +73,20 @@
 - RED: the original harness stopped at Python because Windows could locate but not execute the `tsc.cmd` shim directly. The first timeout run also exposed an uncaught Windows `ConnectionAbortedError` in the fixture server.
 - GREEN: the conformance command completed successfully for Python, TypeScript, Go, Rust, and .NET; it observed 47 loopback requests, followed no redirect, and made no provider calls.
 - The exact TypeScript 5.8.3 compiler was installed in a temporary tool directory for local qualification; no repository dependency or generated artifact was changed by that installation.
+
+## 2026-10-01 — Task 7: Delivery Qualification
+
+- Added an additive GitHub Actions workflow with read-only contents permission, path filtering, concurrency cancellation, a 20-minute timeout, exact action commits, and pinned Python, Node/TypeScript, Go, Rust, .NET, Ruff, and mypy versions.
+- Updated the architecture and codegen documentation for five generated languages and recorded both CI-target and locally tested tool versions.
+- Added a draft-PR body that states the experimental two-operation scope, safety semantics, evidence, limitations, and absence of publication or facade replacement.
+- Repository static validation: Ruff format check clean across 15 handwritten files; Ruff lint clean; mypy clean across 12 generator source files; `git diff --check` clean.
+- Generation validation: 30 managed files matched byte-for-byte after formatting/regeneration; 47 compiler/ownership/handler tests passed.
+- Native validation: five-language conformance passed over 47 loopback requests; Rust Clippy passed with warnings denied; .NET Release build produced zero warnings/errors; Go vet passed.
+- Focused production integration: all 5 retrieval-history repair tests passed. The wider two-file CCR run passed 19 tests and failed only `TestCCREdgeCases.test_ccr_disabled_no_caching` because the temporary Python 3.12 environment could not load the prebuilt `headroom._core` native DLL; that test does not exercise SDK generation or retrieval metadata.
+- Ruff initially found 11 inherited bundle files needing formatting and two loop-variable lambda bindings; both were corrected before regeneration. Mypy initially found 18 type issues and finished clean after explicit narrowing/annotations.
+
+## Draft PR Readiness
+
+- Code, generated artifacts, CI, design, plan, progress log, and PR notes are present in the detached worktree.
+- Remaining external steps: attach commits to a named branch, push the intended remote, open the draft PR, and observe hosted CI.
+- No merge or package publication has been performed.

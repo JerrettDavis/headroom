@@ -4,6 +4,7 @@ Bodies transcribed from server.py at c46e74d06b5ffa9643f420f28d2da6686fb7e487.
 This is not a full proxy checkout; integration tests isolate these handler ASTs.
 The full-source gate selects the real server.py when applied to Headroom.
 """
+
 # ruff: noqa: F821 -- deliberately non-importable AST-only source fixture
 from headroom.proxy.sdk_contracts import (
     RetrievalError,
@@ -90,4 +91,3 @@ def install_routes(app):
                 store.get_entry_status(hash_key, clean_expired=True)
             ),
         )
-

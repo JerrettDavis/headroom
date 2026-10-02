@@ -15,7 +15,7 @@ python -m tools.sdkgen diff old-openapi.json sdk/generated-pilot/openapi.json
 
 Use `--fixture` on generate/check/conformance only in the standalone delivered bundle. Source mode is the default and fails rather than silently using fixtures. The unit tests automatically prefer the actual `headroom/proxy/server.py` when present. Inventory is a candidate report, not a complete route-graph or public-API coverage certification.
 
-The compiler uses only the Python standard library; Python 3.11+ is needed. The additive metadata module is compatible with Python 3.10 syntax. Conformance additionally needs Go 1.23+, Node 22+, and the TypeScript compiler. See `toolchain.lock.json` for the exact tools actually tested and pinned in the proposed workflow. No provider credentials, network downloads during generation, npm dependencies, or proxy startup are needed to generate the committed snapshots.
+The compiler uses only the Python standard library; Python 3.11+ is needed. The additive metadata module is compatible with Python 3.10 syntax. Conformance additionally needs Go, Node and TypeScript, Rust/Cargo, and the .NET SDK. See `toolchain.lock.json` for exact local and CI tool versions. No provider credentials, network downloads during generation, or proxy startup are needed to generate the committed snapshots. Native dependency downloads occur only when compiling the Rust client for the first time.
 
 ## Scope and ownership
 
@@ -35,7 +35,6 @@ The mature implementation can substitute qualified, pinned OpenAPI Generator bac
 
 ## Tests before a draft PR
 
-Run repository-pinned Ruff checks and formatting, regeneration, then the compiler and conformance tests. Repository Ruff 0.16.8 and mypy gates were inspected but their executables were not available in the delivery environment; their successful execution is a remaining qualification gate, not an asserted result. If formatting changes generator/runtime source, regenerate before `check` because input hashes deliberately change.
+Run repository-pinned Ruff and mypy checks, regenerate, and then run compiler and five-language conformance tests. The checked-in workflow performs all of these gates with pinned tools. If formatting changes generator or runtime source, regenerate before `check` because input hashes deliberately change.
 
 After these isolated tests, run the project's supported full proxy and existing SDK suites. Validate middleware, same-origin/loopback enforcement, application startup, supported Python versions and the actual CI workflows before declaring the feature production-ready.
-

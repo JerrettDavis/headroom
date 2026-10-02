@@ -11,11 +11,44 @@ from ..emit import operations, without_null
 
 HERE = Path(__file__).resolve().parents[1]
 RUST_KEYWORDS = {
-    "as", "break", "const", "continue", "crate", "else", "enum", "extern",
-    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
-    "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
-    "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async",
-    "await", "dyn",
+    "as",
+    "break",
+    "const",
+    "continue",
+    "crate",
+    "else",
+    "enum",
+    "extern",
+    "false",
+    "fn",
+    "for",
+    "if",
+    "impl",
+    "in",
+    "let",
+    "loop",
+    "match",
+    "mod",
+    "move",
+    "mut",
+    "pub",
+    "ref",
+    "return",
+    "self",
+    "Self",
+    "static",
+    "struct",
+    "super",
+    "trait",
+    "true",
+    "type",
+    "unsafe",
+    "use",
+    "where",
+    "while",
+    "async",
+    "await",
+    "dyn",
 }
 
 
@@ -25,7 +58,7 @@ def rust_ident(value: str) -> str:
 
 def rust_type(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
-        return schema["$ref"].rsplit("/", 1)[1]
+        return str(schema["$ref"]).rsplit("/", 1)[1]
     if "anyOf" in schema:
         return f"Option<{rust_type(without_null(schema))}>"
     kind = schema.get("type")
@@ -73,11 +106,11 @@ def emit_models(models: dict[str, Any]) -> bytes:
         "use serde_json::{Map, Value};",
         "",
         "fn take_required(object: &mut Map<String, Value>, name: &str) -> Result<Value, String> {",
-        "    object.remove(name).ok_or_else(|| format!(\"missing required field {name}\"))",
+        '    object.remove(name).ok_or_else(|| format!("missing required field {name}"))',
         "}",
         "",
         "fn decode<T: DeserializeOwned>(value: Value, name: &str) -> Result<T, String> {",
-        "    serde_json::from_value(value).map_err(|error| format!(\"invalid field {name}: {error}\"))",
+        '    serde_json::from_value(value).map_err(|error| format!("invalid field {name}: {error}"))',
         "}",
         "",
     ]
@@ -88,7 +121,10 @@ def emit_models(models: dict[str, Any]) -> bytes:
             field_type = rust_type(field_schema)
             if field not in required:
                 field_type = f"Option<{field_type}>"
-            lines += [f"    #[serde(rename = {json.dumps(field)})]", f"    pub {rust_ident(field)}: {field_type},"]
+            lines += [
+                f"    #[serde(rename = {json.dumps(field)})]",
+                f"    pub {rust_ident(field)}: {field_type},",
+            ]
         lines += [
             "    #[serde(flatten)]",
             "    pub additional_properties: Map<String, Value>,",
@@ -101,7 +137,7 @@ def emit_models(models: dict[str, Any]) -> bytes:
         for field, field_schema in schema["properties"].items():
             expression = decode_expression(field, field_schema, field in required)
             lines.append(f"        let {rust_ident(field)} = {expression};")
-        lines += [f"        Ok(Self {{"]
+        lines += ["        Ok(Self {"]
         for field in schema["properties"]:
             lines.append(f"            {rust_ident(field)},")
         lines += ["            additional_properties: object,", "        })", "    }", "}", ""]
@@ -113,10 +149,10 @@ def emit_models(models: dict[str, Any]) -> bytes:
             "",
             "    #[test]",
             "    fn required_nullable_accepts_null_and_rejects_omission() {",
-            "        let valid = r#\"{\"hash\":\"h\",\"original_content\":\"x\",\"original_tokens\":1,\"original_item_count\":1,\"compressed_item_count\":1,\"tool_name\":null,\"retrieval_count\":1}\"#;",
-            "        let parsed: RetrieveResponse = serde_json::from_str(valid).expect(\"explicit null is valid\");",
+            '        let valid = r#"{"hash":"h","original_content":"x","original_tokens":1,"original_item_count":1,"compressed_item_count":1,"tool_name":null,"retrieval_count":1}"#;',
+            '        let parsed: RetrieveResponse = serde_json::from_str(valid).expect("explicit null is valid");',
             "        assert_eq!(parsed.tool_name, None);",
-            "        let missing = r#\"{\"hash\":\"h\",\"original_content\":\"x\",\"original_tokens\":1,\"original_item_count\":1,\"compressed_item_count\":1,\"retrieval_count\":1}\"#;",
+            '        let missing = r#"{"hash":"h","original_content":"x","original_tokens":1,"original_item_count":1,"compressed_item_count":1,"retrieval_count":1}"#;',
             "        assert!(serde_json::from_str::<RetrieveResponse>(missing).is_err());",
             "    }",
             "}",
@@ -149,13 +185,21 @@ def emit_client(document: dict[str, Any]) -> bytes:
             f"        let {'mut ' if operation['params'] else ''}path = {json.dumps(operation['path'])}.to_owned();",
         ]
         for param in operation["params"]:
-            lines.append(f"        path = path.replace({json.dumps('{' + param + '}')}, &path_segment({rust_ident(param)})?);")
+            lines.append(
+                f"        path = path.replace({json.dumps('{' + param + '}')}, &path_segment({rust_ident(param)})?);"
+            )
         method = operation["method"].upper()
         if operation["request"]:
-            lines.append(f"        self.transport.request(Method::{method}, &path, Some(body)).await")
+            lines.append(
+                f"        self.transport.request(Method::{method}, &path, Some(body)).await"
+            )
         else:
-            lines.append(f"        self.transport.request::<(), _>(Method::{method}, &path, None).await")
-        lines += ["    }",]
+            lines.append(
+                f"        self.transport.request::<(), _>(Method::{method}, &path, None).await"
+            )
+        lines += [
+            "    }",
+        ]
     lines += ["}"]
     return ("\n".join(lines) + "\n").encode()
 

@@ -14,12 +14,16 @@ HERE = Path(__file__).resolve().parents[1]
 
 def cs_ident(value: str) -> str:
     identifier = pascal(value)
-    return f"@{identifier}" if identifier in {"Class", "Namespace", "Event", "Params", "String"} else identifier
+    return (
+        f"@{identifier}"
+        if identifier in {"Class", "Namespace", "Event", "Params", "String"}
+        else identifier
+    )
 
 
 def cs_type(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
-        return schema["$ref"].rsplit("/", 1)[1]
+        return str(schema["$ref"]).rsplit("/", 1)[1]
     if "anyOf" in schema:
         base = cs_type(without_null(schema))
         return base if base.endswith("?") else f"{base}?"
@@ -79,7 +83,9 @@ def emit_models(models: dict[str, Any]) -> bytes:
             field_type = cs_type(field_schema)
             prefix = "required " if field in required else ""
             if field not in required:
-                base = cs_type(without_null(field_schema)) if "anyOf" in field_schema else field_type
+                base = (
+                    cs_type(without_null(field_schema)) if "anyOf" in field_schema else field_type
+                )
                 field_type = f"Optional<{base}>"
                 lines.append("    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]")
             lines += [
@@ -106,7 +112,7 @@ def emit_client(document: dict[str, Any]) -> bytes:
         "public sealed class Client : IDisposable",
         "{",
         "    private readonly Transport transport;",
-        "    public Client(string baseUrl = \"http://localhost:8787\", ClientOptions? options = null) =>",
+        '    public Client(string baseUrl = "http://localhost:8787", ClientOptions? options = null) =>',
         "        transport = new Transport(baseUrl, options ?? ClientOptions.Default);",
     ]
     for operation in operations(document):
@@ -121,13 +127,21 @@ def emit_client(document: dict[str, Any]) -> bytes:
             f"        var path = {json.dumps(operation['path'])};",
         ]
         for param in operation["params"]:
-            lines.append(f"        path = path.Replace({json.dumps('{' + param + '}')}, Transport.PathSegment({param}), StringComparison.Ordinal);")
+            lines.append(
+                f"        path = path.Replace({json.dumps('{' + param + '}')}, Transport.PathSegment({param}), StringComparison.Ordinal);"
+            )
         method = operation["method"].capitalize()
         if operation["request"]:
-            lines.append(f"        return await transport.SendAsync<{operation['request']}, {operation['response']}>(HttpMethod.{method}, path, body, true, cancellationToken).ConfigureAwait(false);")
+            lines.append(
+                f"        return await transport.SendAsync<{operation['request']}, {operation['response']}>(HttpMethod.{method}, path, body, true, cancellationToken).ConfigureAwait(false);"
+            )
         else:
-            lines.append(f"        return await transport.SendAsync<object, {operation['response']}>(HttpMethod.{method}, path, null, false, cancellationToken).ConfigureAwait(false);")
-        lines += ["    }",]
+            lines.append(
+                f"        return await transport.SendAsync<object, {operation['response']}>(HttpMethod.{method}, path, null, false, cancellationToken).ConfigureAwait(false);"
+            )
+        lines += [
+            "    }",
+        ]
     lines += ["", "    public void Dispose() => transport.Dispose();", "}"]
     return ("\n".join(lines) + "\n").encode()
 

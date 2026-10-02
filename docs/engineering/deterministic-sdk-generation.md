@@ -21,7 +21,9 @@ flowchart TD
     F --> G[Python bindings]
     F --> H[TypeScript bindings]
     F --> I[Go bindings]
-    F -. qualified later .-> J[Java / .NET / Rust]
+    F --> J[Rust bindings]
+    F --> K2[.NET bindings]
+    F -. qualified later .-> J2[Java]
     K[Handwritten transport kernels] --> G
     K --> H
     K --> I
@@ -119,7 +121,7 @@ Keep three distinct checks:
 
 The included `diff` command conservatively flags removed/renamed operations as breaking and other semantic changes for review. It ignores documentation-only changes. It is not a complete JSON-Schema inclusion solver and must not label arbitrary schema edits automatically safe. Request acceptance and response production have different variance rules; enum expansion, nullable changes, unknown-field behavior, and language identifier stability need directional review.
 
-The delivered tests execute isolated handler bodies and a real loopback HTTP mock in three languages. After installation, handler tests select the actual repository handler ASTs instead of transcribed fixtures. Neither mode starts the full proxy. Before merging or releasing, run the repository's lint/type gates, complete proxy tests, and genuine FastAPI/middleware/lifecycle conformance in the project's supported environment.
+The delivered tests execute isolated handler bodies and a real loopback HTTP mock in Python, TypeScript, Go, Rust, and .NET. After installation, handler tests select the actual repository handler ASTs instead of transcribed fixtures. Neither mode starts the full proxy. Before merging or releasing, run the repository's lint/type gates, complete proxy tests, and genuine FastAPI/middleware/lifecycle conformance in the project's supported environment.
 
 The additive CI proposal uses `pull_request`, read-only contents permissions, no secrets, and no publication. It runs source-mode generation checks, unit tests, compilation, Go vet, and mock-wire conformance. It does not require contributors to trigger CI manually. The generated Python directory has a generated Ruff exclusion because its bytes belong to the compiler; handwritten source/templates remain subject to repository lint. Existing CI gates are not disabled.
 
@@ -127,11 +129,11 @@ The additive CI proposal uses `pull_request`, read-only contents permissions, no
 
 | Phase | Deliverable | Acceptance gate |
 |---|---|---|
-| 1 — this bundle | CCR POST/GET pilot; Python/TypeScript/Go; compiler, kernels, tests, guarded installer | Offline tests plus repository review after installation |
+| 1 — this pilot | CCR POST/GET; Python/TypeScript/Go/Rust/.NET; compiler, kernels, tests, guarded integration | Five-language loopback tests plus repository review |
 | 2 — native API typing | Compression, usage, reporting; request/response DTO adapters; complete visibility ledger | Real route graph and wire fixtures; no implicit Any |
 | 3 — facade integration | Existing TypeScript API and PR #405 Go API delegate to generated internals | Public API compatibility tests; no contributor logic rewrite |
 | 4 — provider transports | Explicit pass-through, SSE and WebSocket capability profiles | Cancellation, partial frames, backpressure, error-after-headers, auth and retry tests |
-| 5 — more languages/release | Qualified .NET/Java/Rust generators, docs and publish pipelines | Backend capability matrix, pinned dependencies, release provenance and package tests |
+| 5 — release | Java qualification plus docs and publish pipelines for selected SDKs | Backend capability matrix, pinned dependencies, release provenance and package tests |
 
 Do not make the Go contributor rebuild their whole PR around this architecture before accepting useful work. Review the current PR on its merits, preserve its public facade, and migrate its wire layer incrementally. The experimental output lives at `sdk/generated-pilot`; it neither replaces `sdk/typescript` nor modifies `sdk/golang`.
 
@@ -150,4 +152,3 @@ The reference emitters deliberately cover a bounded portable subset. For broad l
 - FastAPI response processing: https://fastapi.tiangolo.com/tutorial/response-model/
 - Pydantic JSON Schema adapters: https://docs.pydantic.dev/latest/concepts/json_schema/
 - OpenAPI Generator customization: https://openapi-generator.tech/docs/customization/
-
