@@ -26,3 +26,12 @@
 5. Enforce five-language behavioral conformance.
 6. Add CI, repository qualification, and draft-PR notes.
 
+## 2026-10-01 — Task 2: Ownership and Determinism
+
+- Added explicit generated-path validation for absolute paths, parent traversal, Windows drive syntax, backslash aliases, and non-byte emitter output.
+- Generation now stages every output before removing stale managed files. A forced staging failure proved an existing stale managed file remains intact.
+- Added checks that drift detection is read-only, symlinked output is rejected, and separate output roots are byte-identical.
+- RED: unsafe paths failed with a missing validation interface, and a forced temporary-file staging error removed `stale.txt` before the fix.
+- GREEN: `OwnershipTests` and `DeterminismTests` passed all 5 cases.
+- Generated the real current-source snapshot under `sdk/generated-pilot`.
+- Validation: source `generate` emitted 20 files; source `check` matched all 20 byte-for-byte; the complete SDK generator suite passed 42 tests.

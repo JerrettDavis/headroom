@@ -4,10 +4,27 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .compiler import Compiler, ContractError, canonical, load_sources
 from .emit import render
+
+
+def validate_output_paths(generated: dict[str, bytes]) -> None:
+    """Reject generated names that could escape or alias the output tree."""
+    for relative, content in generated.items():
+        path = PurePosixPath(relative)
+        if (
+            not relative
+            or "\\" in relative
+            or path.is_absolute()
+            or ".." in path.parts
+            or path.as_posix() != relative
+            or ":" in path.parts[0]
+        ):
+            raise ContractError(f"Unsafe generated output path: {relative}")
+        if not isinstance(content, bytes):
+            raise ContractError(f"Generated output must be bytes: {relative}")
 
 
 def compare(before: dict, after: dict) -> list[dict[str, str]]:
@@ -66,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             print(canonical(report).decode(), end="")
             return 2 if args.strict and (report["unresolved"] or any(not r["exported"] for r in report["routes"])) else 0
         generated = render(compiler.compile())
+        validate_output_paths(generated)
         out = args.out.resolve() if args.out else root / config["output"]
         if out == root or root.is_relative_to(out):
             raise ContractError("Output directory must not be the repository or its parent")
@@ -89,13 +107,22 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"PASS: {len(generated)} generated files match byte-for-byte ({'fixture' if args.fixture else 'source'} mode)")
             return 0
+        staged: list[tuple[Path, Path]] = []
+        try:
+            for relative, content in generated.items():
+                target = out / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temporary = target.with_suffix(target.suffix + ".sdkgen-tmp")
+                temporary.write_bytes(content)
+                staged.append((temporary, target))
+        except BaseException:
+            for temporary, _target in staged:
+                temporary.unlink(missing_ok=True)
+            raise
         for path in stale:
             existing[path].unlink()
-        for relative, content in generated.items():
-            target = out / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_suffix(target.suffix + ".sdkgen-tmp")
-            temporary.write_bytes(content); temporary.replace(target)
+        for temporary, target in staged:
+            temporary.replace(target)
         print(f"Generated {len(generated)} files under {out} ({'fixture' if args.fixture else 'source'} mode)")
         return 0
     except (ContractError, OSError, ValueError, KeyError) as exc:
@@ -105,4 +132,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

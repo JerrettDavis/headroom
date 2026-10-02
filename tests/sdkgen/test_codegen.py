@@ -18,6 +18,7 @@ import unittest
 from tools.sdkgen.compiler import Compiler, ContractError, canonical, load_sources
 from tools.sdkgen.emit import render
 from tools.sdkgen.__main__ import compare, main
+import tools.sdkgen.__main__ as cli
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = json.loads((ROOT / "sdk/codegen/config.json").read_text())
@@ -230,6 +231,66 @@ class SourceCompilerTests(unittest.TestCase):
             a = {p.relative_to(roots[0]).as_posix(): p.read_bytes() for p in roots[0].rglob("*") if p.is_file()}
             b = {p.relative_to(roots[1]).as_posix(): p.read_bytes() for p in roots[1].rglob("*") if p.is_file()}
             self.assertEqual(a, b)
+
+
+class OwnershipTests(unittest.TestCase):
+    def test_generated_paths_cannot_escape_output_root(self):
+        for path in ("../escape", "/absolute", "nested/../../escape", "C:/escape"):
+            with self.subTest(path=path), self.assertRaises(ContractError):
+                cli.validate_output_paths({path: b"unsafe"})
+
+    def test_check_does_not_modify_drifted_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            args = ["--root", str(ROOT), "--fixture", "--out", td]
+            self.assertEqual(main(["generate", *args]), 0)
+            target = Path(td) / "python/client.py"
+            target.write_bytes(target.read_bytes() + b"# drift\n")
+            before = {p.relative_to(td).as_posix(): p.read_bytes() for p in Path(td).rglob("*") if p.is_file()}
+            self.assertEqual(main(["check", *args]), 1)
+            after = {p.relative_to(td).as_posix(): p.read_bytes() for p in Path(td).rglob("*") if p.is_file()}
+            self.assertEqual(after, before)
+
+    def test_stale_files_survive_failed_staging(self):
+        with tempfile.TemporaryDirectory() as td:
+            args = ["--root", str(ROOT), "--fixture", "--out", td]
+            self.assertEqual(main(["generate", *args]), 0)
+            root = Path(td)
+            stale = root / "stale.txt"
+            stale.write_text("owned stale file", encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["files"]["stale.txt"] = hashlib.sha256(stale.read_bytes()).hexdigest()
+            manifest_path.write_bytes(canonical(manifest))
+            (root / "python/client.py.sdkgen-tmp").mkdir()
+
+            self.assertEqual(main(["generate", *args]), 2)
+            self.assertEqual(stale.read_text(encoding="utf-8"), "owned stale file")
+
+    def test_symlinked_output_is_rejected_when_supported(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outside = root.parent / f"{root.name}-outside.txt"
+            outside.write_text("outside", encoding="utf-8")
+            try:
+                (root / "link.txt").symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+            try:
+                args = ["--root", str(ROOT), "--fixture", "--out", td]
+                self.assertEqual(main(["generate", *args]), 2)
+                self.assertEqual(outside.read_text(encoding="utf-8"), "outside")
+            finally:
+                outside.unlink(missing_ok=True)
+
+
+class DeterminismTests(unittest.TestCase):
+    def test_two_output_roots_are_byte_identical(self):
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
+            for target in (first, second):
+                self.assertEqual(main(["generate", "--root", str(ROOT), "--fixture", "--out", target]), 0)
+            first_files = {p.relative_to(first).as_posix(): p.read_bytes() for p in Path(first).rglob("*") if p.is_file()}
+            second_files = {p.relative_to(second).as_posix(): p.read_bytes() for p in Path(second).rglob("*") if p.is_file()}
+            self.assertEqual(first_files, second_files)
 
 
 class HandlerContractTests(unittest.TestCase):

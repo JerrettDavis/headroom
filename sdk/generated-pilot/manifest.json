@@ -1,0 +1,28 @@
+{
+  "canonical_json_profile": "headroom-json-v1",
+  "files": {
+    ".ruff.toml": "d40d1db057aeec2e95fbd8bfcb38f8e51912ed0eb6ad06987c2d5bec3fc24190",
+    "go/client.go": "7dd31fa14868b6c3affa115471ef6655b1793563aa05dc643e8670ddc06205b5",
+    "go/go.mod": "904ad7c765ccc5f229d388af9ea1258daed1ca20dcb93064a94298674d821c00",
+    "go/models.go": "a0887d96cc1d5c7b4e3ace96b0e88297038e8f193fe04c53771709c2be45f602",
+    "go/runtime.go": "c055cc2fd89a465be9493e4152dea3d187b0fac44314cd4583ae11b17d028442",
+    "go/schemas.json": "88be6e73b4693d227d4bdeb11a0f25861f3c4ac53abd2659d3e8bb63b82f194c",
+    "openapi.json": "d4f19c37e89c76921c00e6f14654a18991f387261496e077d45fcc378d841195",
+    "python/__init__.py": "1f6609752183ac3b71176749dcaaafc77de302fbf22b268e852c7211a5858227",
+    "python/client.py": "0300c717bba3b6a93a52b326c7e0e58dd132274218774fa7a2db6290f056240b",
+    "python/models.py": "3f68ebfa4547fa121f4d692a96a0ab3b49580b9f97e0ab968a51891269506622",
+    "python/runtime.py": "99fbbb9789d7b4920dd2d545c94d3e8875144b55ab909c45a3fe853a0bb90fc8",
+    "python/schemas.json": "88be6e73b4693d227d4bdeb11a0f25861f3c4ac53abd2659d3e8bb63b82f194c",
+    "typescript/client.ts": "fba2c84c95e63712c3e437d98d5ea3d42e6bc5baf03a08c48d80796275002493",
+    "typescript/index.ts": "8c3a874d6cb1e11fe0d55ced084c732260d7706679c0d96a38cea04d765c1889",
+    "typescript/models.ts": "8b525eea8e1c2ae51c0d033ed51bfd433233d13ca87ec9c2a8351080e06e7297",
+    "typescript/package.json": "035a848dace38ac8700ed5439acab89265897dac109c646c1af329584472b571",
+    "typescript/runtime.ts": "d09b7e56504771513b29a152f0f500c04bd637fd86cd27918a42e2183914b1c4",
+    "typescript/schemas.ts": "07357cb966e9bdaa9fe1699c6ce73e1c881e49ff211d239e7a463ffa38033244",
+    "typescript/tsconfig.json": "ec00519c4c98c24be051bc798f754bcea9395f7d41b87f7e6aef91399cc7b13d"
+  },
+  "format_version": 1,
+  "generator_inputs_sha256": "6101ba54b35983fcc9e0eec7e565e611f7b29b13ad98982909d977c2ec859298",
+  "generator_version": "0.1.0",
+  "schema_sha256": "d4f19c37e89c76921c00e6f14654a18991f387261496e077d45fcc378d841195"
+}
