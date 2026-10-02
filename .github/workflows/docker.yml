@@ -152,13 +152,21 @@ jobs:
 
       # BuildKit can load a valid GHA cache index whose backing blob has
       # since been evicted. The resulting lazy-copy 404 is fatal to cache
-      # import, so retry once without remote cache. A real build failure
-      # remains fatal on this uncached attempt.
+      # import. Use a fresh daemon for the retry so the failed builder's
+      # imported records cannot be selected from its local state.
+      - name: Set up clean Docker Buildx fallback
+        id: fallback-buildx
+        if: steps.bake.outcome == 'failure'
+        uses: docker/setup-buildx-action@v4
+
+      # A real build failure remains fatal on this uncached attempt.
       - name: Retry build without remote cache
         id: bake-fallback
         if: steps.bake.outcome == 'failure'
         uses: docker/bake-action@v7
         with:
+          builder: ${{ steps.fallback-buildx.outputs.name }}
+          no-cache: true
           files: |
             ./docker-bake.hcl
             cwd://${{ steps.meta.outputs.bake-file-labels }}

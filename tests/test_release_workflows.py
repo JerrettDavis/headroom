@@ -221,6 +221,7 @@ def test_docker_build_cache_failures_are_best_effort() -> None:
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "docker.yml").read_text())
     build_steps = workflow["jobs"]["docker-build"]["steps"]
     cached = next(step for step in build_steps if step.get("id") == "bake")
+    fallback_builder = next(step for step in build_steps if step.get("id") == "fallback-buildx")
     fallback = next(step for step in build_steps if step.get("id") == "bake-fallback")
     digest = next(step for step in build_steps if step.get("id") == "digest")
 
@@ -230,8 +231,12 @@ def test_docker_build_cache_failures_are_best_effort() -> None:
 
     assert cached["continue-on-error"] is True
     assert "ignore-error=true" in cache_to
+    assert fallback_builder["if"] == "steps.bake.outcome == 'failure'"
+    assert fallback_builder["uses"] == "docker/setup-buildx-action@v4"
     assert fallback["if"] == "steps.bake.outcome == 'failure'"
     assert fallback["uses"] == cached["uses"]
+    assert fallback["with"]["builder"] == "${{ steps.fallback-buildx.outputs.name }}"
+    assert fallback["with"]["no-cache"] is True
     assert not any(".cache-from=" in line for line in fallback_overrides)
     assert not any(".cache-to=" in line for line in fallback_overrides)
     assert (
