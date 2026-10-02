@@ -13,6 +13,12 @@
     "python/models.py": "3f68ebfa4547fa121f4d692a96a0ab3b49580b9f97e0ab968a51891269506622",
     "python/runtime.py": "99fbbb9789d7b4920dd2d545c94d3e8875144b55ab909c45a3fe853a0bb90fc8",
     "python/schemas.json": "88be6e73b4693d227d4bdeb11a0f25861f3c4ac53abd2659d3e8bb63b82f194c",
+    "rust/Cargo.lock": "2dbb70e7b26ff81a28bb93eb7aafba172ac4b8feb0aedbc06746de694e147ee8",
+    "rust/Cargo.toml": "4dd88a713e992e9a347d89cc92fa1dd05f2d9382129cfafacd893b6ac9ff4e3f",
+    "rust/src/client.rs": "6aec70c10db229491c3c712acc12fd0351e17522eb3e93f7ab0847a92f302121",
+    "rust/src/lib.rs": "d1b82e0a434ae2a4e3abfc33a599b5106cf9641e94129e6dd9ca984d8be6ba36",
+    "rust/src/models.rs": "5cc059b4487f08986a3eab59754ce5ba401589d62ded98bfe490ce5750e95fbf",
+    "rust/src/runtime.rs": "4f1badb74a5175ca1bb8bd131936ff27ad9f939d520cc29fc382edc2b2218542",
     "typescript/client.ts": "fba2c84c95e63712c3e437d98d5ea3d42e6bc5baf03a08c48d80796275002493",
     "typescript/index.ts": "8c3a874d6cb1e11fe0d55ced084c732260d7706679c0d96a38cea04d765c1889",
     "typescript/models.ts": "8b525eea8e1c2ae51c0d033ed51bfd433233d13ca87ec9c2a8351080e06e7297",
@@ -22,7 +28,7 @@
     "typescript/tsconfig.json": "ec00519c4c98c24be051bc798f754bcea9395f7d41b87f7e6aef91399cc7b13d"
   },
   "format_version": 1,
-  "generator_inputs_sha256": "15f759ba49d15cc1d66615c11c968fcde6d7716a94f8814bff2e4bcb50568a70",
+  "generator_inputs_sha256": "cf8bfb0159542f49cfc36b4cd9370b9ef56cdf48bbab02430e1aefd1a2500688",
   "generator_version": "0.1.0",
   "schema_sha256": "d4f19c37e89c76921c00e6f14654a18991f387261496e077d45fcc378d841195"
 }

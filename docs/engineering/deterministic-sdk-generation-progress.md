@@ -44,3 +44,13 @@
 - GREEN: the collision test passed and the full suite reached 43 passing tests.
 - Adding emitter modules intentionally changed only `manifest.json` because generator input provenance includes Python source files. Regeneration left all language artifact bytes unchanged, and source drift checking matched all 20 files.
 - The proven legacy emission bodies remain in `emit.py` behind the new adapters for this pilot; Rust and .NET use the stable adapter interface directly.
+
+## 2026-10-01 — Task 4: Rust Generation
+
+- Added deterministic Rust 2021 generation with Serde wire models, manual presence-aware deserialization, unknown-field preservation, async Reqwest client bindings, pinned direct dependencies, and a generated Cargo lockfile.
+- The transport rejects non-HTTP base URLs and credentials/query/fragment components, disables redirects, applies a finite timeout, bounds streamed response bodies, performs no automatic retries, percent-encodes path segments, and retains status/headers/raw error bytes without including response bodies in display text.
+- Required-nullable fields remain `Option<T>` to callers while custom deserialization rejects omission. Generated unit coverage accepts explicit null and rejects a missing `tool_name`.
+- RED: Rust output tests initially failed because no Rust artifacts existed. Cargo then exposed the repository workspace-boundary requirement, and Clippy exposed an oversized error enum variant.
+- GREEN: generated model/runtime tests passed; Cargo compiled the async client with the committed lockfile; Clippy passed with warnings denied after boxing the API-error variant.
+- Rust build output is directed outside the managed generated tree so ownership checking remains exact. Generated Rust is compiler-owned and not rewritten by rustfmt; Cargo compilation and Clippy are the native static gates.
+- Added the Rust shared-wire test source for Task 6 loopback execution.

@@ -4,9 +4,10 @@
   "go": "1.23.2",
   "node": "22.16.0",
   "typescript": "5.8.3",
+  "rust": "1.95.0",
+  "rust_edition": "2021",
   "repository_ruff_required_but_not_executed": "0.16.8",
   "reviewed_main_sha": "c46e74d06b5ffa9643f420f28d2da6686fb7e487",
   "reviewed_pr_405_sha": "2851cbc964ac24d51e825361d23c857f671ffb8f",
-  "notes": "Generation is stdlib-only. npm installation in proposed CI is exact-version-pinned, not a complete digest-locked supply chain. Full proxy and supported-platform qualification remain required."
+  "notes": "Generation is stdlib-only. Language package dependencies are exact direct versions but this pilot is not a complete digest-locked supply chain. Full proxy and supported-platform qualification remain required."
 }
-

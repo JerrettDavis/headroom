@@ -306,6 +306,29 @@ class EmitterCompositionTests(unittest.TestCase):
             emit_module.render_with_emitters(compiler().compile(), (first, second))
 
 
+class RustEmitterTests(unittest.TestCase):
+    def setUp(self):
+        self.output = render(compiler().compile())
+
+    def test_models_preserve_wire_presence_and_unknown_fields(self):
+        models = self.output["rust/src/models.rs"].decode()
+        self.assertIn('#[serde(rename = "tool_name")]', models)
+        self.assertIn("pub tool_name: Option<String>", models)
+        self.assertIn("pub additional_properties: Map<String, Value>", models)
+        self.assertIn("required_nullable_accepts_null_and_rejects_omission", models)
+
+    def test_client_and_runtime_enforce_transport_policy(self):
+        client = self.output["rust/src/client.rs"].decode()
+        runtime = self.output["rust/src/runtime.rs"].decode()
+        self.assertIn("pub struct Client", client)
+        self.assertIn("pub async fn retrieve(", client)
+        self.assertIn("pub async fn retrieve_get(", client)
+        self.assertIn("pub struct APIError", runtime)
+        self.assertIn("Policy::none()", runtime)
+        self.assertIn("max_response_bytes", runtime)
+        self.assertNotIn("retry", runtime.lower())
+
+
 class HandlerContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

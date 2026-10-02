@@ -222,7 +222,8 @@ def render_with_emitters(document: dict[str, Any], emitters) -> dict[str, bytes]
                 raise ContractError(f"Emitter output path collision: {path}")
             output[path] = content
     inputs = {p.relative_to(HERE).as_posix(): digest(p.read_bytes()) for p in sorted(HERE.rglob("*"))
-              if p.is_file() and p.suffix in {".py", ".ts", ".go"} and "__pycache__" not in p.parts}
+              if p.is_file() and p.suffix in {".py", ".ts", ".go", ".rs", ".cs", ".lock"}
+              and "__pycache__" not in p.parts}
     manifest = {"format_version": 1, "generator_version": "0.1.0", "canonical_json_profile": "headroom-json-v1",
                 "schema_sha256": digest(output["openapi.json"]), "generator_inputs_sha256": digest(canonical(inputs)),
                 "files": {p: digest(data) for p, data in sorted(output.items())}}
