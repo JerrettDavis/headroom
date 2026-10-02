@@ -35,3 +35,12 @@
 - GREEN: `OwnershipTests` and `DeterminismTests` passed all 5 cases.
 - Generated the real current-source snapshot under `sdk/generated-pilot`.
 - Validation: source `generate` emitted 20 files; source `check` matched all 20 byte-for-byte; the complete SDK generator suite passed 42 tests.
+
+## 2026-10-01 — Task 3: Emitter Boundary
+
+- Added a typed emitter registry and independent Python, TypeScript, and Go adapters accepting the canonical document and returning fully qualified output paths.
+- Added collision-checked emitter composition; duplicate paths cannot silently overwrite another backend's artifact.
+- RED: `EmitterCompositionTests` failed because `render_with_emitters` did not exist.
+- GREEN: the collision test passed and the full suite reached 43 passing tests.
+- Adding emitter modules intentionally changed only `manifest.json` because generator input provenance includes Python source files. Regeneration left all language artifact bytes unchanged, and source drift checking matched all 20 files.
+- The proven legacy emission bodies remain in `emit.py` behind the new adapters for this pilot; Rust and .NET use the stable adapter interface directly.

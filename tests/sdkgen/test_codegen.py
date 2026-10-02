@@ -19,6 +19,7 @@ from tools.sdkgen.compiler import Compiler, ContractError, canonical, load_sourc
 from tools.sdkgen.emit import render
 from tools.sdkgen.__main__ import compare, main
 import tools.sdkgen.__main__ as cli
+import tools.sdkgen.emit as emit_module
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = json.loads((ROOT / "sdk/codegen/config.json").read_text())
@@ -291,6 +292,18 @@ class DeterminismTests(unittest.TestCase):
             first_files = {p.relative_to(first).as_posix(): p.read_bytes() for p in Path(first).rglob("*") if p.is_file()}
             second_files = {p.relative_to(second).as_posix(): p.read_bytes() for p in Path(second).rglob("*") if p.is_file()}
             self.assertEqual(first_files, second_files)
+
+
+class EmitterCompositionTests(unittest.TestCase):
+    def test_render_rejects_cross_emitter_path_collision(self):
+        def first(_document):
+            return {"shared/file.txt": b"first\n"}
+
+        def second(_document):
+            return {"shared/file.txt": b"second\n"}
+
+        with self.assertRaisesRegex(ContractError, "shared/file.txt"):
+            emit_module.render_with_emitters(compiler().compile(), (first, second))
 
 
 class HandlerContractTests(unittest.TestCase):
