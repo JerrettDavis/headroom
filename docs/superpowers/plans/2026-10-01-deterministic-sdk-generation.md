@@ -301,4 +301,3 @@ Attach detached commits to feat/deterministic-sdk-generation, verify remote/base
 gh pr create --draft --base main --title "feat(sdk): add deterministic five-language generation pilot" --body-file docs/engineering/deterministic-sdk-generation-pr.md
 
 Expected: a draft PR URL. Do not merge or publish packages.
-

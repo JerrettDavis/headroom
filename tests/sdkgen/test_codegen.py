@@ -345,9 +345,48 @@ class SourceCompilerTests(unittest.TestCase):
 
 class OwnershipTests(unittest.TestCase):
     def test_generated_paths_cannot_escape_output_root(self):
-        for path in ("../escape", "/absolute", "nested/../../escape", "C:/escape"):
+        for path in (
+            "../escape",
+            "/absolute",
+            "nested/../../escape",
+            "C:/escape",
+            "nested/file:stream",
+            "nested/CON.txt",
+            "nested/trailing. ",
+        ):
             with self.subTest(path=path), self.assertRaises(ContractError):
                 cli.validate_output_paths({path: b"unsafe"})
+
+    def test_new_generated_path_cannot_overwrite_unowned_existing_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            args = ["--root", str(ROOT), "--fixture", "--out", td]
+            self.assertEqual(main(["generate", *args]), 0)
+            root = Path(td)
+            target = root / "python/client.py"
+            target.write_text("user-owned\n", encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            del manifest["files"]["python/client.py"]
+            manifest_path.write_bytes(canonical(manifest))
+
+            self.assertEqual(main(["generate", *args]), 2)
+            self.assertEqual(target.read_text(encoding="utf-8"), "user-owned\n")
+
+    def test_symlinked_output_root_is_rejected_when_supported(self):
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td)
+            real = parent / "real"
+            real.mkdir()
+            link = parent / "link"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            self.assertEqual(
+                main(["generate", "--root", str(ROOT), "--fixture", "--out", str(link)]),
+                2,
+            )
+            self.assertFalse(any(real.iterdir()))
 
     def test_check_does_not_modify_drifted_output(self):
         with tempfile.TemporaryDirectory() as td:
@@ -453,7 +492,20 @@ class RustEmitterTests(unittest.TestCase):
         self.assertIn("pub struct APIError", runtime)
         self.assertIn("Policy::none()", runtime)
         self.assertIn("max_response_bytes", runtime)
-        self.assertNotIn("retry", runtime.lower())
+        self.assertIn("reqwest::retry::never()", runtime)
+        self.assertIn("Expected a JSON Content-Type", runtime)
+        self.assertIn("Response does not match the declared wire model", runtime)
+
+    def test_optional_fields_skip_absent_values(self):
+        source = BASE.replace("hash: str", "hash: NotRequired[str]")
+        models = render(Compiler({"x.py": source}).compile())["rust/src/models.rs"].decode()
+        self.assertIn('skip_serializing_if = "Option::is_none"', models)
+
+    def test_unsupported_schema_features_fail_closed(self):
+        for annotation in ('Literal["a", "b"]', "dict[str, int]", "JsonValue"):
+            source = BASE.replace("hash: str", f"hash: {annotation}")
+            with self.subTest(annotation=annotation), self.assertRaisesRegex(ContractError, "Rust"):
+                render(Compiler({"x.py": source}).compile())
 
 
 class DotNetEmitterTests(unittest.TestCase):
@@ -479,7 +531,13 @@ class DotNetEmitterTests(unittest.TestCase):
         self.assertIn("HttpCompletionOption.ResponseHeadersRead", runtime)
         self.assertIn("maxResponseBytes", runtime)
         self.assertIn("public sealed class APIException", runtime)
-        self.assertNotIn("retry", runtime.lower())
+        self.assertIn("ValidateModel", runtime)
+        self.assertIn("Expected a JSON Content-Type", runtime)
+
+    def test_optional_nullable_preserves_value_type_nullability(self):
+        source = BASE.replace("hash: str", "hash: NotRequired[int | None]")
+        models = render(Compiler({"x.py": source}).compile())["dotnet/Models.cs"].decode()
+        self.assertIn("Optional<long?> Hash", models)
 
 
 class HandlerContractTests(unittest.TestCase):

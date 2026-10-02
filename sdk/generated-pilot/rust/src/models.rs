@@ -7,7 +7,7 @@ fn take_required(object: &mut Map<String, Value>, name: &str) -> Result<Value, S
 }
 
 fn decode<T: DeserializeOwned>(value: Value, name: &str) -> Result<T, String> {
-    serde_json::from_value(value).map_err(|error| format!("invalid field {name}: {error}"))
+    serde_json::from_value(value).map_err(|_error| format!("invalid field {name}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

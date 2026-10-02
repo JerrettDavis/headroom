@@ -85,6 +85,16 @@
 - Focused production integration: all 5 retrieval-history repair tests passed. The wider two-file CCR run passed 19 tests and failed only `TestCCREdgeCases.test_ccr_disabled_no_caching` because the temporary Python 3.12 environment could not load the prebuilt `headroom._core` native DLL; that test does not exercise SDK generation or retrieval metadata.
 - Ruff initially found 11 inherited bundle files needing formatting and two loop-variable lambda bindings; both were corrected before regeneration. Mypy initially found 18 type issues and finished clean after explicit narrowing/annotations.
 
+## 2026-10-02 — Final Review Fix Pass
+
+- Closed all nine Important whole-branch review findings with focused RED→GREEN regressions.
+- Ownership now trusts only the prior manifest and rejects output-root symlink/junction traversal plus unsafe Windows path components.
+- Rust/.NET preserve optional presence and enforce nested non-nullable values. They reject enum, typed-map, and explicit JSON-value fields before output rather than silently weakening them.
+- Reqwest retries are explicitly disabled; the default Go transport prevents reused-connection replay. Five forced disconnect probes were each observed exactly once.
+- Rust protocol diagnostics are response-value independent. Rust/.NET enforce JSON success media types.
+- Conformance separates timeout from caller cancellation, validates wrong media independently from JSON syntax, exercises nested presence/null states in Go/Rust/.NET, and asserts attempt counts.
+- Final evidence: 52 SDK tests passed; 30 generated files matched exactly; five-language conformance passed over 70 requests; Rust tests and Clippy passed with warnings denied; .NET Release build had zero warnings/errors; Go test/vet passed; 39 focused CCR integration tests passed; full-range whitespace check clean.
+
 ## Draft PR Readiness
 
 - Code, generated artifacts, CI, design, plan, progress log, and PR notes are present in the detached worktree.

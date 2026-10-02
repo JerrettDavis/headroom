@@ -36,6 +36,12 @@ await test("unsafe integer rejects instead of silent rounding", async () => {
 await test("non-JSON success rejects", async () => {
   await assert.rejects(client.retrieve({hash: "notjson"}), ProtocolError);
 });
+await test("valid JSON with a non-JSON media type rejects", async () => {
+  await assert.rejects(client.retrieve({hash: "valid_nonjson"}), ProtocolError);
+});
+await test("null in a non-nullable response field rejects", async () => {
+  await assert.rejects(client.retrieve({hash: "null_nonnullable"}), ProtocolError);
+});
 await test("redirects are not followed", async () => {
   await assert.rejects(client.retrieve({hash: "redirect"}), e => e instanceof APIError && e.status === 302);
 });
@@ -47,6 +53,16 @@ await test("caller cancellation is honored", async () => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(client.retrieve({hash: "ok"}, {signal: controller.signal}));
 });
+await test("timeout and in-flight cancellation are honored", async () => {
+  const timed = new Client(process.env.HEADROOM_WIRE_TEST_URL, {timeoutMs: 50});
+  await assert.rejects(timed.retrieve({hash: "slow"}));
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 25);
+  await assert.rejects(client.retrieve({hash: "slow"}, {signal: controller.signal}));
+});
+await test("closed connection is not retried", async () => {
+  await assert.rejects(client.retrieve({hash: "retry_probe_typescript"}));
+});
 await test("optional undefined, null, zero and false retain distinctions", async () => {
   const schema = {type: "object", properties: {note: {anyOf: [{type: "string"}, {type: "null"}]}, enabled: {type: "boolean"}, count: {type: "integer"}}, required: []};
   for (const value of [{}, {note: undefined}, {note: null}, {note: ""}, {enabled: false, count: 0}]) validate(value, schema, {});
@@ -57,4 +73,3 @@ await test("invalid base URLs and dot segments are rejected", async () => {
   await assert.rejects(client.retrieveGet(".."));
 });
 console.log(`TypeScript: ${count} conformance tests passed`);
-

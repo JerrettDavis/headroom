@@ -21,4 +21,3 @@ export interface RetrieveResponse {
   "tool_name": (string | null);
   [key: string]: unknown; // Preserve future wire fields without renaming.
 }
-

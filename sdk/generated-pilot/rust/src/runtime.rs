@@ -72,6 +72,7 @@ impl Transport {
         }
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
+            .retry(reqwest::retry::never())
             .timeout(options.timeout)
             .build()
             .map_err(Error::Transport)?;
@@ -114,7 +115,19 @@ impl Transport {
                 body: bytes,
             })));
         }
-        serde_json::from_slice(&bytes).map_err(|error| Error::Protocol(error.to_string()))
+        let media_type = headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        if media_type != "application/json" && !media_type.ends_with("+json") {
+            return Err(Error::Protocol("Expected a JSON Content-Type".into()));
+        }
+        serde_json::from_slice(&bytes).map_err(|_error| {
+            Error::Protocol("Response does not match the declared wire model".into())
+        })
     }
 }
 

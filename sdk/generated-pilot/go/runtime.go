@@ -29,7 +29,6 @@ type schema struct {
 	Additional json.RawMessage   `json:"additionalProperties"`
 	Items      *schema           `json:"items"`
 }
-
 var schemas = func() map[string]schema {
 	var out map[string]schema
 	if err := json.Unmarshal(schemaBytes, &out); err != nil {
@@ -115,6 +114,9 @@ func newTransport(base string, options *Options) (*Transport, error) {
 		// Bypass environment proxies unless an explicit RoundTripper was supplied.
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.Proxy = nil
+		// net/http retries idempotent requests only after a reused connection
+		// fails. Fresh connections make every SDK call a single attempt.
+		tr.DisableKeepAlives = true
 		client.Transport = tr
 	}
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
@@ -287,4 +289,3 @@ func validateValue(v any, s schema, path string, depth int) error {
 	}
 	return nil
 }
-

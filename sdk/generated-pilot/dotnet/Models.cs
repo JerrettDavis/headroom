@@ -5,6 +5,11 @@ using System.Text.Json.Serialization;
 
 namespace Headroom.GeneratedPilot;
 
+public interface IWireModel
+{
+    void ValidateModel();
+}
+
 [JsonConverter(typeof(OptionalJsonConverterFactory))]
 public readonly record struct Optional<T>(bool IsSet, T? Value)
 {
@@ -28,25 +33,35 @@ public sealed class OptionalJsonConverterFactory : JsonConverterFactory
     }
 }
 
-public sealed class RetrievalError
+public sealed class RetrievalError : IWireModel
 {
     [JsonPropertyName("detail")]
     public required string Detail { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();
+
+    public void ValidateModel()
+    {
+        if (Detail is null) throw new ProtocolException("Invalid field detail");
+    }
 }
 
-public sealed class RetrieveRequest
+public sealed class RetrieveRequest : IWireModel
 {
     [JsonPropertyName("hash")]
     public required string Hash { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();
+
+    public void ValidateModel()
+    {
+        if (Hash is null) throw new ProtocolException("Invalid field hash");
+    }
 }
 
-public sealed class RetrieveResponse
+public sealed class RetrieveResponse : IWireModel
 {
     [JsonPropertyName("compressed_item_count")]
     public required long CompressedItemCount { get; init; }
@@ -71,5 +86,14 @@ public sealed class RetrieveResponse
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();
-}
 
+    public void ValidateModel()
+    {
+        if (Hash is null) throw new ProtocolException("Invalid field hash");
+        if (OriginalContent is null) throw new ProtocolException("Invalid field original_content");
+        if (ToolName is not null)
+        {
+            if (ToolName is null) throw new ProtocolException("Invalid field tool_name");
+        }
+    }
+}

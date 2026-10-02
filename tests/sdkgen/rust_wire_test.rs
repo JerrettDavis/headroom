@@ -56,7 +56,7 @@ async fn http_error_retains_body_without_displaying_it() {
 
 #[tokio::test]
 async fn malformed_redirect_and_bounded_responses_fail_closed() {
-    for key in ["missing_field", "wrong_type", "notjson"] {
+    for key in ["missing_field", "wrong_type", "null_nonnullable", "notjson", "valid_nonjson"] {
         let error = client()
             .retrieve(&RetrieveRequest {
                 hash: key.into(),
@@ -66,6 +66,17 @@ async fn malformed_redirect_and_bounded_responses_fail_closed() {
             .expect_err("malformed response must fail");
         assert!(matches!(error, Error::Protocol(_)), "unexpected error: {error}");
     }
+
+    let secret = client()
+        .retrieve(&RetrieveRequest { hash: "secret_wrong_type".into(), additional_properties: Map::new() })
+        .await
+        .expect_err("wrong type must fail");
+    assert!(!secret.to_string().contains("sdkgen-secret-marker"));
+
+    let retry = client()
+        .retrieve(&RetrieveRequest { hash: "retry_probe_rust".into(), additional_properties: Map::new() })
+        .await;
+    assert!(retry.is_err(), "closed connection must not be retried");
 
     let wide = client()
         .retrieve(&RetrieveRequest {
@@ -120,4 +131,10 @@ async fn invalid_paths_base_urls_and_timeout_fail_closed() {
         .await
         .expect_err("slow response must time out");
     assert!(matches!(timeout, Error::Transport(_)));
+
+    let cancelled = tokio::time::timeout(
+        Duration::from_millis(25),
+        client().retrieve(&RetrieveRequest { hash: "slow".into(), additional_properties: Map::new() }),
+    ).await;
+    assert!(cancelled.is_err(), "caller cancellation did not interrupt the request");
 }

@@ -68,6 +68,7 @@ internal sealed class Transport : IDisposable
         using var request = new HttpRequestMessage(method, baseUrl + path);
         if (hasBody)
         {
+            if (body is IWireModel requestModel) requestModel.ValidateModel();
             var json = JsonSerializer.Serialize(body);
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
@@ -82,10 +83,19 @@ internal sealed class Transport : IDisposable
                 .ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
             throw new APIException(response.StatusCode, headers, bytes);
         }
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType is null
+            || (!mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+                && !mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ProtocolException("Expected a JSON Content-Type");
+        }
         try
         {
-            return JsonSerializer.Deserialize<TResponse>(bytes)
+            var result = JsonSerializer.Deserialize<TResponse>(bytes)
                 ?? throw new ProtocolException("Response JSON decoded to null");
+            if (result is IWireModel responseModel) responseModel.ValidateModel();
+            return result;
         }
         catch (JsonException error)
         {

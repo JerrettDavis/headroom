@@ -10,7 +10,6 @@ checksum = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b"
 dependencies = [
  "gimli",
 ]
-
 [[package]]
 name = "adler2"
 version = "2.0.1"
@@ -1350,4 +1349,3 @@ dependencies = [
  "quote",
  "syn 3.0.6",
 ]
-

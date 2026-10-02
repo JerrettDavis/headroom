@@ -22,4 +22,3 @@ RetrieveResponse = TypedDict('RetrieveResponse', {
     'retrieval_count': 'int',
     'tool_name': 'str | None',
 })
-

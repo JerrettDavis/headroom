@@ -39,4 +39,3 @@ Sources:
 Findings 1 and 2 are the kind of drift source-owned models prevent. Finding 3 illustrates the limit of generation: retry policy and option-presence semantics still require careful runtime design and tests. Generating models alone is not equivalent to generating a correct SDK.
 
 Keep the useful adapters, hooks, SSE helpers, and ergonomic APIs in the contribution. Introduce generated internals behind that facade gradually. Provider payloads and streams need their own qualification; the current JSON-only retrieval pilot does not claim parity with the full Go PR.
-

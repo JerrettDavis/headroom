@@ -128,4 +128,3 @@ func (x *RetrieveResponse) UnmarshalJSON(raw []byte) error {
     *x = RetrieveResponse(value); x.AdditionalProperties = extra
     return nil
 }
-

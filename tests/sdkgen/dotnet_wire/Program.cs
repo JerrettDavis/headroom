@@ -39,6 +39,12 @@ if (wireUrl is not null)
         throw new Exception("POST response values were not preserved");
     if (response.AdditionalProperties["future_extension"].GetProperty("snake_case").GetString() != "unchanged")
         throw new Exception("POST unknown response field was not preserved");
+    try
+    {
+        await client.RetrieveAsync(new RetrieveRequest { Hash = null! });
+        throw new Exception("Null non-nullable request field was accepted");
+    }
+    catch (ProtocolException) { }
 
     const string key = "a/世界 ?#+'!*()";
     var byHash = await client.RetrieveGetAsync(key);
@@ -57,7 +63,7 @@ if (wireUrl is not null)
             throw new Exception("HTTP error display leaked its body");
     }
 
-    foreach (var bad in new[] { "missing_field", "wrong_type", "notjson" })
+    foreach (var bad in new[] { "missing_field", "wrong_type", "null_nonnullable", "notjson", "valid_nonjson" })
     {
         try
         {
@@ -66,6 +72,13 @@ if (wireUrl is not null)
         }
         catch (ProtocolException) { }
     }
+
+    try
+    {
+        await client.RetrieveAsync(new RetrieveRequest { Hash = "retry_probe_dotnet" });
+        throw new Exception("Closed connection was retried or accepted");
+    }
+    catch (HttpRequestException) { }
 
     var wide = await client.RetrieveAsync(new RetrieveRequest { Hash = "unsafe_int" });
     if (wide.OriginalTokens != 9007199254740993L) throw new Exception("Wide integer changed");
@@ -107,6 +120,15 @@ if (wireUrl is not null)
     {
         await timed.RetrieveAsync(new RetrieveRequest { Hash = "slow" });
         throw new Exception("Timed out response was accepted");
+    }
+    catch (OperationCanceledException) { }
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.CancelAfter(TimeSpan.FromMilliseconds(25));
+    try
+    {
+        await client.RetrieveAsync(new RetrieveRequest { Hash = "slow" }, cancellation.Token);
+        throw new Exception("Caller cancellation was ignored");
     }
     catch (OperationCanceledException) { }
 

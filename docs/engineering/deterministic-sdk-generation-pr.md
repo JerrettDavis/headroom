@@ -37,14 +37,14 @@ The production change is metadata-only. It adds the `sdk_contracts` import and `
 Local Windows validation completed with:
 
 - `python -m tools.sdkgen check` — 30 generated files matched byte-for-byte.
-- `python -m unittest discover -s tests/sdkgen -p 'test_*.py' -v` — 47 passed.
-- `python -m tools.sdkgen.conformance` — five languages passed over 47 loopback HTTP requests; no providers called and no redirect followed.
+- `python -m unittest discover -s tests/sdkgen -p 'test_*.py' -v` — 52 passed.
+- `python -m tools.sdkgen.conformance` — five languages passed over 70 loopback HTTP requests; forced disconnects were observed once per language, no providers were called, and no redirect was followed.
 - `ruff format --check` and `ruff check` on handwritten SDK generator/source/tests — clean.
 - `mypy tools/sdkgen` — clean across 12 source files.
 - Rust `cargo test --locked` and Clippy with warnings denied — clean.
 - .NET Release build — zero warnings and zero errors.
 - Go vet — clean.
-- Focused repository tests — 19 passed; one unrelated native-extension test could not load `headroom._core` in the temporary Python 3.12 environment. The five retrieval-history repair tests passed.
+- Focused repository tests — 39 passed, including all five retrieval-history repair tests.
 
 Exact local and CI-target tool versions are recorded in `sdk/codegen/toolchain.lock.json`. CI re-runs generation drift, compiler tests, native checks, and five-language conformance on Ubuntu.
 
@@ -54,6 +54,7 @@ Exact local and CI-target tool versions are recorded in `sdk/codegen/toolchain.l
 - No Pydantic/dataclass extraction, query/header adapters, authentication profiles, multipart, SSE, or WebSocket generation.
 - No full runtime-route-graph coverage claim.
 - No existing SDK facade migration or compatibility promise.
+- Rust and .NET fail closed before rendering enum, typed-map, or explicit JSON-value fields; those backends must implement the constructs before the pilot contract expands to use them.
 - No package publication, release archive, or supply-chain hermeticity claim.
 - Rust and .NET direct dependencies are pinned and Rust has a committed lockfile; the broader build is not fully mirrored or offline-hermetic.
 - Full proxy, supported-platform, and hosted-CI qualification remain merge gates for this draft.

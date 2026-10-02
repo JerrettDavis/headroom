@@ -22,6 +22,8 @@ def cs_ident(value: str) -> str:
 
 
 def cs_type(schema: dict[str, Any]) -> str:
+    if "enum" in schema:
+        raise ContractError(".NET emitter does not support enum schemas")
     if "$ref" in schema:
         return str(schema["$ref"]).rsplit("/", 1)[1]
     if "anyOf" in schema:
@@ -39,8 +41,38 @@ def cs_type(schema: dict[str, Any]) -> str:
     if kind == "array":
         return f"List<{cs_type(schema['items'])}>"
     if kind == "object":
-        return "Dictionary<string, JsonElement>"
+        raise ContractError(".NET emitter does not support typed map or JsonValue schemas")
     raise ContractError(f"Unsupported .NET schema: {schema}")
+
+
+def validation_lines(schema: dict[str, Any], expression: str, label: str, indent: str) -> list[str]:
+    if "anyOf" in schema:
+        base = without_null(schema)
+        nested = validation_lines(base, expression, label, indent + "    ")
+        if not nested:
+            return []
+        return [f"{indent}if ({expression} is not null)", f"{indent}{{", *nested, f"{indent}}}"]
+    if "$ref" in schema:
+        return [
+            f'{indent}if ({expression} is null) throw new ProtocolException("Invalid field {label}");',
+            f"{indent}{expression}.ValidateModel();",
+        ]
+    kind = schema.get("type")
+    if kind == "string":
+        return [
+            f'{indent}if ({expression} is null) throw new ProtocolException("Invalid field {label}");'
+        ]
+    if kind == "array":
+        item = schema["items"]
+        nested = validation_lines(item, "item", f"{label}[]", indent + "        ")
+        return [
+            f'{indent}if ({expression} is null) throw new ProtocolException("Invalid field {label}");',
+            f"{indent}foreach (var item in {expression})",
+            f"{indent}{{",
+            *nested,
+            f"{indent}}}",
+        ]
+    return []
 
 
 def emit_models(models: dict[str, Any]) -> bytes:
@@ -51,6 +83,11 @@ def emit_models(models: dict[str, Any]) -> bytes:
         "using System.Text.Json.Serialization;",
         "",
         "namespace Headroom.GeneratedPilot;",
+        "",
+        "public interface IWireModel",
+        "{",
+        "    void ValidateModel();",
+        "}",
         "",
         "[JsonConverter(typeof(OptionalJsonConverterFactory))]",
         "public readonly record struct Optional<T>(bool IsSet, T? Value)",
@@ -78,15 +115,12 @@ def emit_models(models: dict[str, Any]) -> bytes:
     ]
     for model, schema in models.items():
         required = set(schema.get("required", []))
-        lines += [f"public sealed class {model}", "{"]
+        lines += [f"public sealed class {model} : IWireModel", "{"]
         for field, field_schema in schema["properties"].items():
             field_type = cs_type(field_schema)
             prefix = "required " if field in required else ""
             if field not in required:
-                base = (
-                    cs_type(without_null(field_schema)) if "anyOf" in field_schema else field_type
-                )
-                field_type = f"Optional<{base}>"
+                field_type = f"Optional<{field_type}>"
                 lines.append("    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]")
             lines += [
                 f"    [JsonPropertyName({json.dumps(field)})]",
@@ -96,10 +130,26 @@ def emit_models(models: dict[str, Any]) -> bytes:
         lines += [
             "    [JsonExtensionData]",
             "    public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();",
+            "",
+            "    public void ValidateModel()",
+            "    {",
+        ]
+        for field, field_schema in schema["properties"].items():
+            field_name = cs_ident(field)
+            if field in required:
+                lines.extend(validation_lines(field_schema, field_name, field, "        "))
+            else:
+                nested = validation_lines(
+                    field_schema, f"{field_name}.Value", field, "            "
+                )
+                if nested:
+                    lines += [f"        if ({field_name}.IsSet)", "        {", *nested, "        }"]
+        lines += [
+            "    }",
             "}",
             "",
         ]
-    return ("\n".join(lines) + "\n").encode()
+    return ("\n".join(lines).rstrip() + "\n").encode()
 
 
 def emit_client(document: dict[str, Any]) -> bytes:
@@ -143,7 +193,7 @@ def emit_client(document: dict[str, Any]) -> bytes:
             "    }",
         ]
     lines += ["", "    public void Dispose() => transport.Dispose();", "}"]
-    return ("\n".join(lines) + "\n").encode()
+    return ("\n".join(lines).rstrip() + "\n").encode()
 
 
 def emit(document: dict[str, Any]) -> dict[str, bytes]:

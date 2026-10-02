@@ -18,4 +18,3 @@ class Client:
         path = '/v1/retrieve/{hash_key}'
         path = path.replace('{hash_key}', path_segment(hash_key))
         return cast(RetrieveResponse, self._transport.request('GET', path, None, None, 'RetrieveResponse'))
-

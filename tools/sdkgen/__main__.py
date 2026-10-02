@@ -13,15 +13,22 @@ from .emit import render
 
 def validate_output_paths(generated: dict[str, bytes]) -> None:
     """Reject generated names that could escape or alias the output tree."""
+    reserved = {"CON", "PRN", "AUX", "NUL"} | {
+        f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(1, 10)
+    }
     for relative, content in generated.items():
         path = PurePosixPath(relative)
+        unsafe_windows = any(
+            ":" in part or part.endswith((".", " ")) or part.split(".", 1)[0].upper() in reserved
+            for part in path.parts
+        )
         if (
             not relative
             or "\\" in relative
             or path.is_absolute()
             or ".." in path.parts
             or path.as_posix() != relative
-            or ":" in path.parts[0]
+            or unsafe_windows
         ):
             raise ContractError(f"Unsafe generated output path: {relative}")
         if not isinstance(content, bytes):
@@ -120,7 +127,21 @@ def main(argv: list[str] | None = None) -> int:
             )
         generated = render(compiler.compile())
         validate_output_paths(generated)
-        out = args.out.resolve() if args.out else root / config["output"]
+        lexical_out = (
+            (Path.cwd() / args.out if not args.out.is_absolute() else args.out)
+            if args.out
+            else root / config["output"]
+        )
+        cursor = lexical_out
+        while True:
+            if cursor.exists() and (
+                cursor.is_symlink() or (hasattr(cursor, "is_junction") and cursor.is_junction())
+            ):
+                raise ContractError("Symlinks are not allowed in the generated output path")
+            if cursor.parent == cursor:
+                break
+            cursor = cursor.parent
+        out = lexical_out.resolve()
         if out == root or root.is_relative_to(out):
             raise ContractError("Output directory must not be the repository or its parent")
         existing = (
@@ -141,7 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             old_owned = set(json.loads(existing["manifest.json"].read_text())["files"]) | {
                 "manifest.json"
             }
-        unknown = set(existing) - set(generated) - old_owned
+            validate_output_paths(dict.fromkeys(old_owned, b""))
+        unknown = set(existing) - old_owned
         if unknown:
             raise ContractError("Unowned files in output directory: " + ", ".join(sorted(unknown)))
         changed = [

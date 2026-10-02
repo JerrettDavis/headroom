@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixtureClient(t *testing.T, options *Options) *Client {
@@ -70,6 +71,18 @@ func TestWrongType(t *testing.T) {
 		t.Fatal("wrong type accepted")
 	}
 }
+func TestNullNonNullableAndValidNonJSON(t *testing.T) {
+	for _, key := range []string{"null_nonnullable", "valid_nonjson"} {
+		if _, err := fixtureClient(t, nil).Retrieve(context.Background(), RetrieveRequest{Hash: key}); err == nil {
+			t.Fatalf("invalid response %s accepted", key)
+		}
+	}
+}
+func TestNoAutomaticRetry(t *testing.T) {
+	if _, err := fixtureClient(t, nil).Retrieve(context.Background(), RetrieveRequest{Hash: "retry_probe_go"}); err == nil {
+		t.Fatal("closed connection accepted")
+	}
+}
 func TestWideIntegerIsExact(t *testing.T) {
 	out, err := fixtureClient(t, nil).Retrieve(context.Background(), RetrieveRequest{Hash: "unsafe_int"})
 	if err != nil {
@@ -106,6 +119,16 @@ func TestCancellation(t *testing.T) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
 }
+func TestTimeoutAndInFlightCancellation(t *testing.T) {
+	if _, err := fixtureClient(t, &Options{Timeout: 50 * time.Millisecond}).Retrieve(context.Background(), RetrieveRequest{Hash: "slow"}); err == nil {
+		t.Fatal("timeout accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(25*time.Millisecond, cancel)
+	if _, err := fixtureClient(t, nil).Retrieve(ctx, RetrieveRequest{Hash: "slow"}); err == nil {
+		t.Fatal("in-flight cancellation accepted")
+	}
+}
 func TestInvalidURLAndPath(t *testing.T) {
 	for _, base := range []string{"file:///tmp", "http://user:pass@localhost", "http://localhost/?secret=1"} {
 		if _, err := NewClient(base, nil); err == nil {
@@ -122,4 +145,3 @@ func TestAdditionalPropertyCollision(t *testing.T) {
 		t.Fatal("declared field overwritten")
 	}
 }
-
