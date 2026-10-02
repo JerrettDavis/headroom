@@ -329,6 +329,32 @@ class RustEmitterTests(unittest.TestCase):
         self.assertNotIn("retry", runtime.lower())
 
 
+class DotNetEmitterTests(unittest.TestCase):
+    def setUp(self):
+        self.output = render(compiler().compile())
+
+    def test_models_preserve_required_nullable_and_unknown_fields(self):
+        models = self.output["dotnet/Models.cs"].decode()
+        self.assertIn("#nullable enable", models)
+        self.assertIn('[JsonPropertyName("tool_name")]', models)
+        self.assertIn("public required string? ToolName", models)
+        self.assertIn("[JsonExtensionData]", models)
+        self.assertIn("Dictionary<string, JsonElement> AdditionalProperties", models)
+        self.assertIn("Optional<T>", models)
+
+    def test_client_and_runtime_enforce_transport_policy(self):
+        client = self.output["dotnet/Client.cs"].decode()
+        runtime = self.output["dotnet/Runtime.cs"].decode()
+        self.assertIn("RetrieveAsync(", client)
+        self.assertIn("RetrieveGetAsync(", client)
+        self.assertIn("CancellationToken cancellationToken", client)
+        self.assertIn("AllowAutoRedirect = false", runtime)
+        self.assertIn("HttpCompletionOption.ResponseHeadersRead", runtime)
+        self.assertIn("maxResponseBytes", runtime)
+        self.assertIn("public sealed class APIException", runtime)
+        self.assertNotIn("retry", runtime.lower())
+
+
 class HandlerContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -54,3 +54,12 @@
 - GREEN: generated model/runtime tests passed; Cargo compiled the async client with the committed lockfile; Clippy passed with warnings denied after boxing the API-error variant.
 - Rust build output is directed outside the managed generated tree so ownership checking remains exact. Generated Rust is compiler-owned and not rewritten by rustfmt; Cargo compilation and Clippy are the native static gates.
 - Added the Rust shared-wire test source for Task 6 loopback execution.
+
+## 2026-10-01 — Task 5: .NET Generation
+
+- Added deterministic .NET 10/C# generation with nullable reference types, required members, JSON wire-name attributes, `JsonExtensionData`, and a presence-aware `Optional<T>` converter for omitted versus present optional properties.
+- Added async `HttpClient` bindings with cancellation tokens, linked finite timeouts, disabled redirects, `ResponseHeadersRead`, streamed bounded reads, path escaping, and structured status/header/raw-body exceptions whose display text omits the payload.
+- RED: .NET output tests initially failed because no .NET artifacts existed.
+- GREEN: generated-output tests passed; `dotnet build` completed with zero warnings/errors; the executable model test accepted explicit-null `tool_name`, rejected omission, and preserved an unknown nested field.
+- `dotnet format --verify-no-changes` formatted 0 of 6 files. Its local `bin`/`obj` build artifacts were removed after an exact `git clean -ndx` preview; all later .NET commands use an external artifacts directory to keep generated ownership exact.
+- Source drift checking now matches 30 generated files byte-for-byte.

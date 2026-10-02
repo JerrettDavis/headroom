@@ -2,6 +2,10 @@
   "canonical_json_profile": "headroom-json-v1",
   "files": {
     ".ruff.toml": "d40d1db057aeec2e95fbd8bfcb38f8e51912ed0eb6ad06987c2d5bec3fc24190",
+    "dotnet/Client.cs": "4ce120d866eba72b08912d765f6de4f968347f023e8fac22e94edbf3a7513ac2",
+    "dotnet/Headroom.GeneratedPilot.csproj": "0b577c58780132dc58c18a2075d41ff939fa1df5550391e82caff046ca986366",
+    "dotnet/Models.cs": "6e7ba5a168853eda7a29a27ed81fdba4e70cfcc53715071cfc71c787d5abd081",
+    "dotnet/Runtime.cs": "1ffe05af21267473ba3b0b4b78235b6d9378b4d6c46b87e9d41943c8e51fbe6c",
     "go/client.go": "7dd31fa14868b6c3affa115471ef6655b1793563aa05dc643e8670ddc06205b5",
     "go/go.mod": "904ad7c765ccc5f229d388af9ea1258daed1ca20dcb93064a94298674d821c00",
     "go/models.go": "a0887d96cc1d5c7b4e3ace96b0e88297038e8f193fe04c53771709c2be45f602",
@@ -28,7 +32,7 @@
     "typescript/tsconfig.json": "ec00519c4c98c24be051bc798f754bcea9395f7d41b87f7e6aef91399cc7b13d"
   },
   "format_version": 1,
-  "generator_inputs_sha256": "cf8bfb0159542f49cfc36b4cd9370b9ef56cdf48bbab02430e1aefd1a2500688",
+  "generator_inputs_sha256": "f1c39788a6005fd28cc9c144175718bb0c57fbf3c7ea038840b3f2934fa46047",
   "generator_version": "0.1.0",
   "schema_sha256": "d4f19c37e89c76921c00e6f14654a18991f387261496e077d45fcc378d841195"
 }
