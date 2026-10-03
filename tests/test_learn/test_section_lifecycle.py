@@ -12,6 +12,8 @@ because it asserts on writer behaviour; it drives the real, unmodified
 ``_patterns_to_recommendations`` to get there.
 """
 
+import pytest
+
 from headroom.learn.models import Recommendation, RecommendationTarget
 from headroom.learn.writer import _merge_into_file
 from headroom.memory.traffic_learner import (
@@ -177,7 +179,9 @@ class TestCarriedSectionLifecycle:
 class TestTrafficLearnerCategoryLifecycle:
     """End-to-end through the real learner rendering."""
 
-    def test_saved_ids_keep_unbatched_items_and_remove_expired_items(self, tmp_path):
+    @pytest.mark.windows_newline
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    def test_saved_ids_keep_unbatched_items_and_remove_expired_items(self, tmp_path, newline):
         context_file = tmp_path / "AGENTS.md"
         prior = _rec(
             "Learned: preference",
@@ -186,7 +190,9 @@ class TestTrafficLearnerCategoryLifecycle:
             "- Use vendored SDK <!-- headroom:pattern-id:vendored -->",
         )
         prior.preserve_prior_items = True
-        context_file.write_text(_merge_into_file(context_file, [prior]), encoding="utf-8")
+        context_file.write_text(
+            _merge_into_file(context_file, [prior]), encoding="utf-8", newline=newline
+        )
 
         current = _rec("Learned: preference", "- New queue <!-- headroom:pattern-id:queue -->")
         current.preserve_prior_items = True
@@ -199,11 +205,15 @@ class TestTrafficLearnerCategoryLifecycle:
         assert "Use vendored SDK" not in final
         assert final.count("<!--") == 2  # Only the managed block delimiters stay literal.
 
-    def test_saved_ids_replace_prior_text_without_a_lifecycle_signal(self, tmp_path):
+    @pytest.mark.windows_newline
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    def test_saved_ids_replace_prior_text_without_a_lifecycle_signal(self, tmp_path, newline):
         context_file = tmp_path / "AGENTS.md"
         prior = _rec("Learned: preference", "- Old queue <!-- headroom:pattern-id:queue -->")
         prior.preserve_prior_items = True
-        context_file.write_text(_merge_into_file(context_file, [prior]), encoding="utf-8")
+        context_file.write_text(
+            _merge_into_file(context_file, [prior]), encoding="utf-8", newline=newline
+        )
 
         current = _rec("Learned: preference", "- New queue <!-- headroom:pattern-id:queue -->")
         current.preserve_prior_items = True
