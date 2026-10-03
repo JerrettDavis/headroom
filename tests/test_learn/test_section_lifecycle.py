@@ -177,6 +177,42 @@ class TestCarriedSectionLifecycle:
 class TestTrafficLearnerCategoryLifecycle:
     """End-to-end through the real learner rendering."""
 
+    def test_saved_ids_keep_unbatched_items_and_remove_expired_items(self, tmp_path):
+        context_file = tmp_path / "AGENTS.md"
+        prior = _rec(
+            "Learned: preference",
+            "- Old queue <!-- headroom:pattern-id:queue -->\n"
+            "- Prefer ripgrep <!-- headroom:pattern-id:ripgrep -->\n"
+            "- Use vendored SDK <!-- headroom:pattern-id:vendored -->",
+        )
+        prior.preserve_prior_items = True
+        context_file.write_text(_merge_into_file(context_file, [prior]), encoding="utf-8")
+
+        current = _rec("Learned: preference", "- New queue <!-- headroom:pattern-id:queue -->")
+        current.preserve_prior_items = True
+        current.active_item_ids = frozenset({"queue", "ripgrep"})
+        final = _merge_into_file(context_file, [current])
+
+        assert "New queue" in final
+        assert "Old queue" not in final
+        assert "Prefer ripgrep" in final
+        assert "Use vendored SDK" not in final
+        assert final.count("<!--") == 2  # Only the managed block delimiters stay literal.
+
+    def test_saved_ids_replace_prior_text_without_a_lifecycle_signal(self, tmp_path):
+        context_file = tmp_path / "AGENTS.md"
+        prior = _rec("Learned: preference", "- Old queue <!-- headroom:pattern-id:queue -->")
+        prior.preserve_prior_items = True
+        context_file.write_text(_merge_into_file(context_file, [prior]), encoding="utf-8")
+
+        current = _rec("Learned: preference", "- New queue <!-- headroom:pattern-id:queue -->")
+        current.preserve_prior_items = True
+        final = _merge_into_file(context_file, [current])
+
+        assert "New queue" in final
+        assert "Old queue" not in final
+        assert final.count("headroom:pattern-id:queue") == 1
+
     def test_category_losing_its_last_pattern_drops_its_heading(self, tmp_path):
         """An emptied category leaves the file entirely.
 
