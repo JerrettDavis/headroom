@@ -51,7 +51,6 @@ from headroom.proxy.buffered_ccr_response import (
     buffered_ccr_asgi_call,
 )
 from headroom.proxy.compression_decision import CompressionDecision
-from headroom.proxy.forwarded_headers import resolve_client_ip
 from headroom.proxy.handlers._debug_dump import _debug_dump_mode, _redact_debug_value
 from headroom.proxy.helpers import (
     extract_tags,
@@ -66,6 +65,7 @@ from headroom.proxy.model_router import estimate_input_tokens
 from headroom.proxy.nonstream_sse_policy import should_recover_sse_reply
 from headroom.proxy.outcome import RequestOutcome
 from headroom.proxy.output_shaper import shaper_enabled_for, steering_allowed_for
+from headroom.proxy.rate_limit_identity import rate_limit_identity
 from headroom.proxy.tenant_key import resolve_tenant_key, set_request_tenant_key
 from headroom.proxy.thinking_tokens import ThinkingTokens, extract_thinking_tokens
 from headroom.utils import format_exception_message
@@ -1139,12 +1139,25 @@ class AnthropicHandlerMixin:
             # aborting multi-turn sessions. Canonicalizing here (in place, so body,
             # original, forwarded, and the recorded/replayed prefix are all identical)
             # keeps it cache-safe: overlay_cached_prefix replays the same stripped bytes.
+            # (Also applied in read_request_json_with_bytes for every parsed request;
+            # the re-run here is idempotent and covers paths that bypass that helper.)
             _strip_streaming_only_content_fields(messages)
             pipeline_provider = provider_name
             pipeline_path = request.url.path if upstream_base_url else "/v1/messages"
             pipeline_stream = bool(body.get("stream", False) or force_stream)
+            # O1 (2026-09-27 perf audit): the snapshot of the original
+            # conversation aliases the live list unless hooks or pipeline
+            # extensions are configured - those can mutate `messages` in place
+            # (pre_compress receives the live list), so then the snapshot is an
+            # independently owned copy (snapshot_original_messages). The
+            # deep_copy stage is always measured so the timing summary keeps
+            # its key.
+            from headroom.proxy.helpers import snapshot_original_messages
+
             with stage_timer.measure("deep_copy"):
-                original_client_messages = copy.deepcopy(messages)
+                original_client_messages = snapshot_original_messages(
+                    messages, hooks=self.config.hooks, extensions=self.pipeline_extensions
+                )
             input_event = self.pipeline_extensions.emit(
                 PipelineStage.INPUT_RECEIVED,
                 operation="proxy.request",
@@ -1158,7 +1171,9 @@ class AnthropicHandlerMixin:
             if input_event.messages is not None:
                 messages = input_event.messages
                 with stage_timer.measure("deep_copy"):
-                    original_client_messages = copy.deepcopy(messages)
+                    original_client_messages = snapshot_original_messages(
+                        messages, hooks=self.config.hooks, extensions=self.pipeline_extensions
+                    )
             if input_event.tools is not None:
                 body["tools"] = input_event.tools
 
@@ -1303,18 +1318,10 @@ class AnthropicHandlerMixin:
 
             # Rate limiting
             if self.rate_limiter:
-                api_key = headers.get("x-api-key", "")
-                if not api_key:
-                    auth = headers.get("authorization", "")
-                    if auth.startswith("Bearer "):
-                        api_key = auth[7:]
-                # Phase F PR-F4: trust ``X-Forwarded-For`` for the rate-limit
-                # key only when the connecting peer is in
-                # ``HEADROOM_PROXY_TRUSTED_GATEWAY_CIDRS``; otherwise we use
-                # the direct peer IP and a malicious client cannot rotate
-                # rate-limit buckets by forging headers.
-                client_ip = resolve_client_ip(request) or "unknown"
-                rate_key = f"{api_key[:16]}:{client_ip}" if api_key else client_ip
+                # One identity rule for every provider: peer-owned, and
+                # credential-scoped only for proxy-token / direct loopback
+                # callers (headroom/proxy/rate_limit_identity.py).
+                rate_key = rate_limit_identity(request, headers)
                 allowed, wait_seconds = await self.rate_limiter.check_request(rate_key)
                 if not allowed:
                     await self.metrics.record_rate_limited(
@@ -2200,6 +2207,11 @@ class AnthropicHandlerMixin:
                                         model_limit=context_limit,
                                         context=extract_user_query(compression_input),
                                         frozen_message_count=prefix_n,
+                                        # The compressed delta is replayed
+                                        # verbatim next turn, so the router
+                                        # keeps the newest user prompt intact
+                                        # here as on every other path (#1174).
+                                        prefix_replay_guaranteed=True,
                                         idle_seconds=idle_seconds,
                                         biases=biases,
                                         protect=protect,
@@ -2534,6 +2546,7 @@ class AnthropicHandlerMixin:
             # ``ccr_inject_system_instructions=False``, or when ``_bypass`` is
             # set. The downstream uses already treat falsy as "unresolved".
             ccr_workspace_key, ccr_workspace_label = None, None
+            ccr_present_hashes: list[str] = []
             if (
                 self.config.ccr_inject_tool or self.config.ccr_inject_system_instructions
             ) and not _bypass:
@@ -2556,7 +2569,7 @@ class AnthropicHandlerMixin:
                 # Shape-only scanning also matches markers from other context
                 # tools; drop hashes this proxy never actually stored before
                 # they can drive tool injection (issue #2836).
-                injector.verify_ownership()
+                ccr_present_hashes = injector.verify_ownership()
                 if inject_system_instructions and injector.has_compressed_content:
                     optimized_messages = injector.inject_into_system_message(optimized_messages)
 
@@ -2690,6 +2703,10 @@ class AnthropicHandlerMixin:
                         user_query,
                         self._turn_counter,
                         workspace_key=ccr_workspace_key,
+                        # Only this conversation's own compressions: a
+                        # same-cwd teammate must not receive the lead's
+                        # tool output (#1174).
+                        present_hashes=ccr_present_hashes,
                     )
                     if recommendations:
                         expansions = self.ccr_context_tracker.execute_expansions(recommendations)
@@ -5408,6 +5425,9 @@ class AnthropicHandlerMixin:
         compressed_requests = []
         pipeline_timing: dict[str, float] = {}
 
+        # O1 (2026-09-27 perf audit): the per-request snapshot aliases unless
+        # hooks or extensions are configured (see the main handler).
+        from headroom.proxy.helpers import snapshot_original_messages
         from headroom.transforms.cold_prefix import anthropic_cache_ttl_seconds
 
         # Apply compression to each request in the batch
@@ -5417,7 +5437,9 @@ class AnthropicHandlerMixin:
             canonical_params = dict(params)
             original_tools = canonical_params.get("tools")
             messages = params.get("messages", [])
-            original_messages = copy.deepcopy(messages)
+            original_messages = snapshot_original_messages(
+                messages, hooks=self.config.hooks, extensions=self.pipeline_extensions
+            )
             model = params.get("model", "unknown")
             cache_ttl_seconds = anthropic_cache_ttl_seconds(
                 model, original_messages, params.get("system")
