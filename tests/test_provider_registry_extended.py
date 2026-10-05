@@ -45,7 +45,7 @@ def test_prefix_cache_pricing_retains_qualified_openai_models(model: str) -> Non
     metrics.cache_by_provider["openai"].update(requests=1, cache_read_tokens=1_000_000)
     with (
         patch.object(tracker, "_get_list_price", return_value=2.5) as price,
-        patch.object(tracker, "_get_cache_prices", return_value=(1.25e-6, 2.5e-6, 2.5e-6)),
+        patch.object(tracker, "_get_cache_prices", return_value=(1.25e-6, 2.5e-6, 2.5e-6, 2.5e-6)),
     ):
         result = build_prefix_cache_stats(metrics, tracker)["by_provider"]["openai"]
 
