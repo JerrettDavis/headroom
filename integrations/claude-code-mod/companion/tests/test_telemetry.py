@@ -26,6 +26,16 @@ def test_signed_expansion_is_not_hidden():
     assert summarize([r])["saved"] == -20
 
 
+@pytest.mark.parametrize("before,after,saved", [(100, 120, 0), (1000, 800, 150)])
+def test_proxy_clamping_and_replay_debt_remain_accounted(before, after, saved):
+    r = record(Log(input_tokens_original=before, input_tokens_optimized=after, tokens_saved=saved))
+    assert r["accounting"] == "complete"
+    assert r["percent"] == round(saved / before * 100, 2)
+    totals = summarize([r])
+    assert totals["accounted_requests"] == 1
+    assert (totals["before"], totals["after"], totals["saved"]) == (before, after, saved)
+
+
 def test_consistent_weighted_not_average_percent():
     a = record(Log(input_tokens_original=1000, input_tokens_optimized=900, tokens_saved=100))
     b = record(Log(input_tokens_original=100, input_tokens_optimized=10, tokens_saved=90))

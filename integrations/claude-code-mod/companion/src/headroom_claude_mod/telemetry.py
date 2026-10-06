@@ -66,7 +66,9 @@ def record(entry: Any) -> dict[str, Any]:
     after = number(getattr(entry, "input_tokens_optimized", None))
     saved = number(getattr(entry, "tokens_saved", None), signed=True)
     complete = before is not None and after is not None and saved is not None
-    consistent = complete and saved == before - after
+    # Anthropic may clamp expansion to zero or subtract cache replay debt.
+    # The logger's savings remain authoritative within the raw token delta.
+    consistent = complete and (saved == before - after or 0 <= saved <= max(0, before - after))
     request_id = text(getattr(entry, "request_id", None), 128)
     transforms = getattr(entry, "transforms_applied", [])
     return {

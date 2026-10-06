@@ -58,6 +58,7 @@ async function refresh($, ctx) {
     const start = await checked($, ctx);
     if (!start || !start.open) return;
     const usage = await $.session.usage(); // no breakdown: never a token-count/model call
+    if (ctx.network) return; // Inspection may have started while usage was awaited.
     const data = await getJson($, ctx, `${start.baseUrl}${PREFIX}${start.sessionId}?limit=100`, start.sessionId);
     const current = await checked($, ctx);
     if (!current?.open || current.owner !== start.owner) return;
@@ -91,7 +92,7 @@ async function close($, ctx) {
   await $.ui.close({ id: PANE });
 }
 
-async function inspectRequest($, ctx, selection) {
+async function inspectRequest($, ctx, selection, lastScreen = false) {
   const rev = ++ctx.inspectRevision;
   const start = await checked($, ctx);
   if (!start?.open) return;
@@ -103,7 +104,9 @@ async function inspectRequest($, ctx, selection) {
     const current = await checked($, ctx);
     if (!current?.open || rev !== ctx.inspectRevision || current.owner !== start.owner) return;
     if (data.epoch !== current.summary?.epoch) throw new Error('Proxy restarted; refresh before inspecting.');
-    await patch($, ctx, { detail: data });
+    // Rendering knows the terminal size and clamps this sentinel to the last
+    // screen. Prev/Next then continue from that clamped position.
+    await patch($, ctx, { detail: data, textPage: lastScreen ? Number.MAX_SAFE_INTEGER : 0 });
   } catch (error) {
     if (rev === ctx.inspectRevision) await patch($, ctx, { detail: { available: false, reason: safeText(error?.message, 280) } });
   }
@@ -124,7 +127,7 @@ function actions($, ctx) {
       const next = Math.min(s.textPage, screens - 1) + delta;
       if (next >= 0 && next < screens) { await patch($, ctx, { textPage: next }); return; }
       const page = s.detail.page + delta;
-      if (page >= 0 && page < s.detail.pages) await inspectRequest($, ctx, { ...s.selection, page });
+      if (page >= 0 && page < s.detail.pages) await inspectRequest($, ctx, { ...s.selection, page }, delta < 0);
     },
   };
 }

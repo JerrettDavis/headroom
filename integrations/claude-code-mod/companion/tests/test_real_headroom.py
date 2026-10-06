@@ -51,6 +51,29 @@ def test_with_real_request_logger_and_security_guards():
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 1)) as c:
         assert c.get(f"/headroom-mod/v1/sessions/{sid}").json()["totals"]["saved"] == 40
         assert c.get(f"/headroom-mod/v1/sessions/{sid}/requests/contract-1").json()["available"]
+        for origin in (
+            "http://127.0.0.1:9000",
+            "http://localhost",
+            "https://127.0.0.1",
+            "http://127.0.0.1:0",
+            "http://@127.0.0.1",
+            "null",
+            "",
+        ):
+            assert (
+                c.get(
+                    f"/headroom-mod/v1/sessions/{sid}/requests/contract-1",
+                    headers={"Origin": origin},
+                ).status_code
+                == 403
+            )
+        assert (
+            c.get(
+                f"/headroom-mod/v1/sessions/{sid}/requests/contract-1",
+                headers={"Origin": "http://127.0.0.1"},
+            ).status_code
+            == 200
+        )
         assert c.get(
             f"/headroom-mod/v1/sessions/{sid}", headers={"Origin": "https://evil.example"}
         ).status_code in {403, 404}

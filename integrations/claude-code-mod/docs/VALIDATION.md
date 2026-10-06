@@ -5,8 +5,8 @@ repository proxy source based on main `855390d6110e0bbb199d9b97025baac16c2f5cf3`
 
 | Gate | Result | Boundary |
 |---|---|---|
-| JavaScript unit suite | 38 passed | Shipped hooks, protocol host fixture, lifecycle, stale responses, `/clear` state loss, paging and error behavior |
-| Companion Python suite | 59 passed, 1 skipped | Accounting, filtering, bounded previews, retention, guards and launcher; the real Headroom gate runs separately |
+| JavaScript unit suite | 40 passed | Shipped hooks, protocol host fixture, lifecycle, stale responses, `/clear` state loss, backward chunk paging and polling/inspection race |
+| Companion Python suite | 61 passed, 1 skipped | Accounting including provider clamping/replay debt, filtering, bounded previews, retention, exact-origin guards and launcher |
 | Real Headroom logger/security gate | Passed | Actual RequestLogger/RequestLog and loopback/origin guards; no substituted Headroom modules |
 | HTTP bridge smoke | Passed | Actual local HTTP, synthetic request records, shipped hooks |
 | Real proxy E2E, capture on/off | Passed | Actual proxy pipeline, local provider stub, actual retained records and shipped hooks; 18,583 tokens saved in the synthetic fixture |

@@ -127,7 +127,7 @@ for attribution. Keep the extracted local marketplace directory in place.
 | Readout | Definition / scope |
 |---|---|
 | Latest recorded request | Headroom-reported original and optimized input tokens for the latest tagged request, including explicit missing/inconsistent/failed states. |
-| Reduction | `(before - after) / before`; negative values show expansion, not a silently clamped zero. |
+| Reduction | Headroom's recorded `tokens_saved / before`. Provider clamping and replay debt may reduce this below the raw input-token delta. Signed expansion records remain negative. |
 | Claude context | `$.session.usage().context`; no `breakdown` is requested, so the mod does not ask for token counting or model inference. |
 | Retained totals | Sum over unique retained request IDs with consistent accounting and no recorded error. Not a lifetime total and not unique context tokens. |
 | Weighted reduction | Sum of saved tokens divided by sum of original tokens over the same accounted requests; never an average of percentages. |

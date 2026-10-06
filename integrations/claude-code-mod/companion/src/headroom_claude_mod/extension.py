@@ -7,14 +7,40 @@ import uuid
 from collections import OrderedDict
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from . import __version__
 from .telemetry import IncompatibleLogger, belongs, inspect, record, snapshot, summarize
 
 PREFIX = "/headroom-mod/v1"
+
+
+def require_exact_origin(request: Request) -> None:
+    """Captured text is readable only by this origin, not other local sites."""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return  # Native clients do not send a browser Origin header.
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
+        target_port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        allowed = (
+            parsed.scheme in {"http", "https"}
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment
+            and (parsed.scheme, parsed.hostname, port)
+            == (request.url.scheme, request.url.hostname, target_port)
+        )
+    except ValueError:
+        allowed = False
+    if not allowed:
+        raise HTTPException(status_code=403, detail="cross-origin request rejected")
 
 
 def install(app: Any, config: Any) -> None:
@@ -27,7 +53,12 @@ def install(app: Any, config: Any) -> None:
     epoch = str(uuid.uuid4())
     cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
     router = APIRouter(
-        prefix=PREFIX, dependencies=[Depends(require_loopback), Depends(require_same_origin)]
+        prefix=PREFIX,
+        dependencies=[
+            Depends(require_loopback),
+            Depends(require_same_origin),
+            Depends(require_exact_origin),
+        ],
     )
 
     def response(payload: dict[str, Any]) -> JSONResponse:

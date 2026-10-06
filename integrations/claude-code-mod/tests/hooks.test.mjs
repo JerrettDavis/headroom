@@ -1,8 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { host, press, words, settle, summary, response, detail, SID, OTHER, EPOCH, row } from './host-fixture.mjs';
+import { textPages } from '../plugins/headroom-sidebar/hooks/core.mjs';
 
 const reads = h => h.calls.filter(c => c[0] === 'http.fetch');
+
+test('backward chunk navigation returns to the previous chunk last screen', async () => {
+  const chunks = ['first chunk\n'.repeat(80), 'second chunk'];
+  const h = host({ transport: async url => {
+    if (!url.includes('/requests/')) return response(summary());
+    const page = Number(new URL(url).searchParams.get('page'));
+    return response({ ...detail(), page, pages: 2, text: chunks[page] });
+  } });
+  await h.start(); await press(h, 'requests'); await press(h, 'inspect-req-1');
+  const screens = textPages(chunks[0], 48, 30).length;
+  assert.ok(screens > 1);
+  for (let i = 0; i < screens; i++) await press(h, 'text-next');
+  assert.equal(h.state().detail.page, 1);
+  await press(h, 'text-prev');
+  assert.equal(h.state().detail.page, 0);
+  assert.match(words(await h.pane()), new RegExp(`Screen ${screens}/${screens}`));
+  await press(h, 'text-prev');
+  assert.match(words(await h.pane()), new RegExp(`Screen ${screens - 1}/${screens}`));
+  await press(h, 'text-next'); await press(h, 'text-next');
+  assert.equal(h.state().detail.page, 1);
+  assert.match(words(await h.pane()), /Screen 1\/1/);
+});
 
 test('loads, registers command, opens without stealing focus and shows live scoped numbers', async () => {
   const h = host(); await h.start();
@@ -79,6 +102,20 @@ test('overlapping refreshes never create overlapping HTTP reads', async () => {
   await h.start(); await h.dispatch('turn.complete', {}); await h.advance(10);
   assert.equal(reads(h).length, 1);
   release(response(summary())); await settle(); assert.equal(h.state().connection, 'live');
+});
+
+test('inspection starting while polling awaits usage does not mark the proxy offline', async () => {
+  const h = host(); await h.start(); await press(h, 'requests');
+  let releaseUsage;
+  h.$.session.usage = () => new Promise(resolve => { releaseUsage = resolve; });
+  await h.dispatch('turn.complete', {}); await h.advance(2);
+  let releaseRead;
+  h.ctl.transport = () => new Promise(resolve => { releaseRead = resolve; });
+  const inspecting = press(h, 'inspect-req-1'); await settle();
+  releaseUsage({ context: null }); await settle();
+  assert.equal(h.state().connection, 'live');
+  releaseRead(response(detail())); await inspecting;
+  assert.equal(h.state().detail.available, true);
 });
 
 test('timeout reports offline but preserves lock until actual host read completes', async () => {
