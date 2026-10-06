@@ -46,6 +46,7 @@ from headroom.evals.metrics import (
     compute_rouge_l,
     compute_semantic_similarity,
 )
+from headroom.offline import guard_egress
 from headroom.providers.evals import call_eval_llm, create_eval_client, default_eval_model
 from headroom.transforms.content_router import ContentRouter, ContentRouterConfig
 
@@ -1027,6 +1028,7 @@ class BatchCompressionEvaluator:
 
     def _init_llm_client(self) -> Any:
         """Initialize LLM client."""
+        guard_egress(f"{self.provider} API for the batch compression benchmark")
         return create_eval_client(self.provider)
 
     def _call_llm(self, messages: list[dict[str, Any]]) -> str:

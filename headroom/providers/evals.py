@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from headroom.offline import guard_egress
+
 
 @dataclass(frozen=True)
 class EvalProviderAdapter:
@@ -21,6 +23,7 @@ class EvalProviderAdapter:
 
 
 def _openai_client() -> Any:
+    guard_egress("openai API for evaluation tooling")
     try:
         import openai
     except ImportError as exc:
@@ -30,6 +33,7 @@ def _openai_client() -> Any:
 
 
 def _anthropic_client() -> Any:
+    guard_egress("anthropic API for evaluation tooling")
     try:
         import anthropic
     except ImportError as exc:
