@@ -14,6 +14,10 @@ and the original design review.
 
 ## Validation status
 
+![Native sidebar showing live compression metrics](docs/screenshots/native-overview.png)
+
+[View request history and message-inspector screenshots](docs/screenshots/README.md).
+
 The shipped hooks and companion pass their unit tests, real Headroom logger/guard
 contracts, native Claude validation and runtime tests. A repeatable end-to-end test
 starts the actual Headroom proxy, compresses a synthetic tool result, forwards it
