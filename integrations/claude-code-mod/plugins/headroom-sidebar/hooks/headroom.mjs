@@ -18,8 +18,17 @@ async function recoverState($, ctx) {
   // Only current command events recover it; stale timers never adopt a new session.
   ctx.timer?.cancel(); ctx.scheduled?.cancel(); ctx.inspectRevision++;
   ctx.owner++;
+  const sid = await $.env.get('HEADROOM_MOD_SESSION_ID');
+  const rawUrl = await $.env.get('HEADROOM_MOD_URL');
+  let link = {};
+  if (UUID.test(sid ?? '') && rawUrl) {
+    try { link = { sessionId: sid, baseUrl: localUrl(rawUrl) }; }
+    catch { /* Unsupported origins remain unlinked. */ }
+  }
   await $.state.set(REF, { ...initialState(ctx.owner), open: true,
+    ...link,
     notice: 'Conversation changed. Relaunch with headroom-mod run to link this conversation.' });
+  ctx.timer = $.clock.every(5000, () => quiet(refresh($, ctx)));
 }
 
 async function checked($, ctx) {
@@ -29,7 +38,10 @@ async function checked($, ctx) {
   if (!UUID.test(s.sessionId) || actual !== s.sessionId) {
     ctx.inspectRevision++;
     await patch($, ctx, { connection: 'setup', summary: null, detail: null, selection: null,
-      notice: 'Conversation not linked (or /clear/resume changed it). Relaunch with headroom-mod run; no proxy-wide data is substituted.' });
+      notice: UUID.test(s.sessionId ?? '')
+        ? 'Conversation changed since launch. Resume it through Headroom to restore session linking.'
+        : 'Claude started without Headroom session linking. The pane cannot attribute requests to this conversation.',
+      resumeId: UUID.test(actual ?? '') ? actual : null });
     return null;
   }
   return s;
@@ -178,7 +190,7 @@ export function register(on) {
   on('command.run', { command: 'headroom' }, async ($, e) => {
     if (e.args?.trim() === 'close') { await close($, ctx); return { text: 'Headroom closed.' }; }
     await open($, ctx);
-    return { text: 'Headroom opened. 1 Overview · 2 Requests · r Refresh · q Close.' };
+    return { text: 'Headroom opened. 1 Overview · 2 Requests · r Refresh · q Close · PgUp/PgDn scroll.' };
   });
   on('command.run', { command: ['clear', 'resume'] }, async ($, e, next) => {
     const result = await next(e);

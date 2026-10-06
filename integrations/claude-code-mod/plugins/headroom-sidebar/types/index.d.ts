@@ -2,6 +2,7 @@ export type HeadroomSelection = { requestId: string; side: 'original' | 'compres
 export type HeadroomState = {
   owner: number;
   sessionId: string;
+  resumeId?: string | null;
   baseUrl: string;
   open: boolean;
   band: boolean;

@@ -12,6 +12,82 @@ const payload = {
 };
 
 describe('headroom', () => {
+  test('native request buttons inspect all sides and navigate messages', async ($, on) => {
+    const clock = mock.clock(on);
+    mock.env(on, { HEADROOM_MOD_SESSION_ID: sid, HEADROOM_MOD_URL: 'http://127.0.0.1:8787' });
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    on('session.id', () => ({ value: sid }));
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 600, window: 200000, percent: 0.3 } } }));
+    on('command.register', ($, e) => ({ value: { command: e.name } }));
+    on('ui.open', () => ({ value: { isPlaced: true } } as any));
+    const row = { request_id: 'native-req', timestamp: '2026-10-06T17:41:49Z', model: 'native-test',
+      before: 1000, after: 600, saved: 400, percent: 40, overhead_ms: 1,
+      accounting: 'complete', failed: false, inspectable_id: true, has_messages: true, transforms: [] };
+    const urls: string[] = [];
+    on('http.fetch', ($, e) => {
+      urls.push(e.url);
+      const url = new URL(e.url);
+      const data = url.pathname.includes('/requests/')
+        ? { schema_version: 1, session_id: sid, epoch, request_id: row.request_id,
+          available: true, side: url.searchParams.get('side'), message: Number(url.searchParams.get('message')),
+          message_count: 2, page: 0, pages: 1, truncated: false, text: 'Native preview fixture' }
+        : { ...payload, totals: { ...payload.totals, requests: 1, accounted_requests: 1, saved: 400 },
+          latest: row, requests: [row], log_full_messages: true };
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(data) } };
+    });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any);
+    await clock.advance(2);
+    await clock.settle();
+    const ui = await $.ui.mount({ plugin: 'headroom-sidebar', surface: 'terminal', component: 'Pane',
+      requestId: 'headroom-sidebar', props: { bodyColumns: 80, placement: 'dock', scroll: { bodyRows: 35 } } } as any);
+    await ui.press({ key: 'requests' });
+    await ui.press({ key: 'inspect-native-req' });
+    await clock.settle();
+    expect(await ui.find({ type: 'Text', text: /Native preview fixture/ })).toBeDefined();
+    for (const side of ['original', 'compressed', 'diff']) {
+      await ui.press({ key: side });
+      await clock.settle();
+      expect(urls[urls.length - 1]).toContain(`side=${side}`);
+    }
+    await ui.press({ key: 'message-next' });
+    await clock.settle();
+    expect(urls[urls.length - 1]).toContain('message=1');
+    await ui.press({ key: 'message-prev' });
+    await clock.settle();
+    expect(urls[urls.length - 1]).toContain('message=0');
+    await ui.press({ key: 'requests' });
+    expect(await ui.find({ type: 'Text', text: /Page 1\/1/ })).toBeDefined();
+    await ui.unmount();
+  });
+  test('native buttons switch unlinked tabs and close without fetching telemetry', async ($, on) => {
+    const clock = mock.clock(on);
+    mock.env(on, {});
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    on('session.id', () => ({ value: sid }));
+    on('command.register', ($, e) => ({ value: { command: e.name } }));
+    on('ui.open', () => ({ value: { isPlaced: true } } as any));
+    let reads = 0;
+    on('ui.render', { component: 'Pane' }, ($, e) => $.ui.resolve(e).Text({ children: 'Host pane fallback' }));
+    on('http.fetch', () => { reads++; throw new Error('Unlinked pane must not fetch'); });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any);
+    await clock.advance(2);
+    await clock.settle();
+    const ui = await $.ui.mount({ plugin: 'headroom-sidebar', surface: 'terminal',
+      component: 'Pane', requestId: 'headroom-sidebar',
+      props: { bodyColumns: 80, placement: 'dock', scroll: { bodyRows: 35 } } } as any);
+    expect(await ui.find({ type: 'Text', text: /OVERVIEW/ })).toBeDefined();
+    await ui.press({ key: 'requests' });
+    expect(await ui.find({ type: 'Text', text: /REQUESTS/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /Request history requires/ })).toBeDefined();
+    await ui.press({ key: 'overview' });
+    expect(await ui.find({ type: 'Text', text: /OVERVIEW/ })).toBeDefined();
+    await ui.press({ key: 'refresh' });
+    await clock.settle();
+    expect(reads).toBe(0);
+    await ui.press({ key: 'close' });
+    expect(await ui.find({ type: 'Text', text: /Host pane fallback/ })).toBeDefined();
+    await ui.unmount();
+  });
   test('native state, command registration and narrow terminal fallback', async ($, on) => {
     const clock = mock.clock(on);
     mock.env(on, { HEADROOM_MOD_SESSION_ID: sid, HEADROOM_MOD_URL: 'http://127.0.0.1:8787' });

@@ -6,14 +6,23 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
   const button = (key, title, fn, hotkey) => Button({ key, label: title, onPress: fn, ...(hotkey ? { hotkey } : {}) });
   const group = children => Box({ flexDirection: 'row', gap: 1, children });
   const children = [line('HEADROOM  /  COMPRESSION', { bold: true }),
-    line(`${state.connection.toUpperCase()} · ${state.sessionId ? state.sessionId.slice(0, 8) : 'not linked'}`, { dimColor: true }),
-    group([button('overview', 'Overview', () => actions.tab('overview'), '1'),
-      button('requests', 'Requests', () => actions.tab('requests'), '2'),
+    line(`${state.connection.toUpperCase()} · ${state.connection !== 'setup' && state.sessionId ? state.sessionId.slice(0, 8) : 'not linked'}`, { dimColor: true }),
+    group([button('overview', state.tab === 'overview' ? 'Overview ●' : 'Overview', () => actions.tab('overview'), '1'),
+      button('requests', state.tab === 'requests' ? 'Requests ●' : 'Requests', () => actions.tab('requests'), '2'),
       button('refresh', 'Refresh', actions.refresh, 'r'), button('close', 'Close', actions.close, 'q')])];
   if (state.notice) children.push(line(safeText(state.notice, 300), { dimColor: true }));
   const data = state.summary;
   if (!data) {
-    children.push(line('Local companion required. Use headroom-mod doctor, then headroom-mod run.'),
+    children.push(line(state.tab === 'requests' ? 'REQUESTS' : 'OVERVIEW', { bold: true }),
+      line(state.connection === 'setup'
+        ? (state.tab === 'requests' ? 'Request history requires a linked conversation.' : 'Compression metrics require a linked conversation.')
+        : 'Telemetry is unavailable until the companion responds.'));
+    if (state.connection === 'setup' && state.resumeId) {
+      children.push(line('Exit Claude, then relaunch this conversation through the launcher:'),
+        line(`headroom-mod run --resume ${state.resumeId}`),
+        line('Add --proxy-url with your companion origin before --resume if it uses a custom port.', { dimColor: true }));
+    } else children.push(line('Check your companion with headroom-mod doctor, then use Refresh.'));
+    children.push(line('1 Overview · 2 Requests · r Refresh · q Close · Tab/Enter selects controls', { dimColor: true }),
       line('The mod observes Headroom; it does not enable compression or message capture.', { dimColor: true }));
     return Box({ flexDirection: 'column', paddingX: 1, children });
   }

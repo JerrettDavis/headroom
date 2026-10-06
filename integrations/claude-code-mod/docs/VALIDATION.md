@@ -5,13 +5,13 @@ repository proxy source based on main `855390d6110e0bbb199d9b97025baac16c2f5cf3`
 
 | Gate | Result | Boundary |
 |---|---|---|
-| JavaScript unit suite | 40 passed | Shipped hooks, protocol host fixture, lifecycle, stale responses, `/clear` state loss, backward chunk paging and polling/inspection race |
+| JavaScript unit suite | 43 passed | Shipped hooks, protocol host fixture, lifecycle, stale responses, `/clear` state loss, backward chunk paging and polling/inspection race |
 | Companion Python suite | 61 passed, 1 skipped | Accounting including provider clamping/replay debt, filtering, bounded previews, retention, exact-origin guards and launcher |
 | Real Headroom logger/security gate | Passed | Actual RequestLogger/RequestLog and loopback/origin guards; no substituted Headroom modules |
 | HTTP bridge smoke | Passed | Actual local HTTP, synthetic request records, shipped hooks |
 | Real proxy E2E, capture on/off | Passed | Actual proxy pipeline, local provider stub, actual retained records and shipped hooks; 18,583 tokens saved in the synthetic fixture |
 | Native Claude validation | Passed on 2.1.290 and 2.1.291 | Native hook validator |
-| Native Claude runtime tests | 2 passed | Official Claude test-kit execution |
+| Native Claude runtime tests | 4 passed | Official Claude test-kit execution |
 | Authenticated native sessions | Passed | Actual Anthropic-backed Windows Claude tool task; 22,801 saved tokens / 9.3%, matching proxy records |
 | Companion wheel | Built/installed | Universal wheel and console-script/extension entry points |
 | Runtime dependency check | Passed | 99 compatible installed dependencies |
@@ -50,6 +50,22 @@ close behavior and session-change safety. The capture-off run requires metrics
 to work without exposing message text. No provider credentials are needed.
 
 ## Native acceptance performed
+
+October 6 follow-up exercised interactive Claude 2.1.291 in a separate repository,
+`G:\git\3dprint4me`, through the native Windows terminal. A direct Claude launch
+showed an unlinked setup pane; `1`/`2` changed tabs and `q` closed it. Resuming the
+same UUID through the dedicated launcher reached `LIVE`. A no-tools prompt
+completed through Headroom, with 252,353 → 229,071 input tokens and 23,282 saved
+(9.23%), matching the session-scoped companion record. Page Down exposed the
+request row and Tab/Enter opened its message inspector. `/clear` removed prior
+telemetry and the final installed hooks correctly displayed the changed-session
+diagnostic. Native runtime tests additionally activate tab, refresh, close,
+original/compressed/diff, and message-navigation buttons. Regression tests cover
+restored periodic refresh when resuming the original linked session after state
+reset, and accurate offline diagnostics when the first companion read fails.
+The final follow-up passed 43 JavaScript tests, four native runtime tests, and
+real-proxy E2E with capture both enabled and disabled. Native mouse input remains
+unverified in this terminal host.
 
 - Two independent sessions displayed separate request histories. Cross-session
   detail requests returned 404.

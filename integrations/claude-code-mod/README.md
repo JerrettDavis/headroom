@@ -91,6 +91,17 @@ headroom-mod run --proxy-url http://127.0.0.1:8787 --plugin-dir ./plugins/headro
 The pane opens without taking keyboard focus. `/headroom` opens/focuses it again.
 Keys: `1` Overview, `2` Requests, `r` Refresh, `q` Close. Use Tab/Enter or mouse
 buttons for request selection, original/compressed/diff modes, and pagination.
+Use Page Up/Page Down to scroll the pane when its content exceeds the visible
+height; request buttons and recovery commands may be below the fold.
+The selected tab has a dot beside its label. If Claude was started directly,
+the plugin can open but cannot attribute proxy requests to that conversation.
+The setup pane shows the conversation UUID and a command to resume it through
+`headroom-mod run --resume <UUID>` after exiting Claude. Include
+`--proxy-url http://127.0.0.1:<port>` before `--resume` for a custom proxy port.
+On the dedicated Windows installation, use
+`& "$env:USERPROFILE\.local\share\headroom-sidebar\Start-HeadroomSidebar.ps1" -Resume <UUID>`
+to use its existing proxy on port 18787. Changing tabs or pressing Refresh cannot
+reroute an already-running Claude process through Headroom.
 When a pane cannot be placed, a compact band explains how to reopen it at a wider
 window size; it yields to surveys and composes with other mods' existing band.
 

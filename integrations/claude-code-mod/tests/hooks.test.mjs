@@ -5,6 +5,52 @@ import { textPages } from '../plugins/headroom-sidebar/hooks/core.mjs';
 
 const reads = h => h.calls.filter(c => c[0] === 'http.fetch');
 
+test('linked initial connection failure describes unavailable telemetry rather than missing linking', async () => {
+  const h = host({ transport: async () => { throw new Error('companion offline'); } });
+  await h.start();
+  assert.equal(h.state().connection, 'offline');
+  assert.doesNotMatch(words(await h.pane()), /require[s]? a linked conversation/);
+  assert.match(words(await h.pane()), /companion responds/);
+});
+
+test('resuming the original linked session after state reset restores periodic refresh', async () => {
+  const h = host();
+  await h.start();
+  await h.dispatch('command.run', { command: 'clear' }, async () => {
+    h.ctl.sid = OTHER;
+    await h.$.state.set({ plugin: 'headroom-sidebar', key: 'model' }, undefined);
+    return { text: 'cleared' };
+  });
+  await h.dispatch('command.run', { command: 'resume' }, async () => {
+    h.ctl.sid = SID;
+    await h.$.state.set({ plugin: 'headroom-sidebar', key: 'model' }, undefined);
+    return { text: 'resumed' };
+  });
+  await h.dispatch('command.run', { command: 'headroom', args: '' });
+  await h.advance(2);
+  assert.equal(h.state().connection, 'live');
+  const n = reads(h).length;
+  await h.advance(5000);
+  assert.equal(reads(h).length, n + 1);
+});
+
+test('unlinked conversation has distinct tabs and an exact resume command without reading telemetry', async () => {
+  const h = host({ env: { HEADROOM_MOD_SESSION_ID: undefined, HEADROOM_MOD_URL: undefined } });
+  await h.start();
+  let text = words(await h.pane());
+  assert.match(text, /OVERVIEW/);
+  assert.match(text, /started without Headroom session linking/);
+  assert.match(text, new RegExp(`headroom-mod run --resume ${SID}`));
+  await press(h, 'requests');
+  text = words(await h.pane());
+  assert.match(text, /REQUESTS/);
+  assert.match(text, /Request history requires a linked conversation/);
+  assert.equal(h.state().tab, 'requests');
+  assert.equal(reads(h).length, 0);
+  await press(h, 'close');
+  assert.equal(h.state().open, false);
+});
+
 test('backward chunk navigation returns to the previous chunk last screen', async () => {
   const chunks = ['first chunk\n'.repeat(80), 'second chunk'];
   const h = host({ transport: async url => {
@@ -191,6 +237,9 @@ test('native clear resets stored state and reopening shows an unlinked notice wi
   assert.equal(h.state().summary, null);
   assert.equal(h.state().detail, null);
   assert.equal(h.state().open, true);
+  assert.equal(h.state().resumeId, OTHER);
+  assert.match(words(await h.pane()), /Conversation changed since launch/);
+  assert.doesNotMatch(words(await h.pane()), /Claude started without/);
   assert.match(words(await h.pane()), /relaunch/i);
   await h.advance(15000);
   assert.equal(reads(h).length, n);
