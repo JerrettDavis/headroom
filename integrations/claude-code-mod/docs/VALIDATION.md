@@ -11,7 +11,7 @@ repository proxy source based on main `855390d6110e0bbb199d9b97025baac16c2f5cf3`
 | HTTP bridge smoke | Passed | Actual local HTTP, synthetic request records, shipped hooks |
 | Real proxy E2E, capture on/off | Passed | Actual proxy pipeline, local provider stub, actual retained records and shipped hooks; 18,583 tokens saved in the synthetic fixture |
 | Native Claude validation | Passed on 2.1.290 and 2.1.291 | Native hook validator |
-| Native Claude runtime tests | 4 passed | Official Claude test-kit execution |
+| Native Claude runtime tests | 5 passed | Official Claude test-kit execution; includes sidebar startup tool invocation and resume guidance |
 | Authenticated native sessions | Passed | Actual Anthropic-backed Windows Claude tool task; 22,801 saved tokens / 9.3%, matching proxy records |
 | Companion wheel | Built/installed | Universal wheel and console-script/extension entry points |
 | Runtime dependency check | Passed | 99 compatible installed dependencies |

@@ -1,5 +1,6 @@
 export type HeadroomSelection = { requestId: string; side: 'original' | 'compressed' | 'diff'; message: number; page: number };
 export type HeadroomState = {
+  startNotice?: string;
   owner: number;
   sessionId: string;
   resumeId?: string | null;

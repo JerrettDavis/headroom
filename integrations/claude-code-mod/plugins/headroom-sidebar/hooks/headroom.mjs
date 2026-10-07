@@ -48,6 +48,10 @@ async function checked($, ctx) {
 }
 
 async function getJson($, ctx, url, sid, requestId) {
+  return parseResponse(await getResponse($, ctx, url), sid, requestId);
+}
+
+async function getResponse($, ctx, url) {
   if (ctx.network) throw new Error('A previous Headroom read is still pending; no overlapping request was started.');
   // The published HttpInit has no abort/timeout member. Do not invent one.
   // A UI deadline does not release the single-flight lock until the HOST read settles.
@@ -58,7 +62,7 @@ async function getJson($, ctx, url, sid, requestId) {
   const timeout = new Promise((_, reject) => {
     deadline = $.clock.after(4000, () => reject(new Error('Headroom read timed out. A pending host read is not retried concurrently.')));
   });
-  try { return parseResponse(await Promise.race([operation, timeout]), sid, requestId); }
+  try { return await Promise.race([operation, timeout]); }
   finally { deadline?.cancel(); }
 }
 
@@ -126,6 +130,29 @@ async function inspectRequest($, ctx, selection, lastScreen = false) {
 
 function actions($, ctx) {
   return {
+    start: async () => {
+      if (ctx.starting) return;
+      ctx.starting = true;
+      const startOwner = ctx.owner;
+      try {
+        const s = await read($);
+        const owner = s.owner;
+        const base = localUrl(s.baseUrl || 'http://127.0.0.1:8787');
+        await patch($, ctx, { startNotice: 'Starting Headroom… Approve the launcher command if Claude asks.' });
+        const launch = await $.tool.call({ tool: 'Bash', command: `headroom-mod start --proxy-url '${base}'`, timeout: 30000 });
+        if (launch?.deny || launch?.isError) throw new Error(launch.deny || launch.text || 'The launcher command failed.');
+        if (ctx.owner !== owner) return;
+        const health = await getResponse($, ctx, `${base}/headroom-mod/v1/health`);
+        if (!health?.ok) throw new Error('The Headroom companion is unavailable. Check the launcher output and retry.');
+        const actual = await $.session.id();
+        if (ctx.owner !== owner) return;
+        const resume = UUID.test(actual ?? '') ? ` --resume ${actual}` : '';
+        await patch($, ctx, { startNotice: `Exit Claude and restart with: headroom-mod run --proxy-url '${base}'${resume}`, resumeId: UUID.test(actual ?? '') ? actual : null });
+        requestRefresh($, ctx);
+      } catch (error) {
+        if (ctx.owner === startOwner) await patch($, ctx, { startNotice: `Headroom startup failed: ${safeText(error?.message, 230)}` });
+      } finally { ctx.starting = false; }
+    },
     refresh: () => quiet(refresh($, ctx)), close: () => quiet(close($, ctx)),
     tab: tab => { ctx.inspectRevision++; return patch($, ctx, { tab, detail: null, selection: null }); },
     filter: async () => { const s = await read($); await patch($, ctx, { changedOnly: !s.changedOnly, listPage: 0 }); },
@@ -190,7 +217,7 @@ export function register(on) {
   on('command.run', { command: 'headroom' }, async ($, e) => {
     if (e.args?.trim() === 'close') { await close($, ctx); return { text: 'Headroom closed.' }; }
     await open($, ctx);
-    return { text: 'Headroom opened. 1 Overview · 2 Requests · r Refresh · q Close · PgUp/PgDn scroll.' };
+    return { text: 'Headroom opened. 1 Overview · 2 Requests · r Refresh · s Start Headroom when offline · PgUp/PgDn scroll. Use the pane close control to close.' };
   });
   on('command.run', { command: ['clear', 'resume'] }, async ($, e, next) => {
     const result = await next(e);

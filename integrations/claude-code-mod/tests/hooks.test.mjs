@@ -3,6 +3,41 @@ import assert from 'node:assert/strict';
 import { host, press, words, settle, summary, response, detail, SID, OTHER, EPOCH, row } from './host-fixture.mjs';
 import { textPages } from '../plugins/headroom-sidebar/hooks/core.mjs';
 
+test('sidebar startup uses a native tool and preserves exact restart guidance during polling', async () => {
+  const h = host();
+  delete h.env.HEADROOM_MOD_SESSION_ID;
+  await h.start();
+  let command;
+  h.$.tool = { call: async args => { command = args; } };
+  h.$.http.fetch = async () => ({ ok: true });
+  await press(h, 'start');
+  assert.equal(command.tool, 'Bash');
+  assert.match(command.command, /^headroom-mod start --proxy-url 'http:\/\/127\.0\.0\.1:\d+'$/);
+  assert.match(h.state().startNotice, new RegExp(`headroom-mod run.*--resume ${SID}`));
+  await h.advance(5000);
+  assert.match(words(await h.pane()), new RegExp(`--resume ${SID}`));
+});
+
+test('denied startup is shown as a failure without restart guidance', async () => {
+  const h = host();
+  delete h.env.HEADROOM_MOD_SESSION_ID;
+  await h.start();
+  h.$.tool = { call: async () => { throw new Error('Permission denied'); } };
+  await press(h, 'start');
+  assert.match(h.state().startNotice, /startup failed: Permission denied/);
+  assert.doesNotMatch(h.state().startNotice, /Exit Claude/);
+});
+
+test('a failed launcher tool result does not claim startup success', async () => {
+  const h = host();
+  delete h.env.HEADROOM_MOD_SESSION_ID;
+  await h.start();
+  h.$.tool = { call: async () => ({ isError: true, text: 'headroom-mod: command not found' }) };
+  await press(h, 'start');
+  assert.match(h.state().startNotice, /startup failed: headroom-mod: command not found/);
+  assert.doesNotMatch(h.state().startNotice, /Exit Claude/);
+});
+
 const reads = h => h.calls.filter(c => c[0] === 'http.fetch');
 
 test('linked initial connection failure describes unavailable telemetry rather than missing linking', async () => {
@@ -47,7 +82,7 @@ test('unlinked conversation has distinct tabs and an exact resume command withou
   assert.match(text, /Request history requires a linked conversation/);
   assert.equal(h.state().tab, 'requests');
   assert.equal(reads(h).length, 0);
-  await press(h, 'close');
+  await h.dispatch('ui.close', { id: 'headroom-sidebar' }, async () => ({}));
   assert.equal(h.state().open, false);
 });
 
@@ -121,7 +156,7 @@ test('polling never downloads messages; inspection does so only on explicit acti
 
 test('close discards sensitive content and pauses polling', async () => {
   const h = host(); await h.start(); await press(h, 'requests'); await press(h, 'inspect-req-1');
-  await press(h, 'close'); const n = reads(h).length;
+  await h.dispatch('ui.close', { id: 'headroom-sidebar' }, async () => ({})); const n = reads(h).length;
   await h.advance(15000); assert.equal(reads(h).length, n); assert.equal(h.state().detail, null); assert.equal(h.state().open, false);
 });
 

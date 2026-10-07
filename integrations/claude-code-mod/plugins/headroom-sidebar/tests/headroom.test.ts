@@ -12,6 +12,29 @@ const payload = {
 };
 
 describe('headroom', () => {
+  test('native startup launches Headroom and renders exact restart guidance', async ($, on) => {
+    const clock = mock.clock(on);
+    mock.env(on, {});
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    on('session.id', () => ({ value: sid }));
+    on('command.register', ($, e) => ({ value: { command: e.name } }));
+    on('ui.open', () => ({ value: { isPlaced: true } } as any));
+    let command = '';
+    on('tool.call', ($, e) => {
+      command = (e as any).command;
+      return { text: 'Headroom is ready.', result: {} } as any;
+    });
+    on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{}' } }));
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any);
+    await clock.advance(2); await clock.settle();
+    const ui = await $.ui.mount({ plugin: 'headroom-sidebar', surface: 'terminal', component: 'Pane', requestId: 'headroom-sidebar',
+      props: { bodyColumns: 80, placement: 'dock', scroll: { bodyRows: 35 } } } as any);
+    await ui.press({ key: 'start' });
+    await clock.settle();
+    expect(command).toBe("headroom-mod start --proxy-url 'http://127.0.0.1:8787'");
+    expect(await ui.find({ type: 'Text', text: new RegExp(`headroom-mod run.*--resume ${sid}`) })).toBeDefined();
+    await ui.unmount();
+  });
   test('native request buttons inspect all sides and navigate messages', async ($, on) => {
     const clock = mock.clock(on);
     mock.env(on, { HEADROOM_MOD_SESSION_ID: sid, HEADROOM_MOD_URL: 'http://127.0.0.1:8787' });
@@ -59,7 +82,7 @@ describe('headroom', () => {
     expect(await ui.find({ type: 'Text', text: /Page 1\/1/ })).toBeDefined();
     await ui.unmount();
   });
-  test('native buttons switch unlinked tabs and close without fetching telemetry', async ($, on) => {
+  test('native buttons switch unlinked tabs and use host close controls without fetching telemetry', async ($, on) => {
     const clock = mock.clock(on);
     mock.env(on, {});
     on('session.start', ($, e) => ({ cwd: e.cwd }));
@@ -84,8 +107,8 @@ describe('headroom', () => {
     await ui.press({ key: 'refresh' });
     await clock.settle();
     expect(reads).toBe(0);
-    await ui.press({ key: 'close' });
-    expect(await ui.find({ type: 'Text', text: /Host pane fallback/ })).toBeDefined();
+    expect(await ui.find({ key: 'close' })).toBeUndefined();
+    expect(await ui.find({ key: 'start' })).toBeDefined();
     await ui.unmount();
   });
   test('native state, command registration and narrow terminal fallback', async ($, on) => {

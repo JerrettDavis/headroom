@@ -7,6 +7,17 @@ from conftest import SID
 from headroom_claude_mod import launcher
 
 
+def test_sidebar_can_find_companion_from_absolute_path_launch(monkeypatch, tmp_path):
+    runtime = tmp_path / "Scripts"
+    runtime.mkdir()
+    monkeypatch.setattr(launcher.sysconfig, "get_path", lambda _: str(runtime))
+    parent = {"PATH": "existing-tools"}
+    env = launcher.child_environment(parent, "http://127.0.0.1:8787", SID)
+    assert env["PATH"].split(os.pathsep)[0] == str(runtime)
+    assert env["PATH"].endswith(os.pathsep + "existing-tools")
+    assert parent == {"PATH": "existing-tools"}
+
+
 @pytest.mark.parametrize(
     "url",
     [

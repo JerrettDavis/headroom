@@ -33,6 +33,16 @@ See [docs/VALIDATION.md](docs/VALIDATION.md) for reproducible commands and limit
 
 ## Requirements
 
+When Headroom is unavailable, choose **Start Headroom** in the sidebar. Claude's
+native tool permission flow runs `headroom-mod start`, which reuses a compatible
+proxy or starts one with the companion extension. Install Headroom and the
+companion in the same Python environment and ensure `headroom-mod` is on PATH.
+The sidebar displays an exact `headroom-mod run --resume` command for restarting
+the current conversation through Headroom; an existing Claude process cannot
+change its provider routing. Proxy output goes to the local Headroom sidebar
+cache directory. Message capture remains off by default. Telemetry reads remain
+read-only; startup is an explicit user action.
+
 Claude Code **2.1.287 or newer**, its native executable on Windows, and a Python-based
 Headroom proxy with the `headroom.proxy_extension` API and retained `RequestLogger`.
 The original compatibility review used Headroom main at
@@ -89,7 +99,7 @@ headroom-mod run --proxy-url http://127.0.0.1:8787 --plugin-dir ./plugins/headro
 ```
 
 The pane opens without taking keyboard focus. `/headroom` opens/focuses it again.
-Keys: `1` Overview, `2` Requests, `r` Refresh, `q` Close. Use Tab/Enter or mouse
+Keys: `1` Overview, `2` Requests, `r` Refresh, `s` Start Headroom when offline. Close using the pane's built-in control. Use Tab/Enter or mouse
 buttons for request selection, original/compressed/diff modes, and pagination.
 Use Page Up/Page Down to scroll the pane when its content exceeds the visible
 height; request buttons and recovery commands may be below the fold.

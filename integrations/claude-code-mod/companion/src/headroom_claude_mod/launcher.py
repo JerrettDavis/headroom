@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -101,6 +102,9 @@ def child_environment(parent: Mapping[str, str], base: str, sid: str) -> dict[st
             "ANTHROPIC_CUSTOM_HEADERS": "\n".join([*kept, f"X-Headroom-Mod-Session: {sid}"]),
         }
     )
+    # Sidebar startup must resolve the companion installed alongside this launcher,
+    # including bundled runtimes invoked by an absolute executable path.
+    env["PATH"] = sysconfig.get_path("scripts") + os.pathsep + env.get("PATH", "")
     return env
 
 
@@ -155,9 +159,17 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("claude_args", nargs=argparse.REMAINDER)
     check = sub.add_parser("doctor", help="Check the local companion without starting Claude")
     check.add_argument("--proxy-url", default="http://127.0.0.1:8787")
+    start = sub.add_parser("start", help="Start the local Headroom companion without launching Claude")
+    start.add_argument("--proxy-url", default="http://127.0.0.1:8787")
     args = parser.parse_args(argv)
     try:
         base = local_url(args.proxy_url)
+        if args.command == "start":
+            from .startup import start_proxy
+
+            start_proxy(base, preflight)
+            print("Headroom is ready. Restart Claude with headroom-mod run to route this conversation through it.")
+            return 0
         if args.command == "doctor":
             info = preflight(base)
             print(

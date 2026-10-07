@@ -1,5 +1,13 @@
 # Security and privacy boundaries
 
+**Start Headroom** is an explicit sidebar action, not a telemetry read. It invokes
+the native Bash tool and its normal permission flow to run `headroom-mod start`.
+That command may start a detached loopback proxy with the companion extension and
+write a local proxy log. It reuses a compatible running companion, does not stop
+existing processes, and does not enable message capture. Restarting Claude through
+the displayed resume command is a separate user action; the mod does not rewrite
+provider routing in the current session.
+
 The UI never changes prompts, tool results, compression settings, cache policy,
 logging preferences, provider credentials, or Headroom statistics. The launcher's
 sole attribution addition is `X-Headroom-Mod-Session`, not the cache-identity header.

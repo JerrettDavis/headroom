@@ -9,7 +9,9 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
     line(`${state.connection.toUpperCase()} · ${state.connection !== 'setup' && state.sessionId ? state.sessionId.slice(0, 8) : 'not linked'}`, { dimColor: true }),
     group([button('overview', state.tab === 'overview' ? 'Overview ●' : 'Overview', () => actions.tab('overview'), '1'),
       button('requests', state.tab === 'requests' ? 'Requests ●' : 'Requests', () => actions.tab('requests'), '2'),
-      button('refresh', 'Refresh', actions.refresh, 'r'), button('close', 'Close', actions.close, 'q')])];
+      button('refresh', 'Refresh', actions.refresh, 'r')])];
+  if (state.connection !== 'live') children.push(button('start', 'Start Headroom', actions.start, 's'));
+  if (state.startNotice) children.push(line(safeText(state.startNotice, 500)));
   if (state.notice) children.push(line(safeText(state.notice, 300), { dimColor: true }));
   const data = state.summary;
   if (!data) {
