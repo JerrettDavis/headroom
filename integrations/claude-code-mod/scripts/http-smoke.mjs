@@ -20,7 +20,7 @@ await press(h, 'original');
 assert.match(h.state().detail.text, /original tool output/);
 await press(h, 'diff');
 assert.match(h.state().detail.text, /original request/);
-await press(h, 'close');
+await h.dispatch('ui.close', { id: 'headroom-sidebar' }, async () => ({}));
 assert.equal(h.state().detail, null);
 console.log(JSON.stringify({ result: 'PASS', test: 'real HTTP bridge with synthetic Headroom records',
   checks: ['scoped metrics', 'other-session exclusion', 'original inspection', 'compressed inspection', 'request diff', 'close clears content'],

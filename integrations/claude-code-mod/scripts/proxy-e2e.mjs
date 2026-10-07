@@ -31,7 +31,7 @@ if (capture === 'true') {
   assert.equal(h.state().detail.text, undefined);
   assert.match(h.state().detail.reason, /log-messages|capture/i);
 }
-await press(h, 'close');
+await h.dispatch('ui.close', { id: 'headroom-sidebar' }, async () => ({}));
 assert.equal(h.state().detail, null);
 // A changed native session must stop reads using the launcher-linked old UUID.
 h.ctl.sid = OTHER;
