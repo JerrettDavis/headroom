@@ -97,7 +97,13 @@ from headroom.observability import (
     shutdown_headroom_tracing,
     shutdown_otel_metrics,
 )
-from headroom.offline import apply_offline_env, is_offline
+from headroom.offline import (
+    OFFLINE_ENV,
+    OfflineEgressBlocked,
+    apply_offline_env,
+    guard_egress,
+    is_offline,
+)
 from headroom.pipeline import PipelineExtensionManager, PipelineStage
 from headroom.providers.proxy_routes import register_provider_routes
 from headroom.providers.registry import (
@@ -144,6 +150,7 @@ from headroom.proxy.helpers import (
     _setup_file_logging,  # noqa: F401
     is_anthropic_auth,  # noqa: F401
     jitter_delay_ms,
+    overload_retry_is_futile,
     resolve_display_provider,
     retry_after_ms,
 )
@@ -696,6 +703,89 @@ def _check_rust_core() -> tuple[str, str | None]:
 
     logger.info("event=rust_core_loaded marker=%r", marker)
     return ("loaded", None)
+
+
+def _refuse_offline_egress(blocked: OfflineEgressBlocked, feature: str, fix: str) -> None:
+    """Turn a startup-time air-gap refusal into a clean exit, never a traceback.
+
+    ``OfflineEgressBlocked`` derives from ``BaseException``, so nothing in the
+    lifespan's own ``except Exception`` will catch it and it would otherwise
+    escape uvicorn as an unhandled error — killing a proxy that had been
+    serving traffic, with a stack trace instead of an explanation, and before
+    ``app.state.startup_error`` exists to record why. ``_check_rust_core``
+    above already settled the shape for a startup refusal: say what is wrong,
+    say how to fix it, exit 78 (``EX_CONFIG``).
+    """
+    msg = (
+        f"FATAL: {feature} needs outbound network access, but "
+        f"{OFFLINE_ENV}=1 forbids it.\n"
+        f"    refused: {blocked}\n"
+        f"    fix:     {fix}\n"
+    )
+    logger.error(
+        "event=offline_egress_refused feature=%r reason=%r action=exit_78",
+        feature,
+        str(blocked),
+    )
+    print(msg, file=sys.stderr, flush=True)
+    sys.exit(_EXIT_CONFIG)
+
+
+def _configure_observability_or_refuse() -> None:
+    """Install the metric/trace exporters, refusing cleanly under an air-gap.
+
+    Both exporters call ``guard_egress`` before they build a client, so under
+    ``HEADROOM_OFFLINE`` they raise rather than dial. Catching that here is what
+    keeps the refusal a refusal: these two calls sit OUTSIDE ``lifespan``'s own
+    ``try``/``except Exception``, and ``OfflineEgressBlocked`` is a
+    ``BaseException``, so an uncaught one escapes uvicorn as an unhandled error
+    — a proxy that had been serving traffic dies on a traceback with
+    ``app.state.startup_error`` never set.
+    """
+    _preflight_offline_egress()
+    try:
+        configure_otel_metrics(OTelMetricsConfig.from_env(default_service_name="headroom-proxy"))
+    except OfflineEgressBlocked as blocked:
+        _refuse_offline_egress(
+            blocked,
+            "OTLP metric export (HEADROOM_OTEL_METRICS_ENABLED)",
+            "set HEADROOM_OTEL_METRICS_EXPORTER=console or scrape /metrics "
+            "(both stay on-box), or unset HEADROOM_OTEL_METRICS_ENABLED",
+        )
+    try:
+        configure_langfuse_tracing(
+            LangfuseTracingConfig.from_env(default_service_name="headroom-proxy")
+        )
+    except OfflineEgressBlocked as blocked:
+        _refuse_offline_egress(
+            blocked,
+            "Langfuse OTLP trace export (HEADROOM_LANGFUSE_ENABLED)",
+            "unset HEADROOM_LANGFUSE_ENABLED; Langfuse ingestion has no on-box mode",
+        )
+
+
+def _preflight_offline_egress() -> None:
+    """Refuse, at startup, any configuration that asks for egress while offline.
+
+    Runs before the observability exporters are configured and before the
+    compressors are preloaded. Without it the same contradiction surfaces later
+    and worse: the OTLP exporter raised out of ``lifespan`` with a raw
+    traceback, and the remote Kompress endpoint was not noticed until a request
+    reached for the compressor.
+    """
+    if not is_offline():
+        return
+    endpoint = os.environ.get("HEADROOM_KOMPRESS_ENDPOINT", "").strip()
+    if endpoint:
+        try:
+            guard_egress("remote Kompress inference", endpoint)
+        except OfflineEgressBlocked as blocked:
+            _refuse_offline_egress(
+                blocked,
+                "remote Kompress compression (HEADROOM_KOMPRESS_ENDPOINT)",
+                "unset HEADROOM_KOMPRESS_ENDPOINT to use the local Kompress "
+                "model, or unset " + OFFLINE_ENV + " if this box is not air-gapped",
+            )
 
 
 # Compression pipeline timeout in seconds
@@ -2569,6 +2659,11 @@ class HeadroomProxy(
                         if (
                             not self.config.retry_enabled
                             or attempt >= self.config.retry_max_attempts - 1
+                            or overload_retry_is_futile(
+                                response,
+                                self.config.retry_max_delay_ms,
+                                retries_left=self.config.retry_max_attempts - attempt - 1,
+                            )
                         ):
                             return response
                         delay_ms = retry_after_ms(
@@ -3104,15 +3199,29 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
     # Air-gap master switch. Propagate config.offline to the env so the
     # env-based egress predicates (telemetry, update check, license) all honor
-    # it, force HF/transformers offline before any model code loads, and
-    # announce that every outbound path is disabled.
+    # it, force HF/transformers offline before any model code loads, and say
+    # what is covered.
+    #
+    # The banner names the exception rather than claiming a whole-process kill
+    # switch, and the exception is permanent rather than a to-do: a proxy that
+    # refused to forward the caller's request to the caller's own upstream
+    # would not be a proxy. Every connection Headroom itself initiates IS
+    # refused; tests/test_offline_egress_chokepoint.py fails the build if a new
+    # egress path appears that is neither guarded nor one of the four written
+    # exceptions. TestDocsMatchTheGuarantee scans this file for the absolute
+    # phrasings and fails while any remain.
     if config.offline:
         os.environ.setdefault("HEADROOM_OFFLINE", "1")
     if is_offline():
         apply_offline_env()
         logger.warning(
-            "event=proxy_offline_mode air-gap active — all outbound egress disabled "
-            "(telemetry, update check, license reporter, HuggingFace downloads)"
+            "event=proxy_offline_mode air-gap active — every connection Headroom "
+            "initiates is refused (telemetry, update check, license reporter, "
+            "model/tokenizer/binary/dataset downloads, remote Kompress, "
+            "OTLP/Langfuse export, Copilot auth, subscription polling, OpenAI "
+            "embedders, Headroom Cloud compression). Still allowed on purpose: "
+            "forwarding your requests to the upstream you configured, "
+            "operator-configured local endpoints, loopback health probes."
         )
 
     proxy = HeadroomProxy(config)
@@ -3231,10 +3340,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 _rust_core_error,
             )
 
-        configure_otel_metrics(OTelMetricsConfig.from_env(default_service_name="headroom-proxy"))
-        configure_langfuse_tracing(
-            LangfuseTracingConfig.from_env(default_service_name="headroom-proxy")
-        )
+        _configure_observability_or_refuse()
 
         app.state.started_at = time.time()
         app.state.ready = False
@@ -3740,6 +3846,13 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 "min_tokens_to_crush": profile_kwargs.get(
                     "min_tokens_to_compress",
                     config.min_tokens_to_crush,
+                ),
+                "exclude_tools": sorted(
+                    {
+                        *DEFAULT_EXCLUDE_TOOLS,
+                        *(config.exclude_tools or ()),
+                        *(config.protect_tool_results or ()),
+                    }
                 ),
                 "max_items_after_crush": profile_kwargs.get(
                     "max_items_after_crush",
@@ -4431,11 +4544,17 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     # published on host loopback, whose peer is the bridge gateway, still loads.
     _dashboard_gate = [Depends(_require_operator_read_client)]
 
+    # Effective licence state of THIS proxy, resolved once: an explicit
+    # ProxyConfig.license_key, else HEADROOM_LICENSE or its deprecated alias.
+    from headroom.license_env import resolve_license_token
+
+    _dashboard_licensed = bool(config.license_key) or bool(resolve_license_token())
+
     @app.get("/dashboard", response_class=HTMLResponse)
     @app.get("/dashboard/", response_class=HTMLResponse, include_in_schema=False)
     async def dashboard():
         """Serve the Headroom dashboard UI."""
-        return get_dashboard_html()
+        return get_dashboard_html(licensed=_dashboard_licensed)
 
     # --- Dashboard settings API (loopback-gated, registry-validated) ---------
     # Read/write the curated HEADROOM_* knobs the settings GUI manages. Writes
@@ -5823,7 +5942,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             limit: Maximum number of patterns to return (default 20)
 
         Response includes for each pattern:
-        - hash: Truncated tool signature hash (12 chars)
+        - hash: Full aggregation key identifying one scoped tool pattern
         - compressions: Total compression events
         - retrievals: Total retrieval events
         - retrieval_rate: Percentage of compressions that triggered retrieval
@@ -5847,7 +5966,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
             patterns_list.append(
                 {
-                    "hash": sig_hash[:12],
+                    "hash": sig_hash,
                     "compressions": total_compressions,
                     "retrievals": total_retrievals,
                     "retrieval_rate": f"{retrieval_rate:.1%}",
@@ -5867,36 +5986,41 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
 
         return patterns_list[:limit]
 
-    @app.get("/v1/toin/pattern/{hash_prefix}", dependencies=[Depends(_require_loopback)])
+    @app.get("/v1/toin/pattern/{hash_prefix:path}", dependencies=[Depends(_require_loopback)])
     async def toin_pattern_detail(hash_prefix: str):
-        """Get detailed TOIN pattern info by hash prefix.
+        """Get detailed TOIN pattern info by the listed identifier or a unique prefix.
 
-        Searches for a pattern where the tool signature hash starts with
-        the provided prefix. Returns full pattern details if found.
+        Pass the ``hash`` returned by ``/v1/toin/patterns`` for an exact
+        lookup. A shorter aggregation-key prefix is accepted only when it
+        identifies one pattern; ambiguous prefixes return 409.
 
-        Path params:
-            hash_prefix: Beginning of the tool signature hash (min 4 chars recommended)
-
-        Response: Full pattern.to_dict() with all learned statistics and recommendations.
+        Response: Learned statistics without query text or field semantics.
         """
         toin = get_toin()
         exported = toin.export_patterns()
         patterns_data = exported.get("patterns", {})
 
-        # Search for pattern with matching hash prefix
-        for sig_hash, pattern_dict in patterns_data.items():
-            if sig_hash.startswith(hash_prefix):
-                # Keep this response aligned with /v1/toin/patterns while
-                # excluding query text, field semantics, and other internal
-                # learning state from the detail endpoint.
-                return {
-                    "compressions": pattern_dict.get("total_compressions", 0),
-                    "retrievals": pattern_dict.get("total_retrievals", 0),
-                    "retrieval_rate": pattern_dict.get("retrieval_rate", 0.0),
-                    "confidence": pattern_dict.get("confidence", 0.0),
-                    "skip_recommended": pattern_dict.get("skip_compression_recommended", False),
-                    "optimal_max_items": pattern_dict.get("optimal_max_items", 20),
-                }
+        pattern_dict = patterns_data.get(hash_prefix)
+        if pattern_dict is None:
+            matches = (
+                pattern for key, pattern in patterns_data.items() if key.startswith(hash_prefix)
+            )
+            pattern_dict = next(matches, None)
+            if next(matches, None) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Ambiguous TOIN pattern prefix; use a full hash from /v1/toin/patterns",
+                )
+        if pattern_dict is not None:
+            # Keep query text, field semantics, and internal learning state private.
+            return {
+                "compressions": pattern_dict.get("total_compressions", 0),
+                "retrievals": pattern_dict.get("total_retrievals", 0),
+                "retrieval_rate": pattern_dict.get("retrieval_rate", 0.0),
+                "confidence": pattern_dict.get("confidence", 0.0),
+                "skip_recommended": pattern_dict.get("skip_compression_recommended", False),
+                "optimal_max_items": pattern_dict.get("optimal_max_items", 20),
+            }
 
         raise HTTPException(
             status_code=404, detail=f"No TOIN pattern found with hash starting with: {hash_prefix}"
@@ -6368,13 +6492,23 @@ def run_server(
     # Resolve upstream API targets for display in the banner (#583).
     api_targets = resolve_api_targets(config.provider_api_overrides)
 
+    if config.uds:
+        # No per-agent recipe on a socket bind; see uds.socket_usage_lines().
+        listen_display = f"unix:{config.uds}"
+        usage_label = "Client:     "
+        usage_display = "must support HTTP over a Unix socket natively"
+    else:
+        listen_display = f"http://{config.host}:{config.port}"
+        usage_label = "Claude Code:"
+        usage_display = f"ANTHROPIC_BASE_URL=http://{config.host}:{config.port} claude"
+
     if print_banner:
         print(f"""
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                      HEADROOM PROXY SERVER                           ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  Version: 1.0.0                                                      ║
-║  Listening: http://{config.host}:{config.port:<5}                                      ║
+║  Listening: {listen_display:<57}║
 ║  Workers: {workers:<3}  Concurrency Limit: {limit_concurrency:<5}                          ║
 ║  Backend: {backend_status:<59}║
 ╠══════════════════════════════════════════════════════════════════════╣
@@ -6396,7 +6530,7 @@ def run_server(
 ║    Conn Pool:       {pool_info:<52}║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  USAGE:                                                              ║
-║    Claude Code:   ANTHROPIC_BASE_URL=http://{config.host}:{config.port} claude     ║
+║    {usage_label}   {usage_display:<51}║
 ║    Cursor:        Set base URL in settings                           ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  ENDPOINTS:                                                          ║
@@ -6475,11 +6609,48 @@ def run_server(
     # and no CLI flag to change it. Overridable now; the default is unchanged.
     uvicorn_log_level = _resolve_uvicorn_log_level()
 
+    # Bind target: a Unix socket when one is configured, otherwise host:port.
+    # uvicorn treats `uds` and `host`/`port` as alternatives, so they are built
+    # here rather than passed together.
+    bind_kwargs: dict[str, Any]
+    uds_path: Path | None = None
+    if config.uds:
+        from headroom.proxy.uds import prepare_uds_path
+
+        uds_path = prepare_uds_path(config.uds)
+        bind_kwargs = {"uds": str(uds_path)}
+    else:
+        bind_kwargs = {"host": config.host, "port": config.port}
+
+    try:
+        _run_uvicorn(
+            app_target,
+            bind_kwargs,
+            workers,
+            limit_concurrency,
+            uvicorn_log_level,
+            uvicorn_kwargs,
+        )
+    finally:
+        if uds_path is not None:
+            from headroom.proxy.uds import remove_uds_path
+
+            remove_uds_path(uds_path)
+
+
+def _run_uvicorn(
+    app_target: Any,
+    bind_kwargs: dict[str, Any],
+    workers: int,
+    limit_concurrency: int,
+    log_level: str,
+    uvicorn_kwargs: dict[str, Any],
+) -> None:
+    """Hand off to uvicorn. Split out so the bind target stays testable."""
     uvicorn.run(
         app_target,
-        host=config.host,
-        port=config.port,
-        log_level=uvicorn_log_level,
+        **bind_kwargs,
+        log_level=log_level,
         workers=workers if workers > 1 else None,  # None = single process (default)
         limit_concurrency=limit_concurrency,
         # Defense-in-depth: the loopback guard for /debug/* endpoints trusts

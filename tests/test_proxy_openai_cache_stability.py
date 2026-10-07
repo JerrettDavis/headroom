@@ -82,7 +82,9 @@ def test_openai_cache_mode_freezes_previous_turns() -> None:
         proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
             "stable-session"
         )
-        proxy.session_tracker_store.get_or_create = lambda session_id, provider: fake_tracker
+        proxy.session_tracker_store.get_or_create = (
+            lambda session_id, provider, cache_ttl_seconds=None: fake_tracker
+        )
 
         def _fake_apply(**kwargs):
             captured["frozen_message_count"] = kwargs.get("frozen_message_count")
@@ -193,7 +195,9 @@ def test_openai_cache_mode_keeps_final_tool_observation_mutable(tail_role: str) 
         proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
             "stable-session"
         )
-        proxy.session_tracker_store.get_or_create = lambda session_id, provider: fake_tracker
+        proxy.session_tracker_store.get_or_create = (
+            lambda session_id, provider, cache_ttl_seconds=None: fake_tracker
+        )
 
         def _fake_apply(**kwargs):
             captured.setdefault("calls", []).append(
@@ -271,7 +275,9 @@ def test_openai_cache_mode_restores_mutated_frozen_prefix() -> None:
         proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
             "stable-session"
         )
-        proxy.session_tracker_store.get_or_create = lambda session_id, provider: fake_tracker
+        proxy.session_tracker_store.get_or_create = (
+            lambda session_id, provider, cache_ttl_seconds=None: fake_tracker
+        )
 
         original_messages = [
             {"role": "user", "content": "turn1"},
@@ -376,7 +382,9 @@ def test_issue_327_openai_handler_does_not_call_walker_functions() -> None:
         proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
             "openai-spy-session"
         )
-        proxy.session_tracker_store.get_or_create = lambda s, p: fake_tracker
+        proxy.session_tracker_store.get_or_create = lambda s, p, cache_ttl_seconds=None: (
+            fake_tracker
+        )
         proxy._get_compression_cache = lambda s: _SpyCompCache()
 
         def _fake_apply(**kwargs):  # noqa: ANN003
@@ -625,7 +633,9 @@ def _install_tracker(proxy, tracker) -> None:
     proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
         "stable-session"
     )
-    proxy.session_tracker_store.get_or_create = lambda session_id, provider: tracker
+    proxy.session_tracker_store.get_or_create = (
+        lambda session_id, provider, cache_ttl_seconds=None: tracker
+    )
     proxy.session_tracker_store.resolve_tracker = lambda *args, **kwargs: tracker
 
 
@@ -892,7 +902,9 @@ def test_openai_cache_mode_keeps_replayed_prefix_over_frozen_restore() -> None:
         proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
             "stable-session"
         )
-        proxy.session_tracker_store.get_or_create = lambda session_id, provider: fake_tracker
+        proxy.session_tracker_store.get_or_create = (
+            lambda session_id, provider, cache_ttl_seconds=None: fake_tracker
+        )
         proxy.session_tracker_store.resolve_tracker = lambda *args, **kwargs: fake_tracker
 
         def _fake_apply(**kwargs):
@@ -962,7 +974,9 @@ def _forward_cache_mode_chat(
         proxy.session_tracker_store.compute_session_id = lambda request, model, messages: (
             "stable-session"
         )
-        proxy.session_tracker_store.get_or_create = lambda session_id, provider: tracker
+        proxy.session_tracker_store.get_or_create = (
+            lambda session_id, provider, cache_ttl_seconds=None: tracker
+        )
         proxy.session_tracker_store.resolve_tracker = lambda *args, **kwargs: tracker
 
         def _fake_apply(**kwargs):

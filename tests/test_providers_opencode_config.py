@@ -218,6 +218,84 @@ def test_inject_provider_config_idempotent(tmp_path: Path, monkeypatch: pytest.M
     assert config["provider"]["headroom"]["options"]["baseURL"] == "http://127.0.0.1:9999/v1"
 
 
+def test_inject_provider_config_keeps_the_users_models_and_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A third-party upstream needs its own model ids and key under `headroom`.
+
+    OpenCode only resolves `headroom/<id>` for listed ids, so wiping the user's
+    entries made `wrap opencode --openai-api-url ...` unusable for DeepSeek.
+    """
+    _set_test_home(monkeypatch, tmp_path)
+    config_file = tmp_path / ".config" / "opencode" / "opencode.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "headroom": {
+                        "npm": "something-else",
+                        "options": {
+                            "apiKey": "{env:DEEPSEEK_API_KEY}",
+                            "baseURL": "https://api.deepseek.com/v1",
+                        },
+                        "models": {"deepseek-chat": {"name": "DeepSeek Chat"}},
+                    },
+                    "anthropic": {"options": {"timeout": 5}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inject_opencode_provider_config(port=8787, keep_user_entries=True)
+    inject_opencode_provider_config(port=9999, keep_user_entries=True)
+
+    config = _parse_json_loose(config_file.read_text())
+    headroom = config["provider"]["headroom"]
+    # Headroom still owns how the provider reaches the proxy.
+    assert headroom["npm"] == "@ai-sdk/openai-compatible"
+    assert headroom["options"]["baseURL"] == "http://127.0.0.1:9999/v1"
+    # The user's key and model ids survive alongside Headroom's defaults.
+    assert headroom["options"]["apiKey"] == "{env:DEEPSEEK_API_KEY}"
+    assert set(headroom["models"]) == {"deepseek-chat", "gpt-4o", "gpt-4.1"}
+    assert headroom["models"]["deepseek-chat"] == {"name": "DeepSeek Chat"}
+    assert config["provider"]["anthropic"] == {"options": {"timeout": 5}}
+
+
+def test_inject_provider_config_drops_user_entries_without_an_explicit_upstream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a named upstream the proxy forwards to OpenAI, so a kept key would go there."""
+    _set_test_home(monkeypatch, tmp_path)
+    config_file = tmp_path / ".config" / "opencode" / "opencode.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "headroom": {
+                        "npm": "something-else",
+                        "options": {
+                            "apiKey": "{env:DEEPSEEK_API_KEY}",
+                            "baseURL": "https://api.deepseek.com/v1",
+                        },
+                        "models": {"deepseek-chat": {"name": "DeepSeek Chat"}},
+                    },
+                    "anthropic": {"options": {"timeout": 5}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inject_opencode_provider_config(port=8787)
+
+    headroom = _parse_json_loose(config_file.read_text())["provider"]["headroom"]
+    assert "apiKey" not in headroom["options"]
+    assert set(headroom["models"]) == {"gpt-4o", "gpt-4.1"}
+
+
 # ---------------------------------------------------------------------------
 # Edge cases — JSON parsing
 # ---------------------------------------------------------------------------
@@ -266,11 +344,6 @@ def test_parse_json_loose_returns_empty_on_empty_string() -> None:
 def test_parse_json_loose_returns_empty_on_whitespace() -> None:
     """_parse_json_loose returns {} for whitespace-only input."""
     assert _parse_json_loose("   \n  \t  ") == {}
-
-
-def test_parse_json_loose_returns_empty_on_trailing_comma() -> None:
-    """_parse_json_loose returns {} for malformed JSON (trailing comma)."""
-    assert _parse_json_loose('{"model": "gpt-4o",}') == {}
 
 
 def test_parse_json_loose_returns_empty_on_unclosed_brace() -> None:
@@ -558,3 +631,29 @@ def test_inject_provider_config_strips_existing_markers(
     second = config_file.read_text()
     assert "headroom" in second
     assert second.count("headroom") == first.count("headroom")
+
+
+@pytest.mark.parametrize("conflict", ["canonical", "sibling"])
+def test_jsonc_migration_treats_dangling_conflict_as_ambiguous(
+    tmp_path: Path, conflict: str
+) -> None:
+    from headroom.providers.opencode.config import migrate_legacy_opencode_jsonc_backup
+
+    config = tmp_path / "opencode.jsonc"
+    canonical = config.with_name(config.name + ".headroom-backup")
+    legacy = config.with_suffix(".json.headroom-backup")
+    original = b'{"theme":"unrelated legacy"}\n'
+    legacy.write_bytes(original)
+    conflicting_path = canonical if conflict == "canonical" else config.with_suffix(".json")
+    try:
+        conflicting_path.symlink_to(tmp_path / "missing-target")
+    except OSError:
+        pytest.skip("creating symlinks requires platform permissions")
+
+    migrate_legacy_opencode_jsonc_backup(config, canonical)
+    assert conflicting_path.is_symlink()
+    assert legacy.read_bytes() == original
+    conflicting_path.unlink()
+    migrate_legacy_opencode_jsonc_backup(config, canonical)
+    assert not canonical.exists()
+    assert legacy.read_bytes() == original

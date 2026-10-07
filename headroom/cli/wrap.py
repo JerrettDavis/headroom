@@ -11,6 +11,7 @@ Usage:
     headroom wrap vibe                      # Start proxy + Mistral Vibe
     headroom wrap grok                      # Start proxy + Grok CLI
     headroom wrap cursor                    # Start proxy + print Cursor config instructions
+    headroom wrap antigravity               # Start proxy + print Antigravity config instructions
     headroom wrap grok-build                # Start proxy + configure Grok Build
     headroom wrap openclaw                  # Install + configure OpenClaw plugin
     headroom wrap claude --port 9999        # Custom proxy port
@@ -81,6 +82,9 @@ from headroom.copilot_auth import (
     resolve_subscription_bearer_token_details,
 )
 from headroom.providers.aider import build_launch_env as _build_aider_launch_env
+from headroom.providers.antigravity import (
+    render_setup_lines as _render_antigravity_setup_lines,
+)
 from headroom.providers.claude import (
     CONTEXT_1M_SUFFIX,
     DEFAULT_1M_MODEL,
@@ -96,6 +100,7 @@ from headroom.providers.claude import (
     remote_control_applies_to_auth,
     remote_control_gate_active,
     remote_control_gate_message,
+    remote_control_gate_short_message,
     remote_control_sibling_gate_note,
     remove_vscode_claude_settings,
     resolve_1m_model,
@@ -190,6 +195,7 @@ from headroom.providers.opencode.config import (
     _PROVIDER_MARKER_END,  # noqa: F401
     _PROVIDER_MARKER_START,
     inject_opencode_provider_config,
+    migrate_legacy_opencode_jsonc_backup,
     opencode_config_paths,
     snapshot_opencode_config_if_unwrapped,
     strip_opencode_headroom_blocks,
@@ -313,7 +319,15 @@ def _append_text(path: Path, content: str) -> None:
     fsutil.append_text(path, content)
 
 
-_AGENT_SAVINGS_TARGET_AGENTS = {"claude", "codex", "cursor", "grok", "grok_build", "opencode"}
+_AGENT_SAVINGS_TARGET_AGENTS = {
+    "antigravity",
+    "claude",
+    "codex",
+    "cursor",
+    "grok",
+    "grok_build",
+    "opencode",
+}
 _WRAP_PROXY_TIMEOUT_ENV = "HEADROOM_WRAP_PROXY_TIMEOUT"
 _WRAP_PROXY_TIMEOUT_DEFAULT_SECONDS = 45
 _WRAP_PROXY_TIMEOUT_ML_DEFAULT_SECONDS = 90
@@ -329,7 +343,14 @@ _WRAP_PROXY_TIMEOUT_ML_MODULES = ("torch", "sentence_transformers", "spacy")
 _TOOL_SEARCH_ENV = TOOL_SEARCH_ENV
 _TOOL_SEARCH_DEFAULT = TOOL_SEARCH_DEFAULT
 _TOOL_SEARCH_FOUNDRY_DEFAULT = TOOL_SEARCH_FOUNDRY_DEFAULT
-_AGENT_SAVINGS_WRAP_AGENTS = {"claude", "codex", "cursor", "grok", "grok_build"}
+_AGENT_SAVINGS_WRAP_AGENTS = {
+    "antigravity",
+    "claude",
+    "codex",
+    "cursor",
+    "grok",
+    "grok_build",
+}
 
 # 1M context window for `wrap claude` (#1158). Claude Code only sends the
 # `context-1m` beta header — unlocking the 1M window for entitled subscription
@@ -4019,6 +4040,48 @@ def _normalize_proxy_api_url(url: object, *, strip_provider_v1: bool = True) -> 
     return normalized or None
 
 
+def _require_no_proxy_openai_upstream(port: int, openai_api_url: str) -> dict[str, Any]:
+    """Refuse ``--no-proxy`` unless the proxy on ``port`` already targets ``openai_api_url``.
+
+    ``--no-proxy`` reuses a listener wrap does not own, so it can neither
+    start nor re-point one. Reusing it unchecked would present a third-party
+    key (DeepSeek, Together, ...) to whatever upstream that proxy was started
+    with — usually OpenAI, which rejects it with a 401 — while the flag
+    implies the key went to the requested provider (#3107). Fail closed
+    instead: require a healthy Headroom listener whose advertised upstream
+    matches exactly after normalization.
+    """
+    helpers = _live_wrap_module()
+    start_cmd = f"headroom proxy --port {port} --openai-api-url {openai_api_url}"
+    if not helpers._check_proxy(port):
+        raise click.ClickException(
+            f"No Headroom proxy is listening on port {port}, so --no-proxy cannot honor "
+            f"the requested OpenAI-compatible upstream {openai_api_url}. "
+            f"Start it separately with `{start_cmd}`, or drop --no-proxy so wrap can start it."
+        )
+    running_config: dict[str, Any] | None = helpers._proxy_health_config(
+        helpers._query_proxy_health(port)
+    )
+    if running_config is None:
+        running_config = helpers._query_proxy_config(port)
+    if running_config is None:
+        raise click.ClickException(
+            f"The listener on port {port} did not report a Headroom config, so wrap "
+            f"cannot confirm it forwards to {openai_api_url}. "
+            f"Start a Headroom proxy separately with `{start_cmd}`, or drop --no-proxy "
+            "so wrap can start it."
+        )
+    running_url = running_config.get("openai_api_url")
+    if _normalize_proxy_api_url(running_url) != _normalize_proxy_api_url(openai_api_url):
+        raise click.ClickException(
+            f"The Headroom proxy on port {port} forwards OpenAI-compatible traffic to "
+            f"{running_url or 'https://api.openai.com/v1'}, not {openai_api_url}. "
+            f"Restart it with `{start_cmd}`, or drop --no-proxy so wrap can restart it "
+            "when no other wrapper is attached."
+        )
+    return running_config
+
+
 def _proxy_version(payload: dict[str, Any] | None) -> str | None:
     """Return the running proxy version when it exposes one."""
     if payload is None:
@@ -4596,6 +4659,7 @@ def _ensure_proxy_unlocked(
     anyllm_provider: str | None = None,
     region: str | None = None,
     openai_api_url: str | None = None,
+    require_openai_api_url: bool = False,
     anthropic_api_url: str | None = None,
     vertex_api_url: str | None = None,
     clear_vertex_api_url: bool = False,
@@ -4728,8 +4792,7 @@ def _ensure_proxy_unlocked(
                     if code_graph and not running_config.get("code_graph"):
                         missing.append("code_graph")
                     if not missing:
-                        click.echo(f"  Proxy already running on port {port}")
-                        click.echo(f"  Dashboard:    http://127.0.0.1:{port}/dashboard")
+                        click.echo(_proxy_status_line("Proxy already running", port))
                         _warn_proxy_mode_mismatch(running_config)
                         return None, port
                 # Features mismatch or config unavailable — fall through to the
@@ -5008,8 +5071,7 @@ def _ensure_proxy_unlocked(
                         needs_restart = True
 
             if not needs_restart and reuse_running:
-                click.echo(f"  Proxy already running on port {port}")
-                click.echo(f"  Dashboard:    http://127.0.0.1:{port}/dashboard")
+                click.echo(_proxy_status_line("Proxy already running", port))
                 _warn_proxy_mode_mismatch(running_config)
                 return None, port
 
@@ -5056,16 +5118,27 @@ def _ensure_proxy_unlocked(
                     copilot_api_token_expires_at=copilot_api_token_expires_at,
                 ),
             )
-            click.echo(f"  Proxy ready on http://127.0.0.1:{actual_port}")
-            click.echo(f"  Dashboard:    http://127.0.0.1:{actual_port}/dashboard")
+            click.echo(_proxy_status_line("Proxy ready", actual_port))
             return proc, actual_port
         except RuntimeError as e:
             click.echo(f"  Error: {e}")
             raise SystemExit(1) from e
     else:
-        if not helpers._check_proxy(port):
+        if require_openai_api_url and openai_api_url:
+            # A user-chosen upstream cannot be applied to a proxy wrap does
+            # not own; fail closed unless the running one already matches.
+            running_config = _require_no_proxy_openai_upstream(port, openai_api_url)
+            click.echo(f"  Proxy on port {port} already targets {openai_api_url}")
+            _warn_proxy_mode_mismatch(running_config)
+        elif not helpers._check_proxy(port):
             click.echo(f"  Warning: No proxy detected on port {port}")
-        elif vertex_api_url or clear_vertex_api_url or os.environ.get("HEADROOM_MODE"):
+        elif (
+            vertex_api_url
+            or clear_vertex_api_url
+            or os.environ.get("HEADROOM_MODE")
+            or os.environ.get("HEADROOM_MIN_TOKENS") is not None
+            or os.environ.get("HEADROOM_EXCLUDE_TOOLS") is not None
+        ):
             health_payload = helpers._query_proxy_health(port)
             running_config = helpers._proxy_health_config(health_payload)
             if running_config is None:
@@ -5114,6 +5187,11 @@ def _proxy_start_lock(port: int) -> Any:
         return
     with _locked_file(lock_file):
         yield
+
+
+def _proxy_status_line(status: str, port: int) -> str:
+    """One banner line for the proxy, naming its host:port once (#3426)."""
+    return f"  {status} — dashboard: http://127.0.0.1:{port}/dashboard"
 
 
 @wraps(_ensure_proxy_unlocked)
@@ -5582,6 +5660,7 @@ def wrap(ctx: click.Context) -> None:
         headroom wrap vibe                # Mistral Vibe
         headroom wrap grok                # Grok CLI (xAI)
         headroom wrap cursor              # Cursor (prints config instructions)
+        headroom wrap antigravity         # Antigravity IDE (prints config instructions)
         headroom wrap grok-build          # Grok Build (updates ~/.grok/config.toml)
         headroom wrap cline               # Cline (VS Code; prints config instructions)
         headroom wrap continue            # Continue (VS Code/JetBrains; injects systemMessage)
@@ -6022,7 +6101,12 @@ def claude(
                 if remote_control_applies_to_auth(os.environ)
                 else None
             )
-            if remote_control_gate_active(proxy_url, os.environ, _cc_version):
+            _rc_gated = remote_control_gate_active(proxy_url, os.environ, _cc_version)
+            if _rc_gated and not verbose:
+                # Issue #3426: one actionable line by default; -v restores the
+                # full explanation (versions, sibling gates) below.
+                click.echo("  " + remote_control_gate_short_message(version=_cc_version))
+            elif _rc_gated:
                 click.echo(
                     "  "
                     + remote_control_gate_message(
@@ -6111,14 +6195,23 @@ def claude(
             # Describe what the written value actually does: --tool-search
             # false/0/no/off turns deferral OFF, and the banner must say so
             # rather than repeat "kept on" (issue #1779 accuracy rule).
-            _tool_search_state = (
-                "on-demand tool loading kept on"
-                if _tool_search_mode_is_active(_tool_search_value)
-                else "on-demand tool loading DISABLED per your setting"
-            )
-            click.echo(
-                f"  {_TOOL_SEARCH_ENV}={_tool_search_value} ({_tool_search_state}; issue #746)"
-            )
+            _tool_search_active = _tool_search_mode_is_active(_tool_search_value)
+            if verbose:
+                _tool_search_state = (
+                    "on-demand tool loading kept on"
+                    if _tool_search_active
+                    else "on-demand tool loading DISABLED per your setting"
+                )
+                click.echo(
+                    f"  {_TOOL_SEARCH_ENV}={_tool_search_value} ({_tool_search_state}; issue #746)"
+                )
+            else:
+                # Issue #3426: state the outcome once; -v shows the env var and issue.
+                click.echo(
+                    "  On-demand tool loading: kept on (this session)"
+                    if _tool_search_active
+                    else "  On-demand tool loading: off (this session)"
+                )
         elif verbose:
             click.echo(
                 f"  {_TOOL_SEARCH_ENV}={env.get(_TOOL_SEARCH_ENV)} "
@@ -7597,6 +7690,62 @@ def cursor(
 
 
 # =============================================================================
+# Antigravity IDE
+# =============================================================================
+
+
+@wrap.command(context_settings={"ignore_unknown_options": True})
+@_retired_context_tool_option
+@proxy_port_option()
+@click.option("--no-proxy", is_flag=True, help="Skip proxy startup (use existing proxy)")
+@click.option("--learn", is_flag=True, help="Enable live traffic learning")
+@click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option("--prepare-only", is_flag=True, hidden=True)
+def antigravity(
+    port: int,
+    no_proxy: bool,
+    learn: bool,
+    memory: bool,
+    verbose: bool,
+    prepare_only: bool,
+) -> None:
+    """Start Headroom proxy for use with Antigravity IDE.
+
+    \b
+    Antigravity reads its model endpoints from its model-provider settings,
+    not from environment variables. This command starts the proxy and prints
+    the settings to add as a custom OpenAI-compatible model provider.
+
+    \b
+    After running this command, open Antigravity and add a custom model
+    provider with the printed base URL. Antigravity fetches the model list
+    from GET /v1/models automatically.
+
+    \b
+    Example:
+        headroom wrap antigravity                # Start proxy + Antigravity settings
+        headroom wrap antigravity --port 9999    # Custom proxy port
+    """
+    if prepare_only:
+        return
+
+    def _print_antigravity_setup(actual_port: int) -> None:
+        for line in _render_antigravity_setup_lines(actual_port, project=_project_name_from_cwd()):
+            click.echo(line)
+
+    _run_proxy_only_watcher(
+        agent_label="antigravity",
+        port=port,
+        no_proxy=no_proxy,
+        learn=learn,
+        memory=memory,
+        agent_type="antigravity",
+        print_setup_lines=_print_antigravity_setup,
+    )
+
+
+# =============================================================================
 # Grok Build
 # =============================================================================
 
@@ -7868,6 +8017,7 @@ def continue_dev(
 
 
 # =============================================================================
+
 # OpenClaw
 # =============================================================================
 
@@ -8152,6 +8302,16 @@ def openclaw(
     is_flag=True,
     help="Route headroom/* models through the authenticated GitHub Copilot subscription",
 )
+@click.option(
+    "--openai-api-url",
+    default=None,
+    envvar="OPENAI_TARGET_API_URL",
+    help=(
+        "Upstream base URL for OpenAI-compatible traffic, e.g. "
+        "https://api.deepseek.com/v1. Without it the proxy forwards to "
+        "https://api.openai.com/v1 (env: OPENAI_TARGET_API_URL)."
+    ),
+)
 @click.option("--learn", is_flag=True, help="Enable live traffic learning")
 @click.option("--memory", is_flag=True, help="Enable persistent cross-session memory")
 @click.option(
@@ -8169,6 +8329,7 @@ def opencode(
     code_graph: bool,
     no_proxy: bool,
     copilot_subscription: bool,
+    openai_api_url: str | None,
     learn: bool,
     memory: bool,
     backend: str | None,
@@ -8194,9 +8355,25 @@ def opencode(
         headroom wrap opencode --port 9999             # Custom proxy port
         headroom wrap opencode --backend anyllm --anyllm-provider groq
         headroom wrap opencode --copilot-subscription # Use a GitHub Copilot subscription
+        headroom wrap opencode --openai-api-url https://api.deepseek.com/v1
+
+    \b
+    Without --openai-api-url the proxy forwards OpenAI-compatible traffic to
+    https://api.openai.com/v1, so a third-party key (DeepSeek, Together,
+    OpenRouter, ...) is rejected upstream with OpenAI's 401 "Incorrect API key
+    provided". Point the proxy at the real upstream instead:
+
+    \b
+        headroom wrap opencode --openai-api-url https://api.deepseek.com/v1
+        OPENAI_TARGET_API_URL=https://api.deepseek.com/v1 headroom wrap opencode
     """
     subscription_resolution = None
     if copilot_subscription:
+        if openai_api_url:
+            raise click.ClickException(
+                "--openai-api-url cannot be combined with --copilot-subscription; "
+                "the subscription resolves its own upstream."
+            )
         effective_backend = backend or os.environ.get("HEADROOM_BACKEND")
         if effective_backend not in (None, "", "anthropic"):
             raise click.ClickException(
@@ -8228,6 +8405,12 @@ def opencode(
             click.echo("Error: 'opencode' not found in PATH.")
             click.echo("Install OpenCode: https://opencode.ai")
             raise SystemExit(1)
+
+    # Likewise refuse a reused proxy that cannot honor --openai-api-url before
+    # touching OpenCode's config or registering a client marker; the same check
+    # inside _ensure_proxy would only fire after those edits.
+    if not prepare_only and no_proxy and openai_api_url:
+        _require_no_proxy_openai_upstream(port, openai_api_url)
 
     # Snapshot OpenCode config.json BEFORE any wrap-time mutation so
     # `headroom unwrap opencode` can restore the user's pre-wrap state.
@@ -8266,7 +8449,7 @@ def opencode(
         _inject_memory_agents_md(agents_md)
 
     if prepare_only:
-        inject_opencode_provider_config(port)
+        inject_opencode_provider_config(port, keep_user_entries=bool(openai_api_url))
         return
 
     # Past the prepare-only return the launch path always ran the binary check
@@ -8290,7 +8473,10 @@ def opencode(
         backend=backend,
         anyllm_provider=anyllm_provider,
         region=region,
-        openai_api_url=(subscription_resolution.api_url if subscription_resolution else None),
+        openai_api_url=(
+            subscription_resolution.api_url if subscription_resolution else openai_api_url
+        ),
+        require_openai_api_url=bool(openai_api_url),
         copilot_api_token=(subscription_resolution.token if subscription_resolution else None),
         copilot_refresh_oauth_token=(
             subscription_resolution.refresh_oauth_token if subscription_resolution else None
@@ -8320,7 +8506,7 @@ def opencode(
         )
 
         # Inject Headroom provider into OpenCode config so traffic routes through proxy.
-        inject_opencode_provider_config(actual_port)
+        inject_opencode_provider_config(actual_port, keep_user_entries=bool(openai_api_url))
         if memory:
             mem_dir = Path.cwd() / ".headroom"
             _inject_memory_mcp_config(
@@ -8407,6 +8593,7 @@ def unwrap_opencode(port: int, no_stop_proxy: bool) -> None:
     click.echo()
 
     config_file, backup_file = opencode_config_paths()
+    migrate_legacy_opencode_jsonc_backup(config_file, backup_file)
 
     if backup_file.exists():
         try:
@@ -8862,12 +9049,49 @@ def unwrap_zcode(port: int, no_stop_proxy: bool) -> None:
 
 
 def _warn_proxy_mode_mismatch(running_config: dict[str, Any] | None) -> None:
-    """Warn when a reused proxy runs a different mode than this session asked for.
+    """Warn when reuse ignores this session's startup-only settings.
 
-    Mode is fixed at proxy startup, so a requested HEADROOM_MODE (explicit, or
-    a wrap target's default_mode) is silently ignored on reuse. Warning-only:
-    other clients may be attached to the running proxy.
+    Do not restart a shared proxy: other clients may be attached to it.
     """
+    config = running_config or {}
+    mismatches: list[str] = []
+    requested_min = os.environ.get("HEADROOM_MIN_TOKENS")
+    running_min = config.get("min_tokens_to_crush")
+    if requested_min is not None and isinstance(running_min, int):
+        try:
+            requested_min_value = int(requested_min)
+        except ValueError:
+            requested_min_value = None
+        if requested_min_value is not None and requested_min_value != running_min:
+            mismatches.append(f"HEADROOM_MIN_TOKENS={requested_min_value} (running: {running_min})")
+
+    requested_excludes = os.environ.get("HEADROOM_EXCLUDE_TOOLS")
+    running_excludes = config.get("exclude_tools")
+    if (
+        requested_excludes is not None
+        and isinstance(running_excludes, list)
+        and all(isinstance(name, str) for name in running_excludes)
+    ):
+        from headroom.config import DEFAULT_EXCLUDE_TOOLS
+
+        defaults = {name.lower() for name in DEFAULT_EXCLUDE_TOOLS}
+        requested_names = {
+            name.strip().lower() for name in requested_excludes.split(",") if name.strip()
+        }
+        running_names = {name.lower() for name in running_excludes}
+        if requested_names | defaults != running_names | defaults:
+            mismatches.append(
+                f"HEADROOM_EXCLUDE_TOOLS={sorted(requested_names)!r} "
+                f"(running: {sorted(running_names)!r})"
+            )
+
+    if mismatches:
+        click.echo(
+            "  Warning: this session requested "
+            + "; ".join(mismatches)
+            + ", but those settings are fixed at proxy startup. "
+            "Restart the proxy, or use --port for a separate one."
+        )
     requested = os.environ.get("HEADROOM_MODE")
     running = (running_config or {}).get("mode")
     if not requested or not isinstance(running, str):
