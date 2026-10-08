@@ -1,0 +1,13 @@
+{
+  "requests": 4,
+  "session_model": "claude-haiku-5-5",
+  "saved": 17687,
+  "completed": true,
+  "captured_from": "native ConPTY ANSI output",
+  "percent": 3.34,
+  "privacy": "pane only; no paths, account data, prompts, credentials or raw transcript uploaded",
+  "native_version": "2.1.293",
+  "source_commit": "dafa1ec0ec7599aedf05d98d591691cdf686cdc6",
+  "task": "dependency-free fictional todo SPA",
+  "pause_resume_verified": true
+}

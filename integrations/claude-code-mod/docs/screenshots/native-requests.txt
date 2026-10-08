@@ -1,0 +1,25 @@
+HEADROOM  /  COMPRESSION
+LIVE · d8da565b
+[ Overview ] [ Requests ● ] [ Refresh ]
+Local · refreshes every 5 seconds while open
+COMPRESSION ON
+[ Pause compression ] [ Reset stats ]
+TIME WINDOW
+[ 15m ] [ 1h ] [ 24h ] [ All retained ● ]
+Compression ON · applies to the next request.
+[ All requests ] [ Older ] [ Newer ]
+Page 1/1 · newest 4 retained requests
+2026-10-08T02:15:42  claude-haiku-5-5
+178.7k → 178.7k · 0.0%
+[ Capture status ]
+2026-10-08T02:15:39  claude-haiku-5-5
+175.9k → 175.9k · 0.0%
+[ Capture status ]
+2026-10-08T02:15:25  claude-haiku-5-5
+175k → 157.4k · 10.1%
+[ Capture status ]
+2026-10-08T02:15:25  claude-haiku-5-5
+166 → 166 · 0.0%
+[ Capture status ]
+Message capture is off. Metrics still work.
+--log-messages is an explicit proxy opt-in.

@@ -1,30 +1,40 @@
-# Native sidebar demo
+# Native sidebar demo — 0.1.2
 
-These are the native Claude Code 2.1.290 terminal pane from the authenticated
-Windows acceptance session on October 6, 2026. The screenshots were rendered
-from recorded ConPTY ANSI output and framed around the pane to exclude the
-surrounding conversation and local paths. The displayed metrics are unchanged;
-these are not the protocol-host E2E fixture or generated UI mockups.
+Captured from a real Claude Code 2.1.293 / Haiku 5.5 session through Headroom on
+October 7, 2026. Haiku built a tiny dependency-free todo SPA in a disposable
+worktree using fictional todo fixtures. These images are rendered from that
+session's ConPTY ANSI output, cropped to the native sidebar. They are not host
+fixtures or generated UI mockups; displayed metrics and controls are unchanged.
+
+Only the sidebar cells were published. Account details, workspace paths,
+conversation text, credentials and raw session logs are excluded. Message
+capture was off. The temporary session, worktree, fixtures and capture runtime
+were removed after the images were pushed and their remote copies verified.
 
 ## Live overview
 
-![Native overview with 245.2k to 222.4k tokens, 22.8k removed and 9.3% reduction](native-overview.png)
+![Current native overview with compression controls and percentage bars](native-overview.png)
 
-The latest request's exact savings were 22,801 tokens, matching proxy records.
-Native Claude context usage is displayed separately from request savings.
-Retained totals cover the current tagged conversation, including inherited
-children, rather than unique context or lifetime usage.
+The retained window contains four successful task requests and 17,687 tokens
+removed, a 3.34% weighted reduction (displayed as 3.3%). One request recorded a
+10.1% reduction; the latest request had no reduction. Native context usage is
+shown separately. These are retained request metrics, not billing savings or
+unique context reduction.
+
+## Paused compression
+
+![Actual paused state with resume control](native-paused.png)
+
+Pause and resume were invoked through the native pane's keyboard control and
+confirmed against the live companion. Closing the pane does not resume compression.
 
 ## Request history
 
-![Native retained request list showing before and after token counts](native-requests.png)
+![Synthetic session request history](native-requests.png)
 
-Each retained request exposes its own accounting and a message-review action.
+All retained requests belong to the same throwaway Haiku session. Message capture
+is disabled; the pane explicitly reports that policy rather than showing bodies.
 
-## Message inspector
-
-![Native message inspector with original, compressed, diff and paging controls](native-inspector.png)
-
-Message inspection requires explicitly enabled capture. This frame shows the
-compressed side, independent message indices, preview chunks and text paging.
-See [the validation record](../VALIDATION.md) for checks and platform limits.
+The adjacent `.txt` files preserve the same cropped TUI text. The small
+[native-demo-evidence.json](native-demo-evidence.json) records model, version,
+source commit and aggregate checks without exporting a transcript.

@@ -17,10 +17,16 @@
   and rendered percentage bars. Companion wheel 0.1.1 builds; Ruff and whitespace
   checks pass.
 
-The new controls and bars have native test-kit and local-provider E2E evidence.
-The authenticated live-session screenshots below document the earlier 0.1.1 UI;
-they do not show the new controls. Desktop live UI and native mouse input remain
-unverified. Control state and reset markers are in-memory and clear on proxy restart.
+The new controls and bars also have authenticated live-session evidence on Claude
+2.1.293 / Haiku 5.5: a fictional todo SPA was built in a disposable worktree through
+Headroom. Four retained successful requests recorded 17,687 tokens removed / 3.34%
+weighted reduction. Native keyboard pause/resume changed the companion's confirmed
+state. The current [screenshots](screenshots/README.md) and cropped TUI text come
+from that session's ConPTY output. Images were pushed and fetched back for hash
+verification before removing the temporary session, fixtures, credentials copy,
+capture runtime and worktree. Raw transcripts and account/workspace details are
+not published. Desktop live UI and native mouse input remain unverified. Control
+state and reset markers are in-memory and clear on proxy restart.
 
 ## Sidebar 0.1.1 — October 6, 2026
 
