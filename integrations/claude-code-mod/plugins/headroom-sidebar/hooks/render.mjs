@@ -4,27 +4,34 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
   const { Box, Text, Button } = ui;
   const line = (value, extra = {}) => Text({ ...extra, children: value });
   const button = (key, title, fn, hotkey) => Button({ key, label: title, onPress: fn, ...(hotkey ? { hotkey } : {}) });
-  const group = children => Box({ flexDirection: 'row', gap: 1, children });
-  const children = [line('HEADROOM  /  COMPRESSION', { bold: true }),
-    line(`${state.connection.toUpperCase()} · ${state.connection !== 'setup' && state.sessionId ? state.sessionId.slice(0, 8) : 'not linked'}`, { dimColor: true }),
+  const group = (children, extra = {}) => Box({ flexDirection: 'row', gap: 1, ...extra, children });
+  const section = (key, title, body, extra = {}) => Box({ key, flexDirection: 'column', marginTop: 1, ...extra,
+    children: [line(title, { dimColor: true }), ...body] });
+  const rule = () => line('─'.repeat(Math.max(12, Math.min(48, columns - 4))), { dimColor: true });
+  const periodicNotice = state.connection === 'live' && state.notice?.startsWith('Local ·');
+  const windowName = { all: 'All retained', '15m': 'Last 15 minutes', '1h': 'Last hour', '24h': 'Last 24 hours' }[state.timeWindow] ?? 'All retained';
+  const children = [group([line('HEADROOM', { bold: true }),
+    line(state.connection.toUpperCase(), { color: state.connection === 'live' ? 'green' : 'yellow' })], { justifyContent: 'space-between' }),
     group([button('overview', state.tab === 'overview' ? 'Overview ●' : 'Overview', () => actions.tab('overview'), '1'),
       button('requests', state.tab === 'requests' ? 'Requests ●' : 'Requests', () => actions.tab('requests'), '2'),
-      button('refresh', 'Refresh', actions.refresh, 'r')])];
+      button('refresh', 'Refresh', actions.refresh, 'r')], { marginTop: 1 })];
   if (state.connection !== 'live') children.push(button('start', 'Start Headroom', actions.start, 's'));
   if (state.startNotice) children.push(line(safeText(state.startNotice, 500)));
-  if (state.notice) children.push(line(safeText(state.notice, 300), { dimColor: true }));
+  if (state.notice && !periodicNotice) children.push(section('notice', 'STATUS', [line(safeText(state.notice, 300))]));
   if (state.sessionId && state.connection !== 'setup') {
-    children.push(line(`COMPRESSION ${state.compressionEnabled === false ? 'PAUSED' : state.compressionEnabled === true ? 'ON' : 'UNKNOWN'}`, { bold: true }));
+    const controls = [line(`COMPRESSION ${state.compressionEnabled === false ? 'PAUSED' : state.compressionEnabled === true ? 'ON' : 'UNKNOWN'}`,
+      { color: state.compressionEnabled === false ? 'yellow' : 'green', bold: true })];
     if (state.compressionEnabled !== null) {
-      children.push(group([
-      button('compression', state.controlPending ? 'Working…' : state.compressionEnabled ? 'Pause compression' : 'Resume compression', actions.compression, 'p'),
-      button('reset', 'Reset stats', actions.reset),
-    ]));
-    children.push(line('TIME WINDOW', { dimColor: true }), group(['15m', '1h', '24h', 'all'].map(w =>
-      button(`window-${w}`, `${w === 'all' ? 'All retained' : w}${state.timeWindow === w ? ' ●' : ''}`, () => actions.window(w)))));
-    } else children.push(line('Upgrade the companion to 0.1.1+ for conversation controls.', { dimColor: true }));
+      controls.push(group([
+        button('compression', state.controlPending ? 'Working…' : state.compressionEnabled ? 'Pause' : 'Resume', actions.compression, 'p'),
+        button('reset', 'Reset stats', actions.reset),
+      ]), group([line('Window', { dimColor: true }), ...['15m', '1h', '24h', 'all'].map(w =>
+        button(`window-${w}`, `${w === 'all' ? 'All' : w}${state.timeWindow === w ? ' ●' : ''}`, () => actions.window(w)))], { marginTop: 1 }));
+    } else controls.push(line('Upgrade the companion to 0.1.1+ for conversation controls.', { dimColor: true }));
+    children.push(Box({ key: 'controls', flexDirection: 'column', marginTop: 1, children: controls }));
   }
-  if (state.controlNotice) children.push(line(safeText(state.controlNotice, 300)));
+  if (state.controlNotice) children.push(Box({ flexDirection: 'column', marginTop: 1,
+    children: [line(safeText(state.controlNotice, 300), { color: state.controlNotice.includes('failed') ? 'red' : state.compressionEnabled === false ? 'yellow' : 'green' })] }));
   const data = state.summary;
   if (!data) {
     children.push(line(state.tab === 'requests' ? 'REQUESTS' : 'OVERVIEW', { bold: true }),
@@ -38,36 +45,47 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
     } else children.push(line('Check your companion with headroom-mod doctor, then use Refresh.'));
     children.push(line('1 Overview · 2 Requests · r Refresh · q Close · Tab/Enter selects controls', { dimColor: true }),
       line('Controls require a linked companion. Message capture remains a separate proxy opt-in.', { dimColor: true }));
-    return Box({ flexDirection: 'column', paddingX: 1, children });
+    return Box({ flexDirection: 'column', paddingX: 1, paddingY: 1, children });
   }
   if (state.tab === 'overview') {
     const latest = data.latest, totals = data.totals;
-    children.push(line('LATEST RECORDED REQUEST', { bold: true }));
+    const savings = totals.requests === 0 ? 0 : totals.saved;
+    const reduction = totals.requests === 0 ? 0 : totals.percent;
+    const savingsColor = typeof savings !== 'number' ? 'gray' : savings < 0 ? 'red' : 'green';
+    children.push(section('savings', 'SAVINGS', [
+      line(`${count(savings)} tokens removed`, { bold: true, color: savingsColor }),
+      line(progressBar(reduction, columns - 6) ?? 'Reduction unavailable', { color: savingsColor }),
+      line(`${totals.requests} requests · ${windowName}`, { dimColor: true }),
+    ], { borderStyle: 'round', borderColor: 'gray', paddingX: 1, paddingY: 1 }));
+    if (totals.failed_requests) children.push(line(`${totals.failed_requests} failed requests`, { color: 'yellow' }));
+    if (totals.unaccounted_requests) children.push(line(`${totals.unaccounted_requests} requests excluded from savings (failed or missing accounting).`, { color: 'yellow' }));
+    const latestLines = [];
     if (latest) {
-      children.push(line(`${count(latest.before)} → ${count(latest.after)} tokens`),
-        line(`${count(latest.saved)} removed · ${percent(latest.percent)} reduction`),
-        line(progressBar(latest.percent, columns) ?? 'Reduction unavailable', { color: 'green' }),
-        line(`${label(latest.model, 50)} · ${ms(latest.overhead_ms)} compression`, { dimColor: true }));
-      if (latest.failed) children.push(line('Latest request failed; it is excluded from savings totals.'));
-      if (latest.accounting !== 'complete') children.push(line('Latest token accounting is unavailable/inconsistent.'));
-    } else children.push(line('No tagged requests yet. Send a prompt through this launch.'));
-    children.push(line('CLAUDE CONTEXT  (native usage)', { bold: true }),
-      line(`${count(state.context?.tokens)} / ${count(state.context?.window)} · ${percent(state.context?.percent)}`),
+      latestLines.push(line(`${count(latest.before)} → ${count(latest.after)} tokens`, { bold: true }),
+        line(`${count(latest.saved)} removed · ${percent(latest.percent)} reduction`, { dimColor: true }));
+      if (latest.failed) latestLines.push(line('Latest request failed; excluded from savings totals.', { color: 'yellow' }));
+      if (latest.accounting !== 'complete') latestLines.push(line('Token accounting unavailable/inconsistent.', { color: 'yellow' }));
+    } else latestLines.push(line('No requests in this window.', { dimColor: true }));
+    children.push(section('latest', 'LATEST REQUEST', latestLines));
+    children.push(section('context', 'CLAUDE CONTEXT', [
+      line(`${count(state.context?.tokens)} / ${count(state.context?.window)} tokens`, { bold: true }),
       line(progressBar(state.context?.percent, columns) ?? 'Context usage unavailable', { color: state.context?.percent >= 85 ? 'yellow' : 'cyan' }),
-      line('RETAINED REQUEST TOTALS', { bold: true }),
-      line(`${totals.requests} requests · ${count(totals.saved)} tokens removed`),
-      line(`${percent(totals.percent)} weighted reduction · ${totals.failed_requests} failed`),
-      line(progressBar(totals.percent, columns) ?? 'Reduction unavailable', { color: 'green' }),
-      line(`${ms(totals.average_overhead_ms)} mean compression overhead`),
-      line(`Cache reads ${count(totals.cache_read)} · writes ${count(totals.cache_write)}`),
-      line(`${percent(totals.cache_read_percent)} provider cache-read share`),
-      line(`Saved/request  ${trend(data.requests)}`, { dimColor: true }));
-    if (totals.unaccounted_requests) children.push(line(`${totals.unaccounted_requests} requests excluded from savings (failed or missing accounting).`));
-    const transforms = Object.entries(totals.transforms ?? {}).slice(0, Math.max(1, Math.min(4, rows - 25)));
-    if (transforms.length) children.push(line('Transforms (request counts, not additive savings)', { dimColor: true }),
-      ...transforms.map(([name, n]) => line(`${label(name, 36)}  ${n}`)));
-    children.push(line('Includes inherited child requests. Cumulative request tokens are not unique context or bill savings.', { dimColor: true }));
-    if (data.retention?.window_full) children.push(line('Retention window full: older requests may have been evicted.'));
+    ]));
+    if (data.retention?.window_full) children.push(section('retention-warning', 'HISTORY', [line('Older requests may be missing: retention is full.', { color: 'yellow' })]));
+    children.push(Box({ marginTop: 1, children: button('details', state.showDetails ? 'Less details ▴' : 'More details ▾', actions.details, 'd') }));
+    if (state.showDetails) {
+      const details = [line(`${ms(totals.average_overhead_ms)} mean compression overhead`),
+        line(`Cache reads ${count(totals.cache_read)} · writes ${count(totals.cache_write)}`),
+        line(`${percent(totals.cache_read_percent)} provider cache-read share`),
+        line(`Saved/request  ${trend(data.requests)}`)];
+      if (latest) details.push(line(`${label(latest.model, 40)} · ${ms(latest.overhead_ms)} latest`));
+      const transforms = Object.entries(totals.transforms ?? {}).slice(0, 4);
+      if (transforms.length) details.push(line('Transforms (request counts)', { dimColor: true }),
+        ...transforms.map(([name, n]) => line(`${label(name, 36)}  ${n}`)));
+      details.push(line(`Conversation ${state.sessionId.slice(0, 8)}`, { dimColor: true }),
+        line('Includes inherited child requests. Request totals are not unique context or bill savings.', { dimColor: true }));
+      children.push(section('details-body', 'PERFORMANCE & ACCOUNTING', details));
+    }
   } else if (state.tab === 'requests') {
     const items = state.changedOnly ? data.requests.filter(r => r.saved !== null && r.saved !== 0) : data.requests;
     const perPage = Math.max(1, Math.min(5, Math.floor((rows - 12) / 3)));
@@ -78,9 +96,10 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
       button('newer', 'Newer', () => actions.listPage(Math.max(0, page - 1)))]),
       line(`Page ${page + 1}/${pages} · newest ${data.requests.length} retained requests`, { dimColor: true }));
     for (const r of items.slice(page * perPage, (page + 1) * perPage)) {
-      children.push(line(`${label(r.timestamp, 19)}  ${label(r.model, 28)}`),
-        line(`${count(r.before)} → ${count(r.after)} · ${percent(r.percent)}${r.failed ? ' · FAILED' : ''}`));
-      if (r.inspectable_id) children.push(button(`inspect-${r.request_id}`, r.has_messages ? 'Review messages' : 'Capture status', () => actions.inspect(r.request_id)));
+      const request = [line(`${count(r.before)} → ${count(r.after)} · ${percent(r.percent)}${r.failed ? ' · FAILED' : ''}`, { bold: true }),
+        line(`${label(r.timestamp, 19)}  ${label(r.model, 28)}`, { dimColor: true })];
+      if (r.inspectable_id) request.push(button(`inspect-${r.request_id}`, r.has_messages ? 'Review messages' : 'Capture status', () => actions.inspect(r.request_id)));
+      children.push(Box({ key: `request-${r.request_id}`, flexDirection: 'column', marginTop: 1, paddingX: 1, borderStyle: 'single', borderColor: 'gray', children: request }));
     }
     if (!items.length) children.push(line('No matching requests in the retained window.'));
     if (!data.log_full_messages) children.push(line('Message capture is off. Metrics still work. --log-messages is an explicit proxy opt-in.'));
@@ -102,5 +121,6 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
       children.push(line('Original/compressed indices are independent. Diff is request-level.', { dimColor: true }));
     }
   }
-  return Box({ flexDirection: 'column', paddingX: 1, children });
+  if (periodicNotice) children.push(Box({ flexDirection: 'column', marginTop: 1, children: [rule(), line('Local · refreshes every 5s', { dimColor: true })] }));
+  return Box({ flexDirection: 'column', paddingX: 1, paddingY: 1, children });
 }

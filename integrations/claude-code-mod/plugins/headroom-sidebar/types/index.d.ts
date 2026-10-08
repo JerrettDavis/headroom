@@ -6,6 +6,7 @@ export type HeadroomState = {
   timeWindow: 'all' | '15m' | '1h' | '24h';
   controlNotice: string;
   controlPending: boolean;
+  showDetails: boolean;
   sessionId: string;
   resumeId?: string | null;
   baseUrl: string;

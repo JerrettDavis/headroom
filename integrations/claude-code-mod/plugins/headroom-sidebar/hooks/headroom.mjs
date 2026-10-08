@@ -163,6 +163,10 @@ async function inspectRequest($, ctx, selection, lastScreen = false) {
 
 function actions($, ctx) {
   return {
+    details: async () => {
+      const s = await read($);
+      await patch($, ctx, { showDetails: !s.showDetails });
+    },
     compression: () => changeControl($, ctx, 'compression'),
     reset: () => changeControl($, ctx, 'reset'),
     window: async timeWindow => {

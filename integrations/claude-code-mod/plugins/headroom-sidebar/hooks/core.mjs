@@ -67,7 +67,7 @@ export function parseResponse(response, sid, requestId) {
 }
 export function initialState(owner = 1) {
   return { owner, sessionId: '', baseUrl: '', open: false, band: false, tab: 'overview',
-    compressionEnabled: null, timeWindow: 'all', controlNotice: '', controlPending: false,
+    compressionEnabled: null, timeWindow: 'all', controlNotice: '', controlPending: false, showDetails: false,
     connection: 'setup', notice: 'Launch with headroom-mod run to correlate this conversation.',
     updatedAt: null, context: null, summary: null, detail: null, selection: null,
     listPage: 0, changedOnly: false, textPage: 0 };

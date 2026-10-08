@@ -41,6 +41,10 @@ describe('headroom', () => {
       props: { bodyColumns: 48, placement: 'dock', scroll: { bodyRows: 40 } } as any });
     expect(await ui.find({ type: 'Text', text: /[█░]+.*40\.0%/ })).toBeDefined();
     expect(await ui.find({ type: 'Text', text: /[█░]+.*25\.0%/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /provider cache-read share/ })).toBeUndefined();
+    await ui.press({ key: 'details' }); await clock.settle();
+    expect(await ui.find({ type: 'Text', text: /provider cache-read share/ })).toBeDefined();
+    await ui.press({ key: 'details' }); await clock.settle();
     await ui.press({ key: 'compression' }); await clock.settle();
     expect(enabled).toBe(false);
     expect(await ui.find({ type: 'Text', text: /COMPRESSION PAUSED/ })).toBeDefined();
@@ -187,8 +191,8 @@ describe('headroom', () => {
     await clock.settle();
     const ui = await $.ui.mount({ plugin: 'headroom-sidebar', surface: 'terminal', component: 'Pane', requestId: 'headroom-sidebar',
       props: { bodyColumns: 48, placement: 'dock', scroll: { bodyRows: 35 } } } as any);
-    expect(await ui.find({ type: 'Text', text: /No tagged requests yet/ })).toBeDefined();
-    expect(await ui.find({ type: 'Text', text: /RETAINED REQUEST TOTALS/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /No requests in this window/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /0 requests/ })).toBeDefined();
     await ui.unmount();
   });
 });

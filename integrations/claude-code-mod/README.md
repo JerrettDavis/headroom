@@ -1,6 +1,6 @@
 # Headroom Sidebar — Claude Code mod
 
-**Version 0.1.2 · installable preview · local conversation controls and telemetry**
+**Version 0.1.3 · installable preview · local conversation controls and telemetry**
 
 A sidebar for current-conversation Headroom compression, native Claude context usage,
 retained request statistics, and on-demand before/after message review. This is a
@@ -43,9 +43,13 @@ See [docs/VALIDATION.md](docs/VALIDATION.md) for reproducible commands and limit
 - **Time window**: 15 minutes, 1 hour, 24 hours, or all retained requests.
   Filtering happens before totals are computed, including records beyond the
   100-row display limit. Retention can make a selected window incomplete.
-- **Progress bars**: latest and weighted compression reduction, plus native
+- **Progress bars**: weighted compression reduction and native
   Claude context usage. Percentages remain visible; unavailable values are marked
   explicitly, and negative reductions retain their signed percentage.
+- **Overview layout**: a framed savings summary, separate latest-request and
+  context sections, and an expandable **More details** (`d`) control for latency,
+  cache and transform metrics. Accounting failures and retention warnings remain
+  visible even when details are collapsed.
 
 Controls are local and conversation-scoped. Closing the pane does not resume
 compression. Proxy restart restores compression to on and clears reset markers;
