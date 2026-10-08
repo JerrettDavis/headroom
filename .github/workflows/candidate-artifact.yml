@@ -22,10 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate exact authoritative main SHA
         id: source
@@ -34,6 +36,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           PRODUCER_SHA: ${{ github.sha }}
           WORKFLOW_REF: ${{ github.ref }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
@@ -44,7 +47,10 @@ jobs:
             echo "source_sha must be a lowercase full 40-character Git SHA" >&2
             exit 1
           fi
-          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          # Authentication exists only in this trusted validation step; it is
+          # never persisted or passed into jobs executing historical source.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)" \
+            fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
           git cat-file -e "$SOURCE_SHA^{commit}"
           if ! git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main; then
             echo "source_sha is not reachable from authoritative origin/main" >&2
@@ -56,6 +62,23 @@ jobs:
           fi
           printf 'source_sha=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve immutable version from the selected source manifest
+        id: version
+        env:
+          CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python headroom/release_version.py
+
+      - name: Retain trusted producer tooling without checkout credentials
+        shell: bash
+        run: tar -czf "$RUNNER_TEMP/candidate-producer.tar.gz" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: candidate-producer-source
+          path: ${{ runner.temp }}/candidate-producer.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   build-and-smoke:
     needs: validate-source
     permissions:
@@ -63,26 +86,37 @@ jobs:
     uses: ./.github/workflows/release-build.yml
     with:
       source_sha: ${{ needs.validate-source.outputs.source_sha }}
+      resolved_version: ${{ needs.validate-source.outputs.version }}
 
   emit-candidate:
     needs: [validate-source, build-and-smoke]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    permissions: {}
     env:
       SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
-      VERSION: ${{ needs.build-and-smoke.outputs.version }}
+      VERSION: ${{ needs.validate-source.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Download trusted producer tooling
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
+          name: candidate-producer-source
+          path: ${{ runner.temp }}/candidate-producer
 
-      - name: Check out exact candidate source for rollout identity
-        uses: actions/checkout@v7
+      - name: Restore trusted producer tooling
+        shell: bash
+        run: tar -xzf "$RUNNER_TEMP/candidate-producer/candidate-producer.tar.gz"
+
+      - name: Download exact candidate source for rollout identity
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
-          ref: ${{ env.SOURCE_SHA }}
-          path: candidate-source
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Restore credential-free candidate source
+        shell: bash
+        run: |
+          mkdir candidate-source
+          tar -xzf "$RUNNER_TEMP/release-source/release-source.tar.gz" -C candidate-source
 
       - uses: astral-sh/setup-uv@v7
 
@@ -160,15 +194,20 @@ jobs:
   verify-downloaded-candidate:
     needs: [validate-source, build-and-smoke, emit-candidate]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    permissions: {}
     env:
       SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
-      VERSION: ${{ needs.build-and-smoke.outputs.version }}
+      VERSION: ${{ needs.validate-source.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Download trusted producer tooling
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
+          name: candidate-producer-source
+          path: ${{ runner.temp }}/candidate-producer
+
+      - name: Restore trusted producer tooling
+        shell: bash
+        run: tar -xzf "$RUNNER_TEMP/candidate-producer/candidate-producer.tar.gz"
 
       - uses: astral-sh/setup-uv@v7
 

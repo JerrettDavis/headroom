@@ -39,14 +39,16 @@ def test_shared_build_keeps_all_release_gates_and_version_outputs() -> None:
     build = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
     jobs = build["jobs"]
     assert set(jobs) == {
+        "prepare-source",
         "detect-version",
         "build",
         "build-wheels",
         "collect-dist",
         "smoke-import-wheels",
     }
-    assert jobs["build"]["needs"] == ["detect-version"]
-    assert jobs["build-wheels"]["needs"] == ["detect-version", "build"]
+    assert jobs["detect-version"]["needs"] == ["prepare-source"]
+    assert jobs["build"]["needs"] == ["prepare-source", "detect-version"]
+    assert jobs["build-wheels"]["needs"] == ["prepare-source", "detect-version", "build"]
     assert jobs["collect-dist"]["needs"] == ["build", "build-wheels"]
     assert jobs["smoke-import-wheels"]["needs"] == ["build-wheels"]
     for name, job in jobs.items():
@@ -144,3 +146,28 @@ def test_reusable_build_checks_out_the_requested_exact_sha() -> None:
     checkout_count = content.count("uses: actions/checkout@v7")
     exact_ref_count = content.count("ref: ${{ inputs.source_sha || github.sha }}")
     assert checkout_count == exact_ref_count
+
+
+def test_historical_source_executes_without_repository_token_authority() -> None:
+    build = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
+    candidate = yaml.safe_load(CANDIDATE.read_text(encoding="utf-8"))
+    for name in ("detect-version", "build", "build-wheels", "smoke-import-wheels"):
+        job = build["jobs"][name]
+        assert job["permissions"] == {}, name
+        assert all(step.get("uses") != "actions/checkout@v7" for step in job["steps"]), name
+        if name != "smoke-import-wheels":
+            assert any(
+                step.get("uses") == "actions/download-artifact@v8"
+                and step["with"].get("name") == "release-source"
+                for step in job["steps"]
+            ), name
+    for name in ("emit-candidate", "verify-downloaded-candidate"):
+        job = candidate["jobs"][name]
+        assert job["permissions"] == {}, name
+        assert all(step.get("uses") != "actions/checkout@v7" for step in job["steps"]), name
+    # The only authenticated source checkout does not execute source scripts
+    # and removes its token before retaining the snapshot.
+    prepare = build["jobs"]["prepare-source"]
+    checkout = next(step for step in prepare["steps"] if "checkout" in step.get("uses", ""))
+    assert checkout["with"]["persist-credentials"] is False
+    assert len([step for step in prepare["steps"] if "run" in step]) == 1

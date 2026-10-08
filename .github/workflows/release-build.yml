@@ -9,6 +9,11 @@ on:
         description: "Exact full source SHA to build"
         required: true
         type: string
+      resolved_version:
+        description: "Producer-resolved immutable candidate version; empty uses release detection"
+        required: false
+        default: ""
+        type: string
     outputs:
       version:
         description: "Resolved version from release version detection"
@@ -29,14 +34,46 @@ on:
         description: "Resolved previous tag from release version detection"
         value: ${{ jobs.detect-version.outputs.previous_tag }}
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  detect-version:
+  # Only trusted workflow shell runs here. Historical source scripts execute in
+  # separate jobs with no repository permissions and no checkout credentials.
+  prepare-source:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Retain credential-free exact source and Git history
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          if git config --local --get-regexp 'http\..*\.extraheader' >/dev/null; then
+            echo "checkout retained an HTTP credential header" >&2
+            exit 1
+          fi
+          tar -czf "$RUNNER_TEMP/release-source.tar.gz" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release-source.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  detect-version:
+    needs: [prepare-source]
+    runs-on: ubuntu-latest
+    permissions: {}
     outputs:
       version: ${{ steps.ver.outputs.version }}
       npm_version: ${{ steps.ver.outputs.npm_version }}
@@ -45,10 +82,15 @@ jobs:
       bump: ${{ steps.ver.outputs.bump }}
       previous_tag: ${{ steps.ver.outputs.previous_tag }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Download credential-free source snapshot
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
-          ref: ${{ inputs.source_sha || github.sha }}
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Restore exact source and Git history
+        shell: bash
+        run: tar -xzf "$RUNNER_TEMP/release-source/release-source.tar.gz"
 
       # When fired by release-please's release event, the tag the
       # bot just published IS the canonical version for this run —
@@ -60,7 +102,7 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          MANUAL_INPUT: ${{ github.event.inputs.version }}
+          MANUAL_INPUT: ${{ inputs.resolved_version || github.event.inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
             # github.event.release.tag_name is "vX.Y.Z" — strip the
@@ -75,23 +117,35 @@ jobs:
 
       - name: Compute semantic version from canonical + release history
         id: ver
+        shell: bash
         run: |
-          python headroom/release_version.py
+          if [ -n "$RESOLVED_VERSION" ]; then
+            [[ "$RESOLVED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            printf 'version=%s\nnpm_version=%s\ncanonical=%s\nheight=0\nbump=source-manifest\nprevious_tag=\n' \
+              "$RESOLVED_VERSION" "$RESOLVED_VERSION" "$RESOLVED_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            python headroom/release_version.py
+          fi
         env:
+          RESOLVED_VERSION: ${{ inputs.resolved_version }}
           MANUAL_VER: ${{ steps.manualver.outputs.value }}
 
   # Single source of truth for changelog + npm packaging. Wheels are
   # built per-platform in `build-wheels` below. publish-pypi merges them.
   build:
-    needs: [detect-version]
+    needs: [prepare-source, detect-version]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    permissions: {}
     steps:
-      - uses: actions/checkout@v7
+      - name: Download credential-free source snapshot
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
-          ref: ${{ inputs.source_sha || github.sha }}
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Restore exact source and Git history
+        shell: bash
+        run: tar -xzf "$RUNNER_TEMP/release-source/release-source.tar.gz"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -164,13 +218,10 @@ jobs:
   # Python source under `headroom/` plus the compiled `headroom/_core.so`
   # — one atomic install via `pip install headroom-ai`.
   build-wheels:
-    needs: [detect-version, build]
-    # Minimal privilege: this job only checks out source, builds wheels,
-    # and uploads them as artifacts. It doesn't push, write packages, or
-    # mutate releases — `contents: read` is sufficient. Mitigates CodeQL
-    # alert "actions/missing-workflow-permissions" (CWE-275).
-    permissions:
-      contents: read
+    needs: [prepare-source, detect-version, build]
+    # Historical build code receives only a credential-free source snapshot.
+    # Artifact transfer uses the Actions runtime service, not repository access.
+    permissions: {}
     strategy:
       fail-fast: false
       matrix:
@@ -224,10 +275,15 @@ jobs:
             manylinux: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Download credential-free source snapshot
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
-          ref: ${{ inputs.source_sha || github.sha }}
+          name: release-source
+          path: ${{ runner.temp }}/release-source
+
+      - name: Restore exact source and Git history
+        shell: bash
+        run: tar -xzf "$RUNNER_TEMP/release-source/release-source.tar.gz"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -367,8 +423,7 @@ jobs:
   collect-dist:
     needs: [build, build-wheels]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    permissions: {}
     steps:
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v8
@@ -428,8 +483,7 @@ jobs:
     needs: [build-wheels]
     if: github.event.inputs.dry_run != 'true'
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
+    permissions: {}
     strategy:
       fail-fast: false
       matrix:
