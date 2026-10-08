@@ -16,7 +16,11 @@ when the reusable build's `resolved_version` input is empty.
 
 Authenticated checkout occurs only in trusted preparation jobs. Checkout uses
 `persist-credentials: false`; source preparation rejects any retained local
-HTTP credential header before archiving the exact checkout and Git history.
+HTTP credential header. Git history is reconstructed from a bundle containing
+objects and refs, with the selected commit restored as HEAD. The source archive
+uses this clean history instead of the checkout's Git directory, so checkout
+configuration, credential-bearing remotes and includes, worktree configuration,
+hooks and reflogs are not transported. The original checkout remains untouched.
 The producer tooling and historical source are transferred as same-run Actions
 artifacts to fresh jobs, including private-repository source when authorized.
 
