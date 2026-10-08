@@ -68,13 +68,17 @@ The `release.yml` workflow runs when a GitHub Release is published, which normal
 
 `release.yml` calls the read-only `release-build.yml` workflow for version
 resolution, npm packaging, the wheel matrix, artifact collection, and smoke
-imports. Every publisher waits for that complete build group to succeed;
+imports. Authenticated source preparation removes checkout credentials and
+snapshots the exact source and Git history. Historical build and smoke jobs
+consume that snapshot with no repository permissions. Every publisher waits
+for that complete build group to succeed;
 `create-release` also waits for the publish jobs.
 
 ```
 release-build.yml:
-  detect-version -> build -> build-wheels -> collect-dist
-                                         -> smoke-import-wheels
+  prepare-source -> detect-version -> build -> build-wheels
+                                               -> collect-dist
+                                               -> smoke-import-wheels
 
 release.yml:
   build-and-smoke -> publish-pypi            --+
@@ -151,10 +155,10 @@ To rename a package, update the corresponding constant — all references throug
 
 ## Safety Gates
 
-Each publish job requires all of the following to be true (`.github/workflows/release.yml:768`, PyPI shown; npm/GitHub Packages mirror it with their own skip variable):
+Each publish job requires all of the following to be true (`.github/workflows/release.yml`, PyPI shown; npm/GitHub Packages mirror it with their own skip variable):
 
 ```yaml
-if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true' && vars.PYPI_SKIP != 'true'
+if: inputs.candidate_mode != true && github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true' && vars.PYPI_SKIP != 'true'
 ```
 
 To skip a publish target, set the corresponding GitHub Actions variable:
