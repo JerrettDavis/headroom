@@ -102,6 +102,7 @@ def send(base, sid, text):
 
 def main():
     capture = "--no-capture" not in sys.argv[1:]
+    response_cache = "--response-cache" in sys.argv[1:]
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
@@ -132,7 +133,7 @@ def main():
                     "smart_crusher",
                     "--disable-kompress-anthropic",
                     "--no-subscription-tracking",
-                    "--no-cache",
+                    *([] if response_cache else ["--no-cache"]),
                     *(["--log-messages"] if capture else []),
                     "--proxy-extension",
                     "claude_mod",
@@ -216,18 +217,26 @@ def main():
                     with opener.open(request, timeout=10) as response:
                         return json.load(response)
 
+                if response_cache:
+                    count_before = len(forwarded)
+                    send(base, SID, original)
+                    assert len(forwarded) == count_before, "Expected a populated response-cache hit"
                 assert control("compression", {"enabled": False})["compression_enabled"] is False
+                count_before = len(forwarded)
                 send(base, SID, original)
+                assert len(forwarded) == count_before + 1, (
+                    "Paused request replayed a cached response"
+                )
                 assert forwarded[-1]["body"]["messages"][2]["content"][0]["content"] == original
                 assert not any(
                     k.lower().startswith("x-headroom-") for k in forwarded[-1]["headers"]
                 )
-                send(base, OTHER, original)
+                send(base, OTHER, original + "\nOTHER")
                 assert len(forwarded[-1]["body"]["messages"][2]["content"][0]["content"]) < len(
                     original
                 )
                 assert control("compression", {"enabled": True})["compression_enabled"] is True
-                send(base, SID, original)
+                send(base, SID, original + "\nRESUMED")
                 assert len(forwarded[-1]["body"]["messages"][2]["content"][0]["content"]) < len(
                     original
                 )
@@ -248,6 +257,7 @@ def main():
                             "saved": summary["totals"]["saved"],
                             "requests": len(forwarded),
                             "controls": "pause, resume, cross-session isolation, reset",
+                            "response_cache": response_cache,
                             "native_claude": False,
                             "capture": capture,
                         }
