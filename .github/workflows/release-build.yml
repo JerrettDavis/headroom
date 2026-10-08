@@ -61,7 +61,20 @@ jobs:
             echo "checkout retained an HTTP credential header" >&2
             exit 1
           fi
-          tar -czf "$RUNNER_TEMP/release-source.tar.gz" .
+          # A bundle carries objects and refs, never checkout configuration,
+          # credential-bearing remotes/includes, hooks, or reflogs.
+          git bundle create "$RUNNER_TEMP/release-history.bundle" --all HEAD
+          history="$RUNNER_TEMP/release-clean-history"
+          staging="$RUNNER_TEMP/release-source-staging"
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+            git clone --quiet --mirror --template= "$RUNNER_TEMP/release-history.bundle" "$history"
+          git --git-dir="$history" config --remove-section remote.origin
+          git --git-dir="$history" config core.bare false
+          git --git-dir="$history" update-ref --no-deref HEAD "$SOURCE_SHA"
+          mkdir -p "$staging"
+          tar --exclude=./.git -cf - . | tar -xf - -C "$staging"
+          mv "$history" "$staging/.git"
+          tar -czf "$RUNNER_TEMP/release-source.tar.gz" -C "$staging" .
 
       - uses: actions/upload-artifact@v7
         with:
