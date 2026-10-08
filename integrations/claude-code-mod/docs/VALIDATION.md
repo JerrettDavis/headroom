@@ -1,4 +1,28 @@
-# Validation record — 0.1.1
+# Validation record
+
+## Sidebar 0.1.2 / companion 0.1.1 — October 7, 2026
+
+- JavaScript: 56 passed, including proxy-confirmed controls, legacy-companion
+  upgrade guidance, stale window responses and session-switch isolation.
+- Companion: 72 passed, 1 skipped (POSIX executable fixture on Windows).
+  Covers strict control payloads, origin guards, capacity bounds, reset retention,
+  and window totals beyond the display limit. Includes real Headroom guards/logger.
+- Repository regressions: 189 passed across marketplace/versioning, extension
+  ordering and loopback gating.
+- Real proxy E2E: passed with capture on and off. The local provider receives
+  unchanged content while paused, compressed content after resume, and compressed
+  requests from another conversation throughout. Reset preserves inspectable logs.
+  Response caching is disabled in this test so every probe reaches the provider.
+- Native Claude test kit: 6 passed, including POST controls, time-window selection
+  and rendered percentage bars. Companion wheel 0.1.1 builds; Ruff and whitespace
+  checks pass.
+
+The new controls and bars have native test-kit and local-provider E2E evidence.
+The authenticated live-session screenshots below document the earlier 0.1.1 UI;
+they do not show the new controls. Desktop live UI and native mouse input remain
+unverified. Control state and reset markers are in-memory and clear on proxy restart.
+
+## Sidebar 0.1.1 — October 6, 2026
 
 Executed on Windows, October 6, 2026, against published Headroom 0.40.0 and the
 repository proxy source based on main `855390d6110e0bbb199d9b97025baac16c2f5cf3`.

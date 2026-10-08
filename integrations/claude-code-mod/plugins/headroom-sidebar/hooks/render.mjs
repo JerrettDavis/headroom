@@ -1,4 +1,4 @@
-import { count, percent, ms, label, safeText, trend, textPages } from './core.mjs';
+import { count, percent, ms, label, safeText, trend, textPages, progressBar } from './core.mjs';
 
 export function renderPane(ui, state, actions, columns = 48, rows = 30) {
   const { Box, Text, Button } = ui;
@@ -13,6 +13,18 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
   if (state.connection !== 'live') children.push(button('start', 'Start Headroom', actions.start, 's'));
   if (state.startNotice) children.push(line(safeText(state.startNotice, 500)));
   if (state.notice) children.push(line(safeText(state.notice, 300), { dimColor: true }));
+  if (state.sessionId && state.connection !== 'setup') {
+    children.push(line(`COMPRESSION ${state.compressionEnabled === false ? 'PAUSED' : state.compressionEnabled === true ? 'ON' : 'UNKNOWN'}`, { bold: true }));
+    if (state.compressionEnabled !== null) {
+      children.push(group([
+      button('compression', state.controlPending ? 'Working…' : state.compressionEnabled ? 'Pause compression' : 'Resume compression', actions.compression, 'p'),
+      button('reset', 'Reset stats', actions.reset),
+    ]));
+    children.push(line('TIME WINDOW', { dimColor: true }), group(['15m', '1h', '24h', 'all'].map(w =>
+      button(`window-${w}`, `${w === 'all' ? 'All retained' : w}${state.timeWindow === w ? ' ●' : ''}`, () => actions.window(w)))));
+    } else children.push(line('Upgrade the companion to 0.1.1+ for conversation controls.', { dimColor: true }));
+  }
+  if (state.controlNotice) children.push(line(safeText(state.controlNotice, 300)));
   const data = state.summary;
   if (!data) {
     children.push(line(state.tab === 'requests' ? 'REQUESTS' : 'OVERVIEW', { bold: true }),
@@ -25,7 +37,7 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
         line('Add --proxy-url with your companion origin before --resume if it uses a custom port.', { dimColor: true }));
     } else children.push(line('Check your companion with headroom-mod doctor, then use Refresh.'));
     children.push(line('1 Overview · 2 Requests · r Refresh · q Close · Tab/Enter selects controls', { dimColor: true }),
-      line('The mod observes Headroom; it does not enable compression or message capture.', { dimColor: true }));
+      line('Controls require a linked companion. Message capture remains a separate proxy opt-in.', { dimColor: true }));
     return Box({ flexDirection: 'column', paddingX: 1, children });
   }
   if (state.tab === 'overview') {
@@ -34,15 +46,18 @@ export function renderPane(ui, state, actions, columns = 48, rows = 30) {
     if (latest) {
       children.push(line(`${count(latest.before)} → ${count(latest.after)} tokens`),
         line(`${count(latest.saved)} removed · ${percent(latest.percent)} reduction`),
+        line(progressBar(latest.percent, columns) ?? 'Reduction unavailable', { color: 'green' }),
         line(`${label(latest.model, 50)} · ${ms(latest.overhead_ms)} compression`, { dimColor: true }));
       if (latest.failed) children.push(line('Latest request failed; it is excluded from savings totals.'));
       if (latest.accounting !== 'complete') children.push(line('Latest token accounting is unavailable/inconsistent.'));
     } else children.push(line('No tagged requests yet. Send a prompt through this launch.'));
     children.push(line('CLAUDE CONTEXT  (native usage)', { bold: true }),
       line(`${count(state.context?.tokens)} / ${count(state.context?.window)} · ${percent(state.context?.percent)}`),
+      line(progressBar(state.context?.percent, columns) ?? 'Context usage unavailable', { color: state.context?.percent >= 85 ? 'yellow' : 'cyan' }),
       line('RETAINED REQUEST TOTALS', { bold: true }),
       line(`${totals.requests} requests · ${count(totals.saved)} tokens removed`),
       line(`${percent(totals.percent)} weighted reduction · ${totals.failed_requests} failed`),
+      line(progressBar(totals.percent, columns) ?? 'Reduction unavailable', { color: 'green' }),
       line(`${ms(totals.average_overhead_ms)} mean compression overhead`),
       line(`Cache reads ${count(totals.cache_read)} · writes ${count(totals.cache_write)}`),
       line(`${percent(totals.cache_read_percent)} provider cache-read share`),

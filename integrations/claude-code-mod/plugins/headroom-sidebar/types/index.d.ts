@@ -2,6 +2,10 @@ export type HeadroomSelection = { requestId: string; side: 'original' | 'compres
 export type HeadroomState = {
   startNotice?: string;
   owner: number;
+  compressionEnabled: boolean | null;
+  timeWindow: 'all' | '15m' | '1h' | '24h';
+  controlNotice: string;
+  controlPending: boolean;
   sessionId: string;
   resumeId?: string | null;
   baseUrl: string;

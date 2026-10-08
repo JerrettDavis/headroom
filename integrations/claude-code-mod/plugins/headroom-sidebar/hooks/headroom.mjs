@@ -1,4 +1,4 @@
-import { UUID, initialState, localUrl, parseResponse, safeText, count, percent } from './core.mjs';
+import { UUID, initialState, localUrl, parseResponse, parseControl, safeText, count, percent } from './core.mjs';
 import { renderPane } from './render.mjs';
 
 const REF = { plugin: 'headroom-sidebar', key: 'model' };
@@ -37,7 +37,7 @@ async function checked($, ctx) {
   const actual = await $.session.id();
   if (!UUID.test(s.sessionId) || actual !== s.sessionId) {
     ctx.inspectRevision++;
-    await patch($, ctx, { connection: 'setup', summary: null, detail: null, selection: null,
+    await patch($, ctx, { connection: 'setup', summary: null, detail: null, selection: null, compressionEnabled: null, controlNotice: '',
       notice: UUID.test(s.sessionId ?? '')
         ? 'Conversation changed since launch. Resume it through Headroom to restore session linking.'
         : 'Claude started without Headroom session linking. The pane cannot attribute requests to this conversation.',
@@ -51,11 +51,11 @@ async function getJson($, ctx, url, sid, requestId) {
   return parseResponse(await getResponse($, ctx, url), sid, requestId);
 }
 
-async function getResponse($, ctx, url) {
+async function getResponse($, ctx, url, init = {}) {
   if (ctx.network) throw new Error('A previous Headroom read is still pending; no overlapping request was started.');
   // The published HttpInit has no abort/timeout member. Do not invent one.
   // A UI deadline does not release the single-flight lock until the HOST read settles.
-  const operation = $.http.fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  const operation = $.http.fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, ...init });
   ctx.network = operation;
   void operation.then(() => { if (ctx.network === operation) ctx.network = null; }, () => { if (ctx.network === operation) ctx.network = null; });
   let deadline;
@@ -67,23 +67,25 @@ async function getResponse($, ctx, url) {
 }
 
 async function refresh($, ctx) {
-  if (ctx.busy || ctx.network) return;
+  if (ctx.busy || ctx.network || ctx.controlling) return;
   ctx.busy = true;
   const startedOwner = ctx.owner;
   try {
     const start = await checked($, ctx);
     if (!start || !start.open) return;
+    const revision = ctx.metricsRevision;
     const usage = await $.session.usage(); // no breakdown: never a token-count/model call
     if (ctx.network) return; // Inspection may have started while usage was awaited.
-    const data = await getJson($, ctx, `${start.baseUrl}${PREFIX}${start.sessionId}?limit=100`, start.sessionId);
+    const data = await getJson($, ctx, `${start.baseUrl}${PREFIX}${start.sessionId}?limit=100&window=${start.timeWindow}`, start.sessionId);
     const current = await checked($, ctx);
-    if (!current?.open || current.owner !== start.owner) return;
+    if (!current?.open || current.owner !== start.owner || revision !== ctx.metricsRevision) return;
     const restarted = current.summary && current.summary.epoch !== data.epoch;
     if (restarted) ctx.inspectRevision++;
     await patch($, ctx, { summary: data, context: usage?.context ?? null, connection: 'live',
+      compressionEnabled: data.compression_enabled,
       updatedAt: await $.clock.now(),
-      notice: restarted ? 'Proxy restarted. Counters reflect its new retained window.' : 'Local, read-only · refreshes every 5 seconds while open',
-      ...(restarted ? { detail: null, selection: null, tab: 'overview' } : {}) });
+      notice: restarted ? 'Proxy restarted. Controls and stats reflect its new retained history.' : 'Local · refreshes every 5 seconds while open',
+      ...(restarted ? { detail: null, selection: null, tab: 'overview', controlNotice: '' } : {}) });
   } catch (error) {
     if (ctx.owner === startedOwner) await patch($, ctx, { connection: 'offline', detail: null,
       notice: `${safeText(error?.message, 230)} Last metrics, if shown, are stale.` });
@@ -93,6 +95,37 @@ async function refresh($, ctx) {
 function requestRefresh($, ctx) {
   ctx.scheduled?.cancel();
   ctx.scheduled = $.clock.after(1, () => quiet(refresh($, ctx)));
+}
+
+async function changeControl($, ctx, kind) {
+  if (ctx.controlling) return;
+  ctx.controlling = true;
+  const owner = ctx.owner;
+  try {
+    const start = await checked($, ctx);
+    if (!start?.open || start.compressionEnabled === null) return;
+    await patch($, ctx, { controlPending: true, controlNotice: kind === 'reset' ? 'Resetting stats…' : 'Changing compression…' });
+    const body = kind === 'compression' ? { enabled: !start.compressionEnabled } : {};
+    const result = parseControl(await getResponse($, ctx, `${start.baseUrl}${PREFIX}${start.sessionId}/${kind}`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }), start.sessionId);
+    const current = await checked($, ctx);
+    if (!current?.open || current.owner !== start.owner) return;
+    ctx.metricsRevision++; ctx.inspectRevision++;
+    await patch($, ctx, { compressionEnabled: result.compressionEnabled, detail: null, selection: null, listPage: 0,
+      ...(kind === 'reset' || result.epoch !== current.summary?.epoch ? { summary: null, tab: 'overview' } : {}),
+      controlNotice: kind === 'reset' ? 'Stats reset. Request history is retained; totals start from now.'
+        : result.compressionEnabled ? 'Compression ON · applies to the next request.' : 'Compression PAUSED · next requests pass through unchanged.',
+    });
+  } catch (error) {
+    if (ctx.owner === owner) await patch($, ctx, { controlNotice: `Control failed: ${safeText(error?.message, 230)} Refresh to confirm proxy state before retrying.` });
+  } finally {
+    ctx.controlling = false;
+    if (ctx.owner === owner) {
+      await patch($, ctx, { controlPending: false });
+      requestRefresh($, ctx);
+    }
+  }
 }
 
 async function open($, ctx, focus = true) {
@@ -130,6 +163,14 @@ async function inspectRequest($, ctx, selection, lastScreen = false) {
 
 function actions($, ctx) {
   return {
+    compression: () => changeControl($, ctx, 'compression'),
+    reset: () => changeControl($, ctx, 'reset'),
+    window: async timeWindow => {
+      if (!['all', '15m', '1h', '24h'].includes(timeWindow)) return;
+      ctx.metricsRevision++; ctx.inspectRevision++;
+      await patch($, ctx, { timeWindow, summary: null, detail: null, selection: null, listPage: 0, tab: 'overview' });
+      requestRefresh($, ctx);
+    },
     start: async () => {
       if (ctx.starting) return;
       ctx.starting = true;
@@ -174,7 +215,7 @@ function actions($, ctx) {
 
 /** @type {import('claude-code').Register} */
 export function register(on) {
-  const ctx = { owner: 0, timer: null, scheduled: null, network: null, busy: false, inspectRevision: 0 };
+  const ctx = { owner: 0, timer: null, scheduled: null, network: null, busy: false, controlling: false, inspectRevision: 0, metricsRevision: 0 };
   on('session.start', async ($, e, next) => {
     const result = await next(e);
     try {
@@ -245,6 +286,6 @@ export function register(on) {
     const { Box, Text } = $.ui.resolve(e);
     const existing = await next(e);
     return Box({ flexDirection: 'column', children: [existing,
-      Text({ children: `Headroom ${s.connection} · ${count(s.summary?.latest?.saved)} tokens removed · ${percent(s.summary?.latest?.percent)}. Widen the window and run /headroom for the inspector.` })] });
+      Text({ children: `Headroom ${s.connection}${s.compressionEnabled === false ? ' · PAUSED' : ''} · ${count(s.summary?.latest?.saved)} tokens removed · ${percent(s.summary?.latest?.percent)}. Widen the window and run /headroom for the inspector.` })] });
   });
 }

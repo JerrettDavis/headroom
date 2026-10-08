@@ -8,8 +8,8 @@ existing processes, and does not enable message capture. Restarting Claude throu
 the displayed resume command is a separate user action; the mod does not rewrite
 provider routing in the current session.
 
-The UI never changes prompts, tool results, compression settings, cache policy,
-logging preferences, provider credentials, or Headroom statistics. The launcher's
+The UI never changes prompts, tool results, cache policy,
+logging preferences, provider credentials, or global Headroom statistics. The launcher's
 sole attribution addition is `X-Headroom-Mod-Session`, not the cache-identity header.
 It sets the explicitly selected local client base URL and refuses a conflicting
 inherited upstream. Existing credential-bearing custom headers remain only in the
@@ -18,13 +18,22 @@ responses. The companion does not expose arbitrary log tags or raw errors.
 
 All companion routes reuse Headroom's actual loopback peer/Host guard and same-origin
 guard. Responses are `Cache-Control: no-store`. There is no wildcard CORS change,
-proxy-token bypass, separate admin mutation endpoint, secret retrieval endpoint,
+proxy-token bypass, global configuration mutation endpoint, secret retrieval endpoint,
 relay, or unauthenticated remote deployment. The client accepts literal loopback
-HTTP origins only and sends GETs without an auth handle or body. The launcher
+HTTP origins only and polls using GETs without an auth handle or body. The launcher
 disables environment proxies and redirects for its identity probe. The mod uses
 the Claude host HTTP API, which does not expose equivalent redirect/size/abort
 controls; endpoint/response checks do not turn a malicious local process into a
 trusted one. The companion and the local runtime must themselves be trusted.
+
+Explicit POST controls can pause/resume compression and reset displayed stats for
+one launch-tagged conversation. They use the same loopback, Host, exact-origin,
+and proxy security gates as inspection. GET routes never mutate these settings.
+The extension injects the existing bypass header only on matching Anthropic
+message requests, without reading or rewriting the request body. The normal
+proxy forwarder strips internal headers before upstream transmission. Reset is
+a timestamp cutoff, not log deletion. Control state is bounded, never evicted
+silently, and discarded on proxy restart. No control enables message capture.
 
 Session IDs are routing/attribution selectors, **not credentials**. Other processes
 on the same trusted host are within Headroom's existing local trust boundary.

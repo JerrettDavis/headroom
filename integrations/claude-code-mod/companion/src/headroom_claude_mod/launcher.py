@@ -132,7 +132,7 @@ def preflight(base: str) -> dict:
         not isinstance(data, dict)
         or data.get("schema_version") != 1
         or data.get("service") != "headroom-claude-mod"
-        or data.get("read_only") is not True
+        or (data.get("read_only") is not True and data.get("session_controls") is not True)
     ):
         raise ValueError("The endpoint is not a compatible Headroom mod companion")
     return data
@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             info = preflight(base)
             print(
-                f"Headroom mod companion {info['version']}; capture={info.get('log_full_messages', False)}; read-only; schema=1"
+                f"Headroom mod companion {info['version']}; capture={info.get('log_full_messages', False)}; session-controls={info.get('session_controls', False)}; schema=1"
             )
             return 0
         forwarded = args.claude_args

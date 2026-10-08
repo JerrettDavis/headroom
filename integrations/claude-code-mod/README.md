@@ -1,6 +1,6 @@
 # Headroom Sidebar — Claude Code mod
 
-**Version 0.1.1 · installable preview · local, read-only telemetry**
+**Version 0.1.2 · installable preview · local conversation controls and telemetry**
 
 A sidebar for current-conversation Headroom compression, native Claude context usage,
 retained request statistics, and on-demand before/after message review. This is a
@@ -31,6 +31,29 @@ Authenticated native Windows Claude sessions were also exercised on Claude
 message inspection, resume, `/clear`, narrow-terminal scrolling and proxy restart.
 See [docs/VALIDATION.md](docs/VALIDATION.md) for reproducible commands and limits.
 
+## Conversation controls
+
+- **Pause compression / Resume compression** (`p`): changes actual compression
+  for this conversation and children inheriting its launch header. The proxy
+  confirms the state before the sidebar updates it. Paused requests use Headroom's
+  existing bypass path; requests already in flight finish under their previous state.
+- **Reset stats**: starts totals and the request list from now. Retained records
+  remain available to the request inspector; reset does not delete logs or change
+  compression. A selected time window is also limited by the most recent reset.
+- **Time window**: 15 minutes, 1 hour, 24 hours, or all retained requests.
+  Filtering happens before totals are computed, including records beyond the
+  100-row display limit. Retention can make a selected window incomplete.
+- **Progress bars**: latest and weighted compression reduction, plus native
+  Claude context usage. Percentages remain visible; unavailable values are marked
+  explicitly, and negative reductions retain their signed percentage.
+
+Controls are local and conversation-scoped. Closing the pane does not resume
+compression. Proxy restart restores compression to on and clears reset markers;
+settings do not persist across proxy restarts. Control state is bounded to 256
+conversations; a full registry rejects new control registrations rather than
+silently resuming a paused conversation. Existing proxy policy can still bypass
+compression when the sidebar switch is on.
+
 ## Requirements
 
 When Headroom is unavailable, choose **Start Headroom** in the sidebar. Claude's
@@ -41,7 +64,7 @@ The sidebar displays an exact `headroom-mod run --resume` command for restarting
 the current conversation through Headroom; an existing Claude process cannot
 change its provider routing. Proxy output goes to the local Headroom sidebar
 cache directory. Message capture remains off by default. Telemetry reads remain
-read-only; startup is an explicit user action.
+read-only; compression and stats changes are explicit local POST actions.
 
 Claude Code **2.1.287 or newer**, its native executable on Windows, and a Python-based
 Headroom proxy with the `headroom.proxy_extension` API and retained `RequestLogger`.

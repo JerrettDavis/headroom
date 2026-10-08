@@ -22,7 +22,7 @@ function Get-SidebarHealth {
         $response = Invoke-WebRequest -Uri "$proxyUrl/headroom-mod/v1/health" -NoProxy -MaximumRedirection 0 -TimeoutSec 2
         if ($response.Content.Length -gt 16384) { return $null }
         $health = $response.Content | ConvertFrom-Json
-        if ($health.service -eq 'headroom-claude-mod' -and $health.schema_version -eq 1 -and $health.read_only -eq $true) {
+        if ($health.service -eq 'headroom-claude-mod' -and $health.schema_version -eq 1 -and ($health.read_only -eq $true -or $health.session_controls -eq $true)) {
             return $health
         }
     } catch { }

@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "headroom-claude-mod"
-version = "0.1.0"
-description = "Read-only, conversation-scoped Headroom telemetry for a Claude Code sidebar mod"
+version = "0.1.1"
+description = "Conversation-scoped Headroom controls and telemetry for a Claude Code sidebar mod"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = ["fastapi>=0.100.0"]
+dependencies = ["fastapi>=0.100.0", "pydantic>=2.0.0"]
 
 [project.entry-points."headroom.proxy_extension"]
 claude_mod = "headroom_claude_mod.extension:install"

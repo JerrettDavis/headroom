@@ -12,6 +12,48 @@ const payload = {
 };
 
 describe('headroom', () => {
+  test('native controls pause compression, reset stats, select windows and draw bars', async ($, on) => {
+    const clock = mock.clock(on);
+    mock.env(on, { HEADROOM_MOD_SESSION_ID: sid, HEADROOM_MOD_URL: 'http://127.0.0.1:8787' });
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    on('session.id', () => ({ value: sid }));
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 50000, window: 200000, percent: 25 } } }));
+    on('command.register', ($, e) => ({ value: { command: e.name } }));
+    on('ui.open', () => ({ value: { isPlaced: true } } as any));
+    let enabled = true, reset = false;
+    const urls: string[] = [];
+    on('http.fetch', ($, e) => {
+      urls.push(e.url);
+      const init = (e as any).init;
+      if (e.url.endsWith('/compression')) {
+        expect(init.method).toBe('POST');
+        enabled = JSON.parse(init.body).enabled;
+      }
+      if (e.url.endsWith('/reset')) { expect(init.method).toBe('POST'); reset = true; }
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ...payload,
+        compression_enabled: enabled,
+        totals: { ...payload.totals, requests: reset ? 0 : 1, saved: reset ? 0 : 400, percent: reset ? null : 40 },
+      }) } };
+    });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any);
+    await clock.advance(2); await clock.settle();
+    const ui = await $.ui.mount({ plugin: 'headroom-sidebar', surface: 'terminal', component: 'Pane', requestId: 'headroom-sidebar',
+      props: { bodyColumns: 48, placement: 'dock', scroll: { bodyRows: 40 } } as any });
+    expect(await ui.find({ type: 'Text', text: /[█░]+.*40\.0%/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /[█░]+.*25\.0%/ })).toBeDefined();
+    await ui.press({ key: 'compression' }); await clock.settle();
+    expect(enabled).toBe(false);
+    expect(await ui.find({ type: 'Text', text: /COMPRESSION PAUSED/ })).toBeDefined();
+    await clock.advance(2); await clock.settle();
+    await ui.press({ key: 'compression' }); await clock.settle();
+    expect(enabled).toBe(true);
+    await clock.advance(2); await clock.settle();
+    await ui.press({ key: 'window-1h' }); await clock.advance(2); await clock.settle();
+    expect(urls[urls.length - 1]).toContain('window=1h');
+    await ui.press({ key: 'reset' }); await clock.advance(2); await clock.settle();
+    expect(await ui.find({ type: 'Text', text: /0 requests/ })).toBeDefined();
+    ui.unmount();
+  });
   test('native startup launches Headroom and renders exact restart guidance', async ($, on) => {
     const clock = mock.clock(on);
     mock.env(on, {});

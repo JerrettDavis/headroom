@@ -7,6 +7,26 @@ from conftest import SID
 from headroom_claude_mod import launcher
 
 
+def test_preflight_accepts_companion_with_session_controls(monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    payload = {
+        "schema_version": 1,
+        "service": "headroom-claude-mod",
+        "read_only": False,
+        "session_controls": True,
+    }
+    monkeypatch.setattr(
+        launcher.urllib.request,
+        "build_opener",
+        lambda *args: SimpleNamespace(
+            open=lambda *args, **kwargs: io.BytesIO(json.dumps(payload).encode())
+        ),
+    )
+    assert launcher.preflight("http://127.0.0.1:8787")["session_controls"] is True
+
+
 def test_sidebar_can_find_companion_from_absolute_path_launch(monkeypatch, tmp_path):
     runtime = tmp_path / "Scripts"
     runtime.mkdir()

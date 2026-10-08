@@ -132,6 +132,7 @@ def main():
                     "smart_crusher",
                     "--disable-kompress-anthropic",
                     "--no-subscription-tracking",
+                    "--no-cache",
                     *(["--log-messages"] if capture else []),
                     "--proxy-extension",
                     "claude_mod",
@@ -204,13 +205,49 @@ def main():
                     check=True,
                     timeout=30,
                 )
+
+                # Exercise the real bypass after the inspector checks above.
+                def control(suffix, body):
+                    request = Request(
+                        base + f"/headroom-mod/v1/sessions/{SID}/" + suffix,
+                        data=json.dumps(body).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with opener.open(request, timeout=10) as response:
+                        return json.load(response)
+
+                assert control("compression", {"enabled": False})["compression_enabled"] is False
+                send(base, SID, original)
+                assert forwarded[-1]["body"]["messages"][2]["content"][0]["content"] == original
+                assert not any(
+                    k.lower().startswith("x-headroom-") for k in forwarded[-1]["headers"]
+                )
+                send(base, OTHER, original)
+                assert len(forwarded[-1]["body"]["messages"][2]["content"][0]["content"]) < len(
+                    original
+                )
+                assert control("compression", {"enabled": True})["compression_enabled"] is True
+                send(base, SID, original)
+                assert len(forwarded[-1]["body"]["messages"][2]["content"][0]["content"]) < len(
+                    original
+                )
+                control("reset", {})
+                reset_summary = get(base, f"/headroom-mod/v1/sessions/{SID}?window=1h")
+                assert reset_summary["totals"]["requests"] == 0, reset_summary
+                assert (
+                    get(base, f"/headroom-mod/v1/sessions/{SID}/requests/{request_id}")[
+                        "request_id"
+                    ]
+                    == request_id
+                )
                 print(
                     json.dumps(
                         {
                             "result": "PASS",
                             "test": "real proxy compression to companion to shipped sidebar hooks",
                             "saved": summary["totals"]["saved"],
-                            "requests": 2,
+                            "requests": len(forwarded),
+                            "controls": "pause, resume, cross-session isolation, reset",
                             "native_claude": False,
                             "capture": capture,
                         }

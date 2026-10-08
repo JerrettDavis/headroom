@@ -1,7 +1,7 @@
 {
   "name": "headroom-sidebar",
-  "version": "0.1.1",
-  "description": "Conversation-scoped Headroom compression metrics and message inspection in a live sidebar. Requires the opt-in local companion.",
+  "version": "0.1.2",
+  "description": "Conversation-scoped compression controls, time windows, visual metrics and message inspection in a live sidebar. Requires the opt-in local companion.",
   "author": {
     "name": "Headroom Labs"
   },

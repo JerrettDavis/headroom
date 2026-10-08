@@ -61,11 +61,13 @@ export function parseResponse(response, sid, requestId) {
   totals.transforms = Object.fromEntries(Object.entries(data.totals.transforms ?? {}).slice(0, 16)
     .filter(([, n]) => Number.isInteger(n) && n >= 0).map(([k, n]) => [label(k, 100), n]));
   return { ...base, totals, latest: data.latest === null ? null : meta(data.latest),
+    compression_enabled: typeof data.compression_enabled === 'boolean' ? data.compression_enabled : null,
     requests: data.requests.map(meta), log_full_messages: data.log_full_messages === true,
     retention: { window_full: data.retention?.window_full === true }, basis: data.basis };
 }
 export function initialState(owner = 1) {
   return { owner, sessionId: '', baseUrl: '', open: false, band: false, tab: 'overview',
+    compressionEnabled: null, timeWindow: 'all', controlNotice: '', controlPending: false,
     connection: 'setup', notice: 'Launch with headroom-mod run to correlate this conversation.',
     updatedAt: null, context: null, summary: null, detail: null, selection: null,
     listPage: 0, changedOnly: false, textPage: 0 };
@@ -74,6 +76,21 @@ export function trend(rows) {
   const values = rows.slice(0, 16).reverse().map(r => finite(r.saved) ? Math.max(0, r.saved) : 0);
   const top = Math.max(1, ...values);
   return values.map(n => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor(n / top * 7))]).join('');
+}
+export function parseControl(response, sid) {
+  if (!response?.ok) throw new Error(`Headroom control returned HTTP ${response?.status ?? 'unknown'}.`);
+  if (typeof response.text !== 'string' || response.text.length > 4000) throw new Error('Invalid control response.');
+  let data;
+  try { data = JSON.parse(response.text); } catch { throw new Error('Invalid control JSON.'); }
+  if (!data || data.schema_version !== 1 || data.session_id !== sid || !UUID.test(data.epoch ?? '') || typeof data.compression_enabled !== 'boolean')
+    throw new Error('Unsupported control response or mismatched conversation.');
+  return { epoch: data.epoch, compressionEnabled: data.compression_enabled };
+}
+export function progressBar(value, columns = 48) {
+  if (!finite(value)) return null;
+  const width = Math.max(8, Math.min(24, Math.floor(columns) - 14));
+  const filled = Math.round(Math.max(0, Math.min(100, value)) / 100 * width);
+  return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${percent(value)}`;
 }
 // Text-only pagination is terminal-width aware. No Markdown/ANSI interpretation.
 export function textPages(raw, columns, rows) {
