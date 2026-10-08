@@ -33,7 +33,7 @@ public sealed class OptionalJsonConverterFactory : JsonConverterFactory
     }
 }
 
-public sealed class RetrievalError : IWireModel
+public sealed class RetrievalError : IWireModel, IJsonOnSerializing
 {
     [JsonPropertyName("detail")]
     public required string Detail { get; init; }
@@ -41,13 +41,20 @@ public sealed class RetrievalError : IWireModel
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();
 
+    public void OnSerializing()
+    {
+        foreach (var key in new string[] { "detail" })
+            if (AdditionalProperties.ContainsKey(key))
+                throw new JsonException($"Additional property shadows declared field {key}");
+    }
+
     public void ValidateModel()
     {
         if (Detail is null) throw new ProtocolException("Invalid field detail");
     }
 }
 
-public sealed class RetrieveRequest : IWireModel
+public sealed class RetrieveRequest : IWireModel, IJsonOnSerializing
 {
     [JsonPropertyName("hash")]
     public required string Hash { get; init; }
@@ -55,13 +62,20 @@ public sealed class RetrieveRequest : IWireModel
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();
 
+    public void OnSerializing()
+    {
+        foreach (var key in new string[] { "hash" })
+            if (AdditionalProperties.ContainsKey(key))
+                throw new JsonException($"Additional property shadows declared field {key}");
+    }
+
     public void ValidateModel()
     {
         if (Hash is null) throw new ProtocolException("Invalid field hash");
     }
 }
 
-public sealed class RetrieveResponse : IWireModel
+public sealed class RetrieveResponse : IWireModel, IJsonOnSerializing
 {
     [JsonPropertyName("compressed_item_count")]
     public required long CompressedItemCount { get; init; }
@@ -86,6 +100,13 @@ public sealed class RetrieveResponse : IWireModel
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();
+
+    public void OnSerializing()
+    {
+        foreach (var key in new string[] { "compressed_item_count", "hash", "original_content", "original_item_count", "original_tokens", "retrieval_count", "tool_name" })
+            if (AdditionalProperties.ContainsKey(key))
+                throw new JsonException($"Additional property shadows declared field {key}");
+    }
 
     public void ValidateModel()
     {

@@ -398,7 +398,7 @@ def render_with_emitters(document: dict[str, Any], emitters: Any) -> dict[str, b
     }
     for emitter in emitters:
         for path, content in emitter(document).items():
-            if path in output:
+            if path in output or path == "manifest.json":
                 raise ContractError(f"Emitter output path collision: {path}")
             output[path] = content
     inputs = {

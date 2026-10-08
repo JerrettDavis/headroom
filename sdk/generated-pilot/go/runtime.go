@@ -29,6 +29,7 @@ type schema struct {
 	Additional json.RawMessage   `json:"additionalProperties"`
 	Items      *schema           `json:"items"`
 }
+
 var schemas = func() map[string]schema {
 	var out map[string]schema
 	if err := json.Unmarshal(schemaBytes, &out); err != nil {
@@ -80,6 +81,7 @@ type Transport struct {
 	headers  http.Header
 	client   *http.Client
 	maxBytes int64
+	timeout  time.Duration
 }
 
 func newTransport(base string, options *Options) (*Transport, error) {
@@ -120,7 +122,7 @@ func newTransport(base string, options *Options) (*Transport, error) {
 		client.Transport = tr
 	}
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	return &Transport{base: strings.TrimRight(base, "/"), headers: opts.Headers.Clone(), client: &client, maxBytes: opts.MaxResponseBytes}, nil
+	return &Transport{base: strings.TrimRight(base, "/"), headers: opts.Headers.Clone(), client: &client, maxBytes: opts.MaxResponseBytes, timeout: opts.Timeout}, nil
 }
 func pathSegment(v string) (string, error) {
 	if v == "" || v == "." || v == ".." {
@@ -130,6 +132,8 @@ func pathSegment(v string) (string, error) {
 	return strings.ReplaceAll(url.QueryEscape(v), "+", "%20"), nil
 }
 func (t *Transport) request(ctx context.Context, method, path string, body any, out any, requestModel string) error {
+	ctx, cancel := context.WithTimeout(ctx, t.timeout)
+	defer cancel()
 	var payload []byte
 	var err error
 	if requestModel != "" {

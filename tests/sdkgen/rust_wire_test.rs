@@ -2,6 +2,15 @@ use headroom_generated_pilot::{Client, Error, Options, RetrieveRequest};
 use serde_json::{Map, Value};
 use std::time::Duration;
 
+#[test]
+fn additional_properties_cannot_shadow_declared_request_fields() {
+    let request = RetrieveRequest {
+        hash: "ok".into(),
+        additional_properties: Map::from_iter([("hash".into(), Value::String("other".into()))]),
+    };
+    assert!(serde_json::to_string(&request).is_err(), "extension shadowed hash");
+}
+
 fn client() -> Client {
     client_with(Options::default())
 }

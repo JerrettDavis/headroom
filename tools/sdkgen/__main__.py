@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path, PurePosixPath
 
 from .compiler import Compiler, ContractError, canonical, load_sources
@@ -50,18 +51,24 @@ def compare(before: dict, after: dict) -> list[dict[str, str]]:
         return value
 
     findings = []
+    remaining_before = deepcopy(before)
     for path, methods in before.get("paths", {}).items():
         for method, old in methods.items():
             new = after.get("paths", {}).get(path, {}).get(method)
             if new is None:
+                remaining_methods = remaining_before["paths"].get(path, {})
+                remaining_methods.pop(method, None)
+                if not remaining_methods:
+                    remaining_before["paths"].pop(path, None)
                 findings.append(
                     {"severity": "breaking", "change": f"removed operation {method.upper()} {path}"}
                 )
             elif old.get("operationId") != new.get("operationId"):
+                remaining_before["paths"][path][method]["operationId"] = new.get("operationId")
                 findings.append(
                     {"severity": "breaking", "change": f"renamed operation {method.upper()} {path}"}
                 )
-    if clean(before) != clean(after) and not findings:
+    if clean(remaining_before) != clean(after):
         findings.append(
             {
                 "severity": "review",

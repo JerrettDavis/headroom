@@ -115,7 +115,7 @@ def emit_models(models: dict[str, Any]) -> bytes:
     ]
     for model, schema in models.items():
         required = set(schema.get("required", []))
-        lines += [f"public sealed class {model} : IWireModel", "{"]
+        lines += [f"public sealed class {model} : IWireModel, IJsonOnSerializing", "{"]
         for field, field_schema in schema["properties"].items():
             field_type = cs_type(field_schema)
             prefix = "required " if field in required else ""
@@ -130,6 +130,15 @@ def emit_models(models: dict[str, Any]) -> bytes:
         lines += [
             "    [JsonExtensionData]",
             "    public Dictionary<string, JsonElement> AdditionalProperties { get; init; } = new();",
+            "",
+            "    public void OnSerializing()",
+            "    {",
+            "        foreach (var key in new string[] { "
+            + ", ".join(json.dumps(field) for field in schema["properties"])
+            + " })",
+            "            if (AdditionalProperties.ContainsKey(key))",
+            '                throw new JsonException($"Additional property shadows declared field {key}");',
+            "    }",
             "",
             "    public void ValidateModel()",
             "    {",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -127,6 +128,17 @@ func TestTimeoutAndInFlightCancellation(t *testing.T) {
 	time.AfterFunc(25*time.Millisecond, cancel)
 	if _, err := fixtureClient(t, nil).Retrieve(ctx, RetrieveRequest{Hash: "slow"}); err == nil {
 		t.Fatal("in-flight cancellation accepted")
+	}
+}
+
+func TestRequestTimeoutWithCustomHTTPClient(t *testing.T) {
+	custom := &http.Client{Timeout: 30 * time.Second}
+	_, err := fixtureClient(t, &Options{Timeout: 50 * time.Millisecond, HTTPClient: custom}).Retrieve(context.Background(), RetrieveRequest{Hash: "slow"})
+	if err == nil {
+		t.Fatal("custom HTTP client overrode request timeout")
+	}
+	if custom.Timeout != 30*time.Second {
+		t.Fatal("caller HTTP client was mutated")
 	}
 }
 func TestInvalidURLAndPath(t *testing.T) {

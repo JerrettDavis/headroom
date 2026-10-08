@@ -118,6 +118,7 @@ def emit_models(models: dict[str, Any]) -> bytes:
     ]
     for model, schema in models.items():
         required = set(schema.get("required", []))
+        extension_serializer = f"serialize_{model.lower()}_extensions"
         lines += ["#[derive(Debug, Clone, PartialEq, Serialize)]", f"pub struct {model} {{"]
         for field, field_schema in schema["properties"].items():
             field_type = rust_type(field_schema)
@@ -131,8 +132,20 @@ def emit_models(models: dict[str, Any]) -> bytes:
                 f"    pub {rust_ident(field)}: {field_type},",
             ]
         lines += [
-            "    #[serde(flatten)]",
+            f'    #[serde(flatten, serialize_with = "{extension_serializer}")]',
             "    pub additional_properties: Map<String, Value>,",
+            "}",
+            "",
+            f"fn {extension_serializer}<S: serde::Serializer>(value: &Map<String, Value>, serializer: S) -> Result<S::Ok, S::Error> {{",
+            "    let known: &[&str] = &["
+            + ", ".join(json.dumps(field) for field in schema["properties"])
+            + "];",
+            "    for name in known {",
+            "        if value.contains_key(*name) {",
+            '            return Err(serde::ser::Error::custom(format!("additional property shadows declared field {}", name)));',
+            "        }",
+            "    }",
+            "    value.serialize(serializer)",
             "}",
             "",
             f"impl<'de> Deserialize<'de> for {model} {{",

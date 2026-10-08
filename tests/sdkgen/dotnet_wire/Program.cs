@@ -1,6 +1,16 @@
 using System.Text.Json;
 using Headroom.GeneratedPilot;
 
+try
+{
+    JsonSerializer.Serialize(new RetrieveRequest {
+        Hash = "ok",
+        AdditionalProperties = new() { ["hash"] = JsonSerializer.SerializeToElement("other") }
+    });
+    throw new Exception("Extension property shadowed request hash");
+}
+catch (JsonException) { }
+
 const string valid = """
     {"hash":"h","original_content":"x","original_tokens":1,"original_item_count":1,"compressed_item_count":1,"tool_name":null,"retrieval_count":1,"future_extension":{"snake_case":"unchanged"}}
     """;

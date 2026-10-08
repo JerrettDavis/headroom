@@ -14,8 +14,18 @@ fn decode<T: DeserializeOwned>(value: Value, name: &str) -> Result<T, String> {
 pub struct RetrievalError {
     #[serde(rename = "detail")]
     pub detail: String,
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "serialize_retrievalerror_extensions")]
     pub additional_properties: Map<String, Value>,
+}
+
+fn serialize_retrievalerror_extensions<S: serde::Serializer>(value: &Map<String, Value>, serializer: S) -> Result<S::Ok, S::Error> {
+    let known: &[&str] = &["detail"];
+    for name in known {
+        if value.contains_key(*name) {
+            return Err(serde::ser::Error::custom(format!("additional property shadows declared field {}", name)));
+        }
+    }
+    value.serialize(serializer)
 }
 
 impl<'de> Deserialize<'de> for RetrievalError {
@@ -33,8 +43,18 @@ impl<'de> Deserialize<'de> for RetrievalError {
 pub struct RetrieveRequest {
     #[serde(rename = "hash")]
     pub hash: String,
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "serialize_retrieverequest_extensions")]
     pub additional_properties: Map<String, Value>,
+}
+
+fn serialize_retrieverequest_extensions<S: serde::Serializer>(value: &Map<String, Value>, serializer: S) -> Result<S::Ok, S::Error> {
+    let known: &[&str] = &["hash"];
+    for name in known {
+        if value.contains_key(*name) {
+            return Err(serde::ser::Error::custom(format!("additional property shadows declared field {}", name)));
+        }
+    }
+    value.serialize(serializer)
 }
 
 impl<'de> Deserialize<'de> for RetrieveRequest {
@@ -64,8 +84,18 @@ pub struct RetrieveResponse {
     pub retrieval_count: i64,
     #[serde(rename = "tool_name")]
     pub tool_name: Option<String>,
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "serialize_retrieveresponse_extensions")]
     pub additional_properties: Map<String, Value>,
+}
+
+fn serialize_retrieveresponse_extensions<S: serde::Serializer>(value: &Map<String, Value>, serializer: S) -> Result<S::Ok, S::Error> {
+    let known: &[&str] = &["compressed_item_count", "hash", "original_content", "original_item_count", "original_tokens", "retrieval_count", "tool_name"];
+    for name in known {
+        if value.contains_key(*name) {
+            return Err(serde::ser::Error::custom(format!("additional property shadows declared field {}", name)));
+        }
+    }
+    value.serialize(serializer)
 }
 
 impl<'de> Deserialize<'de> for RetrieveResponse {

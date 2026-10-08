@@ -461,6 +461,22 @@ class DeterminismTests(unittest.TestCase):
 
 
 class EmitterCompositionTests(unittest.TestCase):
+    def test_manifest_path_is_reserved_for_generator(self):
+        with self.assertRaisesRegex(ContractError, "manifest.json"):
+            emit_module.render_with_emitters(
+                compiler().compile(), (lambda _: {"manifest.json": b"{}"},)
+            )
+
+    def test_diff_reports_schema_change_alongside_removed_operation(self):
+        before = compiler().compile()
+        after = copy.deepcopy(before)
+        del after["paths"]["/v1/retrieve/{hash_key}"]
+        after["components"]["schemas"]["RetrieveRequest"]["properties"]["hash"] = {
+            "type": "integer"
+        }
+        findings = compare(before, after)
+        self.assertEqual({finding["severity"] for finding in findings}, {"breaking", "review"})
+
     def test_render_rejects_cross_emitter_path_collision(self):
         def first(_document):
             return {"shared/file.txt": b"first\n"}
