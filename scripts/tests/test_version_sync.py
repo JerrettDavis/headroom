@@ -98,7 +98,7 @@ def temp_project(tmp_path: Path) -> dict[str, Path]:
     typescript_pkg = typescript / "package.json"
     typescript_pkg.write_text(json.dumps({"name": "test", "version": "0.5.25"}))
 
-    # server.json â€” the MCP registry descriptor. Asserted byte-for-byte against
+    # server.json — the MCP registry descriptor. Asserted byte-for-byte against
     # render_server_json(), which reads the version from pyproject.toml, so it has
     # to move with every bump or the release PR's test job fails.
     server_json = root / "server.json"
