@@ -218,6 +218,7 @@ func TestPresenceStates(t *testing.T) {
 }
 """,
         encoding="utf-8",
+        newline="\n",
     )
     subprocess.run(["go", "test", "-v", "./..."], cwd=root / "go", env=env, check=True)
     subprocess.run(
@@ -253,6 +254,7 @@ fn presence_states_round_trip_without_collapsing_omission_and_null() {
 }
 """,
         encoding="utf-8",
+        newline="\n",
     )
     rust_env = {**env, "CARGO_TARGET_DIR": str(root / "rust-target")}
     subprocess.run(
@@ -269,6 +271,7 @@ fn presence_states_round_trip_without_collapsing_omission_and_null() {
 </Project>
 ''',
         encoding="utf-8",
+        newline="\n",
     )
     (dotnet_check / "Program.cs").write_text(
         r"""
@@ -296,6 +299,7 @@ foreach (var raw in new[] { "{}", "{\"required_nullable\":null,\"enabled\":null}
 }
 """,
         encoding="utf-8",
+        newline="\n",
     )
     subprocess.run(
         [
@@ -346,7 +350,9 @@ def main():
                 env=env,
                 check=True,
             )
-            (tsbuild / "package.json").write_text('{"type":"module"}\n')
+            (tsbuild / "package.json").write_text(
+                '{"type":"module"}\n', encoding="utf-8", newline="\n"
+            )
             subprocess.run(
                 ["node", str(root / "tests/sdkgen/typescript_wire_test.mjs"), str(tsbuild)],
                 env=env,
@@ -373,6 +379,7 @@ def main():
                     (output / "dotnet/Headroom.GeneratedPilot.csproj").as_posix(),
                 ),
                 encoding="utf-8",
+                newline="\n",
             )
             subprocess.run(
                 [
