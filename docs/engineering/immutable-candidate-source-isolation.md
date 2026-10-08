@@ -14,13 +14,23 @@ the version assignment, not bit-for-bit reproducibility across different build
 toolchains. The existing release publisher retains its ordinary version logic
 when the reusable build's `resolved_version` input is empty.
 
+Supported assignments use canonical Python versions: `X.Y.Z`, `X.Y.ZaN`,
+`X.Y.ZbN` or `X.Y.ZrcN`, without leading zeros in numeric components.
+Python metadata keeps that assignment; npm artifacts use the corresponding
+`X.Y.Z-alpha.N`, `X.Y.Z-beta.N` or `X.Y.Z-rc.N` spelling. Package synchronization
+and its verifier run with the Python spelling before the npm packager rewrites
+tarball metadata. Candidate provenance continues to bind the Python version.
+
 Authenticated checkout occurs only in trusted preparation jobs. Checkout uses
 `persist-credentials: false`; source preparation rejects any retained local
 HTTP credential header. Git history is reconstructed from a bundle containing
-objects and refs, with the selected commit restored as HEAD. The source archive
+objects and refs, with the selected commit restored as HEAD. The history archive
 uses this clean history instead of the checkout's Git directory, so checkout
 configuration, credential-bearing remotes and includes, worktree configuration,
 hooks and reflogs are not transported. The original checkout remains untouched.
+Source and history are separate artifacts. Only version detection and changelog
+generation download history; the five wheel jobs receive source without a Git
+directory. Ordinary release detection retains its tags and complete commit graph.
 The producer tooling and historical source are transferred as same-run Actions
 artifacts to fresh jobs, including private-repository source when authorized.
 

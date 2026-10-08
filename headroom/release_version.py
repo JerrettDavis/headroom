@@ -289,10 +289,10 @@ def candidate_source_version(root: Path, source_sha: str) -> ReleaseVersionInfo:
         import tomllib
     except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
         import tomli as tomllib
-    version = str(SemVer.parse(tomllib.loads(result.stdout)["project"]["version"]))
+    version, npm_version = package_versions(tomllib.loads(result.stdout)["project"]["version"])
     return ReleaseVersionInfo(
         version=version,
-        npm_version=version,
+        npm_version=npm_version,
         canonical=version,
         height="0",
         bump="source-manifest",

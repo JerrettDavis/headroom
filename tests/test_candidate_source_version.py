@@ -11,7 +11,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_historical_candidate_version_ignores_future_tags_and_worktree(tmp_path):
+@pytest.mark.parametrize(
+    "version,npm_version",
+    [
+        ("0.38.0", "0.38.0"),
+        ("0.38.0a1", "0.38.0-alpha.1"),
+        ("0.38.0b2", "0.38.0-beta.2"),
+        ("0.38.0rc3", "0.38.0-rc.3"),
+    ],
+)
+def test_historical_candidate_version_ignores_future_tags_and_worktree(
+    tmp_path, version, npm_version
+):
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
 
@@ -19,7 +30,7 @@ def test_historical_candidate_version_ignores_future_tags_and_worktree(tmp_path)
     git("config", "user.email", "candidate-test@example.invalid")
     git("config", "user.name", "Candidate regression")
     manifest = tmp_path / "pyproject.toml"
-    manifest.write_text('[project]\nversion = "0.38.0"\n', encoding="utf-8")
+    manifest.write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
     git("add", "pyproject.toml")
     git("commit", "--quiet", "-m", "chore: first source")
     source = git("rev-parse", "HEAD")
@@ -48,9 +59,9 @@ def test_historical_candidate_version_ignores_future_tags_and_worktree(tmp_path)
     before = resolve()
     git("tag", "v99.0.0")
     after = resolve()
-    assert before["version"] == after["version"] == "0.38.0"
-    assert before["npm_version"] == after["npm_version"] == "0.38.0"
-    assert before["canonical"] == after["canonical"] == "0.38.0"
+    assert before["version"] == after["version"] == version
+    assert before["npm_version"] == after["npm_version"] == npm_version
+    assert before["canonical"] == after["canonical"] == version
 
 
 def test_candidate_version_is_resolved_before_calling_shared_build():
@@ -100,6 +111,10 @@ def test_snapshot_restore_accepts_windows_runner_temp_path(tmp_path):
     payload.write_text("snapshot payload", encoding="utf-8")
     with tarfile.open(artifact / "release-source.tar.gz", "w:gz") as archive:
         archive.add(payload, arcname="restored.txt")
+    history = runner_temp / "release-history"
+    history.mkdir()
+    with tarfile.open(history / "release-history.tar.gz", "w:gz") as archive:
+        archive.add(payload, arcname="history-restored.txt")
     destination = tmp_path / "destination"
     destination.mkdir()
     workflow = yaml.safe_load(
@@ -122,3 +137,4 @@ def test_snapshot_restore_accepts_windows_runner_temp_path(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert (destination / "restored.txt").read_text(encoding="utf-8") == "snapshot payload"
+    assert (destination / "history-restored.txt").read_text(encoding="utf-8") == "snapshot payload"
