@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -83,3 +84,41 @@ def test_invalid_candidate_identity_cannot_fall_back_to_release_detection(tmp_pa
     assert result.returncode != 0
     assert "Candidate source must be a lowercase full commit SHA" in result.stderr
     assert "version=" not in result.stdout
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows drive-letter tar regression")
+def test_snapshot_restore_accepts_windows_runner_temp_path(tmp_path):
+    import yaml
+
+    bash = Path("C:/Program Files/Git/bin/bash.exe")
+    if not bash.exists():
+        pytest.skip("Git Bash is required for the Windows runner replay")
+    runner_temp = tmp_path / "runner-temp"
+    artifact = runner_temp / "release-source"
+    artifact.mkdir(parents=True)
+    payload = tmp_path / "original.txt"
+    payload.write_text("snapshot payload", encoding="utf-8")
+    with tarfile.open(artifact / "release-source.tar.gz", "w:gz") as archive:
+        archive.add(payload, arcname="restored.txt")
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-build.yml").read_text(encoding="utf-8")
+    )
+    restore = next(
+        step["run"]
+        for step in workflow["jobs"]["detect-version"]["steps"]
+        if step.get("name") == "Restore exact source and Git history"
+    )
+    env = os.environ.copy()
+    env["RUNNER_TEMP"] = str(runner_temp)
+    env["RUNNER_OS"] = "Windows"
+    result = subprocess.run(
+        [str(bash), "-e", "-c", restore],
+        cwd=destination,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (destination / "restored.txt").read_text(encoding="utf-8") == "snapshot payload"
