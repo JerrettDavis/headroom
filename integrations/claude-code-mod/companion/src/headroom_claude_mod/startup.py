@@ -49,7 +49,8 @@ def start_proxy(base, check):
             close_fds=True,
             **options,
         )
-    for _ in range(40):
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
         if child.poll() is not None:
             raise ValueError(f"Headroom could not start. See {logs / 'proxy.log'}.")
         try:
@@ -57,6 +58,12 @@ def start_proxy(base, check):
             return
         except (ValueError, OSError):
             time.sleep(0.25)
+    child.terminate()
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait(timeout=5)
     raise ValueError(
         f"Headroom is still starting or unavailable. Check {logs / 'proxy.log'} and retry."
     )

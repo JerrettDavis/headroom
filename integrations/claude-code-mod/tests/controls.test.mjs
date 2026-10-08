@@ -2,6 +2,55 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { host, press, words, summary, response, SID, OTHER, EPOCH, settle, flatten } from './host-fixture.mjs';
 
+for (const kind of ['metrics', 'inspection']) {
+  test(`compression control waits for a pending ${kind} read`, async () => {
+    const h = host({ transport: async () => response({ ...summary(), compression_enabled: true }) });
+    await h.start();
+    if (kind === 'inspection') await press(h, 'requests');
+    let release;
+    h.ctl.transport = (url) => url.endsWith('/compression')
+      ? Promise.resolve(response({ schema_version: 1, session_id: SID, epoch: EPOCH, compression_enabled: false }))
+      : new Promise(resolve => { release = resolve; });
+    let inspecting;
+    if (kind === 'metrics') await h.advance(5000);
+    else { inspecting = press(h, 'inspect-req-1'); await settle(); }
+    assert.equal(typeof release, 'function');
+    const toggling = press(h, 'compression');
+    await settle();
+    assert.equal(h.calls.filter(c => c[0] === 'http.fetch' && c[1].endsWith('/compression')).length, 0);
+    release(response({ ...summary(), compression_enabled: true }));
+    await toggling;
+    await inspecting;
+    assert.equal(h.state().compressionEnabled, false);
+    assert.equal(h.calls.filter(c => c[0] === 'http.fetch' && c[1].endsWith('/compression')).length, 1);
+  });
+}
+
+for (const outcome of ['timeout', 'conversation changed']) {
+  test(`queued compression control sends no POST after ${outcome}`, async () => {
+    const h = host({ transport: async () => response({ ...summary(), compression_enabled: true }) });
+    await h.start();
+    let release;
+    h.ctl.transport = () => new Promise(resolve => { release = resolve; });
+    await h.advance(5000);
+    const toggling = press(h, 'compression');
+    await settle();
+    if (outcome === 'timeout') await h.advance(4001);
+    else {
+      h.ctl.sid = OTHER;
+      await h.dispatch('command.run', { command: 'clear' });
+      release(response({ ...summary(), compression_enabled: true }));
+    }
+    await toggling;
+    assert.equal(h.calls.filter(c => c[0] === 'http.fetch' && c[1].endsWith('/compression')).length, 0);
+    if (outcome === 'timeout') {
+      assert.match(h.state().controlNotice, /did not finish/);
+      release(response({ ...summary(), compression_enabled: true }));
+      await settle();
+    }
+  });
+}
+
 test('late control completion cannot repopulate a different native conversation', async () => {
   let release;
   const h = host({ transport: async (url) => url.endsWith('/compression')

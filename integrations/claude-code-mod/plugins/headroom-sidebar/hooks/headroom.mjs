@@ -66,6 +66,17 @@ async function getResponse($, ctx, url, init = {}) {
   finally { deadline?.cancel(); }
 }
 
+async function waitForRead($, ctx) {
+  const pending = ctx.network;
+  if (!pending) return;
+  let deadline;
+  const timeout = new Promise((_, reject) => {
+    deadline = $.clock.after(4000, () => reject(new Error('A pending Headroom read did not finish. Retry when it settles.')));
+  });
+  try { await Promise.race([pending.catch(() => undefined), timeout]); }
+  finally { deadline?.cancel(); }
+}
+
 async function refresh($, ctx) {
   if (ctx.busy || ctx.network || ctx.controlling) return;
   ctx.busy = true;
@@ -102,6 +113,8 @@ async function changeControl($, ctx, kind) {
   ctx.controlling = true;
   const owner = ctx.owner;
   try {
+    await waitForRead($, ctx);
+    if (ctx.owner !== owner) return;
     const start = await checked($, ctx);
     if (!start?.open || start.compressionEnabled === null) return;
     await patch($, ctx, { controlPending: true, controlNotice: kind === 'reset' ? 'Resetting stats…' : 'Changing compression…' });
@@ -184,10 +197,12 @@ function actions($, ctx) {
         const owner = s.owner;
         const base = localUrl(s.baseUrl || 'http://127.0.0.1:8787');
         await patch($, ctx, { startNotice: 'Starting Headroom… Approve the launcher command if Claude asks.' });
-        const launch = await $.tool.call({ tool: 'Bash', command: `headroom-mod start --proxy-url '${base}'`, timeout: 30000 });
-        if (launch?.deny || launch?.isError) throw new Error(launch.deny || launch.text || 'The launcher command failed.');
-        if (ctx.owner !== owner) return;
-        const health = await getResponse($, ctx, `${base}/headroom-mod/v1/health`);
+      const launch = await $.tool.call({ tool: 'Bash', command: `headroom-mod start --proxy-url '${base}'`, timeout: 120000 });
+      if (launch?.deny || launch?.isError) throw new Error(launch.deny || launch.text || 'The launcher command failed.');
+      if (ctx.owner !== owner) return;
+      await waitForRead($, ctx);
+      if (ctx.owner !== owner) return;
+      const health = await getResponse($, ctx, `${base}/headroom-mod/v1/health`);
         if (!health?.ok) throw new Error('The Headroom companion is unavailable. Check the launcher output and retry.');
         const actual = await $.session.id();
         if (ctx.owner !== owner) return;

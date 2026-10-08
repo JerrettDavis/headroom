@@ -45,3 +45,32 @@ def test_start_failure_reports_log(monkeypatch, tmp_path):
     monkeypatch.setattr(startup.subprocess, "Popen", Mock(return_value=child))
     with pytest.raises(ValueError, match="could not start.*proxy.log"):
         startup.start_proxy("http://127.0.0.1:8787", Mock(side_effect=ValueError("offline")))
+
+
+@pytest.mark.parametrize("ready_after", [18, None])
+def test_cold_start_waits_and_reaps_timed_out_child(monkeypatch, tmp_path, ready_after):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(startup.importlib.util, "find_spec", lambda _: object())
+    elapsed = [0.0]
+    monkeypatch.setattr(startup.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        startup.time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds)
+    )
+    child = Mock()
+    child.poll.return_value = None
+    monkeypatch.setattr(startup.subprocess, "Popen", Mock(return_value=child))
+
+    def check(_):
+        if ready_after is None or elapsed[0] < ready_after:
+            raise ValueError("offline")
+
+    if ready_after is not None:
+        startup.start_proxy("http://127.0.0.1:8787", check)
+        assert elapsed[0] >= ready_after
+        child.terminate.assert_not_called()
+    else:
+        with pytest.raises(ValueError, match="unavailable"):
+            startup.start_proxy("http://127.0.0.1:8787", check)
+        assert elapsed[0] >= 90
+        child.terminate.assert_called_once()
+        child.wait.assert_called()
