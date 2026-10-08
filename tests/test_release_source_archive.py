@@ -82,6 +82,12 @@ def test_source_archive_preserves_history_without_checkout_configuration(
     restored = tmp_path / "restored"
     restored.mkdir()
     with tarfile.open(runner / "release-source.tar.gz") as archive:
+        assert not any(
+            name == "./.git" or name.startswith("./.git/") for name in archive.getnames()
+        )
+        archive.extractall(restored, filter="data")
+    assert not (restored / ".git").exists()
+    with tarfile.open(runner / "release-history.tar.gz") as archive:
         archive.extractall(restored, filter="data")
     assert git("rev-parse", "HEAD", cwd=restored) == selected
     assert git("tag", "--list", cwd=restored) == "v0.37.0\nv0.38.0"
@@ -95,3 +101,18 @@ def test_source_archive_preserves_history_without_checkout_configuration(
     assert not (restored / ".git/config.worktree").exists()
     assert not (restored / ".git/hooks/post-checkout").exists()
     assert original_hook.read_bytes() == b"dummy credential-bearing original hook\n"
+
+
+@pytest.mark.parametrize("job", ["detect-version", "build"])
+def test_only_history_consumers_download_the_history_artifact(job):
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-build.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"][job]["steps"]
+    assert any(
+        "download-artifact" in step.get("uses", "")
+        and step.get("with", {}).get("name") == "release-history"
+        for step in steps
+    )
+    wheels = workflow["jobs"]["build-wheels"]["steps"]
+    assert not any(step.get("with", {}).get("name") == "release-history" for step in wheels)

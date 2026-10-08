@@ -74,7 +74,8 @@ jobs:
           mkdir -p "$staging"
           tar --exclude=./.git -cf - . | tar -xf - -C "$staging"
           mv "$history" "$staging/.git"
-          tar -czf "$RUNNER_TEMP/release-source.tar.gz" -C "$staging" .
+          tar --exclude=./.git -czf "$RUNNER_TEMP/release-source.tar.gz" -C "$staging" .
+          tar -czf "$RUNNER_TEMP/release-history.tar.gz" -C "$staging" .git
 
       - uses: actions/upload-artifact@v7
         with:
@@ -82,6 +83,14 @@ jobs:
           path: ${{ runner.temp }}/release-source.tar.gz
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-history
+          path: ${{ runner.temp }}/release-history.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   detect-version:
     needs: [prepare-source]
@@ -101,14 +110,22 @@ jobs:
           name: release-source
           path: ${{ runner.temp }}/release-source
 
+      - name: Download credential-free Git history
+        uses: actions/download-artifact@v8
+        with:
+          name: release-history
+          path: ${{ runner.temp }}/release-history
+
       - name: Restore exact source and Git history
         shell: bash
         run: |
-          archive_path="$RUNNER_TEMP/release-source/release-source.tar.gz"
-          if [ "${RUNNER_OS:-}" = "Windows" ]; then
-            archive_path="$(cygpath -u "$archive_path")"
-          fi
-          tar -xzf "$archive_path"
+          for artifact in release-source release-history; do
+            archive_path="$RUNNER_TEMP/$artifact/$artifact.tar.gz"
+            if [ "${RUNNER_OS:-}" = "Windows" ]; then
+              archive_path="$(cygpath -u "$archive_path")"
+            fi
+            tar -xzf "$archive_path"
+          done
 
       # When fired by release-please's release event, the tag the
       # bot just published IS the canonical version for this run —
@@ -171,14 +188,22 @@ jobs:
           name: release-source
           path: ${{ runner.temp }}/release-source
 
+      - name: Download credential-free Git history
+        uses: actions/download-artifact@v8
+        with:
+          name: release-history
+          path: ${{ runner.temp }}/release-history
+
       - name: Restore exact source and Git history
         shell: bash
         run: |
-          archive_path="$RUNNER_TEMP/release-source/release-source.tar.gz"
-          if [ "${RUNNER_OS:-}" = "Windows" ]; then
-            archive_path="$(cygpath -u "$archive_path")"
-          fi
-          tar -xzf "$archive_path"
+          for artifact in release-source release-history; do
+            archive_path="$RUNNER_TEMP/$artifact/$artifact.tar.gz"
+            if [ "${RUNNER_OS:-}" = "Windows" ]; then
+              archive_path="$(cygpath -u "$archive_path")"
+            fi
+            tar -xzf "$archive_path"
+          done
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -315,7 +340,7 @@ jobs:
           name: release-source
           path: ${{ runner.temp }}/release-source
 
-      - name: Restore exact source and Git history
+      - name: Restore exact source
         shell: bash
         run: |
           archive_path="$RUNNER_TEMP/release-source/release-source.tar.gz"
