@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       resolved_version:
-        description: "Producer-resolved immutable candidate version; empty uses release detection"
+        description: "Canonical Python candidate version (X.Y.Z, aN, bN or rcN); empty uses release detection"
         required: false
         default: ""
         type: string
@@ -138,9 +138,19 @@ jobs:
         shell: bash
         run: |
           if [ -n "$RESOLVED_VERSION" ]; then
-            [[ "$RESOLVED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            number='(0|[1-9][0-9]*)'
+            [[ "$RESOLVED_VERSION" =~ ^($number\.$number\.$number)((a|b|rc)$number)?$ ]]
+            base="${BASH_REMATCH[1]}"
+            stage="${BASH_REMATCH[6]}"
+            iteration="${BASH_REMATCH[7]}"
+            npm_version="$RESOLVED_VERSION"
+            case "$stage" in
+              a) npm_version="$base-alpha.$iteration" ;;
+              b) npm_version="$base-beta.$iteration" ;;
+              rc) npm_version="$base-rc.$iteration" ;;
+            esac
             printf 'version=%s\nnpm_version=%s\ncanonical=%s\nheight=0\nbump=source-manifest\nprevious_tag=\n' \
-              "$RESOLVED_VERSION" "$RESOLVED_VERSION" "$RESOLVED_VERSION" >> "$GITHUB_OUTPUT"
+              "$RESOLVED_VERSION" "$npm_version" "$RESOLVED_VERSION" >> "$GITHUB_OUTPUT"
           else
             python headroom/release_version.py
           fi
@@ -180,9 +190,10 @@ jobs:
         with:
           node-version: ">=24.16.0 <25"
 
-      - name: Sync version to package files
+      - name: Sync Python version to package files
         run: |
-          python scripts/version-sync.py --version ${{ needs.detect-version.outputs.npm_version }}
+          # Wheels retain PEP 440; npm packaging below rewrites tarball metadata.
+          python scripts/version-sync.py --version ${{ needs.detect-version.outputs.version }}
 
       - name: Verify package versions are synchronized
         run: |
@@ -318,10 +329,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Sync version to pyproject.toml + Cargo.toml
+      - name: Sync Python version to package files
         shell: bash
         run: |
-          python scripts/version-sync.py --version ${{ needs.detect-version.outputs.npm_version }}
+          python scripts/version-sync.py --version ${{ needs.detect-version.outputs.version }}
 
       - name: Verify package versions are synchronized
         run: |
