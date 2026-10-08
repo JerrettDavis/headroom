@@ -1,25 +1,47 @@
-HEADROOM  /  COMPRESSION
-LIVE · d8da565b
+HEADROOM                                  LIVE
+
 [ Overview ] [ Requests ● ] [ Refresh ]
-Local · refreshes every 5 seconds while open
+
 COMPRESSION ON
-[ Pause compression ] [ Reset stats ]
-TIME WINDOW
-[ 15m ] [ 1h ] [ 24h ] [ All retained ● ]
+[ Pause ] [ Reset stats ]
+
+Window [ 15m ] [ 1h ] [ 24h ] [ All ● ]
+
 Compression ON · applies to the next request.
 [ All requests ] [ Older ] [ Newer ]
-Page 1/1 · newest 4 retained requests
-2026-10-08T02:15:42  claude-haiku-5-5
-178.7k → 178.7k · 0.0%
-[ Capture status ]
-2026-10-08T02:15:39  claude-haiku-5-5
-175.9k → 175.9k · 0.0%
-[ Capture status ]
-2026-10-08T02:15:25  claude-haiku-5-5
-175k → 157.4k · 10.1%
-[ Capture status ]
-2026-10-08T02:15:25  claude-haiku-5-5
-166 → 166 · 0.0%
-[ Capture status ]
+Page 1/2 · newest 8 retained requests
+
+┌────────────────────────────────────────────┐
+│ 8.9k → 8.9k · 0.0%                         │
+│ 2026-10-08T02:56:17  claude-haiku-5-5      │
+│ [ Capture status ]                         │
+└────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────┐
+│ 8.4k → 8.4k · 0.0%                         │
+│ 2026-10-08T02:56:14  claude-haiku-5-5      │
+│ [ Capture status ]                         │
+└────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────┐
+│ 6.8k → 6.8k · 0.0%                         │
+│ 2026-10-08T02:56:12  claude-haiku-5-5      │
+│ [ Capture status ]                         │
+└────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────┐
+│ 4.8k → 4.8k · 0.0%                         │
+│ 2026-10-08T02:56:06  claude-haiku-5-5      │
+│ [ Capture status ]                         │
+└────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────┐
+│ 4.3k → 4.3k · 0.0%                         │
+│ 2026-10-08T02:55:58  claude-haiku-5-5      │
+│ [ Capture status ]                         │
+└────────────────────────────────────────────┘
 Message capture is off. Metrics still work.
 --log-messages is an explicit proxy opt-in.
+
+────────────────────────────────────────────
+Local · refreshes every 5s

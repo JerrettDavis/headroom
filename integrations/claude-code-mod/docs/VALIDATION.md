@@ -117,3 +117,7 @@ excluded from this repository. Hosted checks are evaluated on the PR's exact hea
 
 CI loads checkout Python source with the unchanged Rust extension from the
 published 0.40.0 wheel; this PR does not modify native code.
+
+## Sidebar 0.1.3 visual hierarchy pass
+
+58 JavaScript tests, six native Claude test-kit tests, and 26 version/manifest regressions passed. Version verification and `git diff --check` passed. An independent review found no material issues. Real isolated Haiku 5.5 todo work produced eight successful retained requests, 39,524 → 39,406 tokens (118 removed, 0.3%). Native pause/resume was confirmed against the companion. Current screenshots show the framed savings card, spaced sections and request rows, and collapsed secondary details. Strict empty MCP configuration and fictional fixtures kept private project data out of the session.

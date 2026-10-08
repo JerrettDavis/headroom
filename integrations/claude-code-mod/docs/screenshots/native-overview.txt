@@ -1,32 +1,30 @@
-HEADROOM  /  COMPRESSION
-LIVE · d8da565b
+HEADROOM                                  LIVE
+
 [ Overview ● ] [ Requests ] [ Refresh ]
-Local · refreshes every 5 seconds while open
+
 COMPRESSION ON
-[ Pause compression ] [ Reset stats ]
-TIME WINDOW
-[ 15m ] [ 1h ] [ 24h ] [ All retained ● ]
-Compression ON · applies to the next request.
-LATEST RECORDED REQUEST
-178.7k → 178.7k tokens
+[ Pause ] [ Reset stats ]
+
+Window [ 15m ] [ 1h ] [ 24h ] [ All ● ]
+
+╭────────────────────────────────────────────╮
+│                                            │
+│ SAVINGS                                    │
+│ 118 tokens removed                         │
+│ ░░░░░░░░░░░░░░░░░░░░░░░░ 0.3%              │
+│ 8 requests · All retained                  │
+│                                            │
+╰────────────────────────────────────────────╯
+
+LATEST REQUEST
+8.9k → 8.9k tokens
 0 removed · 0.0% reduction
-░░░░░░░░░░░░░░░░░░░░░░░░ 0.0%
-claude-haiku-5-5 · 192.0 ms compression
-CLAUDE CONTEXT  (native usage)
-264.8k / 1M · 26.0%
-██████░░░░░░░░░░░░░░░░░░ 26.0%
-RETAINED REQUEST TOTALS
-4 requests · 17.7k tokens removed
-3.3% weighted reduction · 0 failed
-█░░░░░░░░░░░░░░░░░░░░░░░ 3.3%
-67.9 ms mean compression overhead
-Cache reads 261.3k · writes 273.7k
-48.8% provider cache-read share
-Saved/request  ▁█▁▁
-Transforms (request counts, not additive
-savings)
-anthropic:tool_schema_compaction  1
-router:tool_search_deferral:298tools  1
-Includes inherited child requests. Cumulative
-request tokens are not unique context or bill
-savings.
+
+CLAUDE CONTEXT
+14.1k / 1M tokens
+░░░░░░░░░░░░░░░░░░░░░░░░ 1.0%
+
+[ More details ▾ ]
+
+────────────────────────────────────────────
+Local · refreshes every 5s
