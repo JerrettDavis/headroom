@@ -90,6 +90,8 @@ def test_source_archive_preserves_history_without_checkout_configuration(
     with tarfile.open(runner / "release-history.tar.gz") as archive:
         archive.extractall(restored, filter="data")
     assert git("rev-parse", "HEAD", cwd=restored) == selected
+    assert git("ls-files", cwd=restored) == "payload.txt"
+    assert git("status", "--porcelain", cwd=restored) == ""
     assert git("tag", "--list", cwd=restored) == "v0.37.0\nv0.38.0"
     assert git("log", "--format=%s", cwd=restored) == "original source"
     assert git("show", f"{future}:payload.txt", cwd=restored) == "future source"

@@ -74,6 +74,9 @@ jobs:
           mkdir -p "$staging"
           tar --exclude=./.git -cf - . | tar -xf - -C "$staging"
           mv "$history" "$staging/.git"
+          # Mirror clones have no working-tree index. Populate tracked paths
+          # without checking out files or changing the selected source bytes.
+          git -C "$staging" read-tree "$SOURCE_SHA"
           tar --exclude=./.git -czf "$RUNNER_TEMP/release-source.tar.gz" -C "$staging" .
           tar -czf "$RUNNER_TEMP/release-history.tar.gz" -C "$staging" .git
 
