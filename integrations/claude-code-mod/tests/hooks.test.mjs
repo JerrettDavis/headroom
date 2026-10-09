@@ -3,6 +3,24 @@ import assert from 'node:assert/strict';
 import { host, press, words, settle, summary, response, detail, SID, OTHER, EPOCH, row } from './host-fixture.mjs';
 import { textPages } from '../plugins/headroom-sidebar/hooks/core.mjs';
 
+test('Sidebar leaves Snip command available and opens through its own command', async () => {
+  const h = host();
+  await h.start();
+  const registrations = h.calls.filter(c => c[0] === 'command.register');
+  assert.equal(registrations[0][1].name, 'headroom-sidebar');
+  let snipCalls = 0;
+  const result = await h.dispatch('command.run', { command: 'headroom', args: '' }, async () => {
+    snipCalls++;
+    return { text: 'Snip opened.' };
+  });
+  assert.equal(snipCalls, 1);
+  assert.equal(result.text, 'Snip opened.');
+  await h.dispatch('command.run', { command: 'headroom-sidebar', args: 'close' });
+  assert.equal(h.state().open, false);
+  await h.dispatch('command.run', { command: 'headroom-sidebar', args: '' });
+  assert.equal(h.state().open, true);
+});
+
 test('sidebar startup uses a native tool and preserves exact restart guidance during polling', async () => {
   const h = host();
   delete h.env.HEADROOM_MOD_SESSION_ID;
@@ -61,7 +79,7 @@ test('resuming the original linked session after state reset restores periodic r
     await h.$.state.set({ plugin: 'headroom-sidebar', key: 'model' }, undefined);
     return { text: 'resumed' };
   });
-  await h.dispatch('command.run', { command: 'headroom', args: '' });
+  await h.dispatch('command.run', { command: 'headroom-sidebar', args: '' });
   await h.advance(2);
   assert.equal(h.state().connection, 'live');
   const n = reads(h).length;
@@ -267,7 +285,7 @@ test('native clear resets stored state and reopening shows an unlinked notice wi
     await h.$.state.set({ plugin: 'headroom-sidebar', key: 'model' }, undefined);
     return { text: 'cleared' };
   });
-  await h.dispatch('command.run', { command: 'headroom', args: '' });
+  await h.dispatch('command.run', { command: 'headroom-sidebar', args: '' });
   assert.equal(h.state().connection, 'setup');
   assert.equal(h.state().summary, null);
   assert.equal(h.state().detail, null);

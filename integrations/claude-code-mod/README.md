@@ -6,7 +6,8 @@ A sidebar for current-conversation Headroom compression, native Claude context u
 retained request statistics, and on-demand before/after message review. This is a
 function-hook **mod**, not a skill, status-line script, or embedded web dashboard.
 Its plugin name is `headroom-sidebar`; the existing `headroom` startup-hooks plugin
-is left alone. The command is `/headroom`.
+is left alone. The command is `/headroom-sidebar`. When installed alongside
+`headroom-snip`, Snip retains `/headroom` for its compression log.
 
 The source includes the mod, a separately buildable Python companion wheel, an
 opt-in Headroom proxy extension, a launcher, offline and native-runtime tests,
@@ -125,7 +126,7 @@ headroom-mod doctor --proxy-url http://127.0.0.1:8787
 headroom-mod run --proxy-url http://127.0.0.1:8787 --plugin-dir ./plugins/headroom-sidebar
 ```
 
-The pane opens without taking keyboard focus. `/headroom` opens/focuses it again.
+The pane opens without taking keyboard focus. `/headroom-sidebar` opens/focuses it again.
 Keys: `1` Overview, `2` Requests, `r` Refresh, `s` Start Headroom when offline. Close using the pane's built-in control. Use Tab/Enter or mouse
 buttons for request selection, original/compressed/diff modes, and pagination.
 Use Page Up/Page Down to scroll the pane when its content exceeds the visible

@@ -36,7 +36,7 @@ assert.equal(h.state().detail, null);
 // A changed native session must stop reads using the launcher-linked old UUID.
 h.ctl.sid = OTHER;
 const before = h.calls.filter(c => c[0] === 'http.fetch').length;
-await h.dispatch('command.run', { command: 'headroom' });
+await h.dispatch('command.run', { command: 'headroom-sidebar' });
 await h.advance(10000);
 assert.equal(h.state().summary, null);
 assert.equal(h.state().detail, null);

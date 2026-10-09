@@ -243,7 +243,7 @@ export function register(on) {
       ctx.owner = previous.owner + 1;
       let s = initialState(ctx.owner);
       await $.state.set(REF, s);
-      await $.command.register({ name: 'headroom', description: 'Show Headroom compression, retained requests, and message inspection' });
+      await $.command.register({ name: 'headroom-sidebar', description: 'Show Headroom compression, retained requests, and message inspection' });
       const sid = await $.env.get('HEADROOM_MOD_SESSION_ID');
       const rawUrl = await $.env.get('HEADROOM_MOD_URL');
       if (UUID.test(sid ?? '') && rawUrl) {
@@ -274,7 +274,7 @@ export function register(on) {
       } catch { /* cleanup must not prevent normal session shutdown */ }
     }
   });
-  on('command.run', { command: 'headroom' }, async ($, e) => {
+  on('command.run', { command: 'headroom-sidebar' }, async ($, e) => {
     if (e.args?.trim() === 'close') { await close($, ctx); return { text: 'Headroom closed.' }; }
     await open($, ctx);
     return { text: 'Headroom opened. 1 Overview · 2 Requests · r Refresh · s Start Headroom when offline · PgUp/PgDn scroll. Use the pane close control to close.' };
@@ -305,6 +305,6 @@ export function register(on) {
     const { Box, Text } = $.ui.resolve(e);
     const existing = await next(e);
     return Box({ flexDirection: 'column', children: [existing,
-      Text({ children: `Headroom ${s.connection}${s.compressionEnabled === false ? ' · PAUSED' : ''} · ${count(s.summary?.latest?.saved)} tokens removed · ${percent(s.summary?.latest?.percent)}. Widen the window and run /headroom for the inspector.` })] });
+      Text({ children: `Headroom ${s.connection}${s.compressionEnabled === false ? ' · PAUSED' : ''} · ${count(s.summary?.latest?.saved)} tokens removed · ${percent(s.summary?.latest?.percent)}. Widen the window and run /headroom-sidebar for the inspector.` })] });
   });
 }
