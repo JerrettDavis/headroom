@@ -105,7 +105,9 @@ unverified in this terminal host.
 - Proxy outage displayed offline/stale status; restart changed epoch and reset
   retained counters. Capture off preserved metrics and disabled detail.
 - Exact UUID resume worked. `/clear` discarded native plugin state; the recovery
-  fix displayed an unlinked/relaunch notice. `/headroom` reopened that pane.
+  fix displayed an unlinked/relaunch notice. `/headroom` reopened that pane in
+  that historical native run. The current Sidebar command is
+  `/headroom-sidebar`; `/headroom` belongs to Snip when both are installed.
 - Windows proxy startup failure cleanup was tested after forced timeout; doctor
   and capture-enabled restart returned successfully after detaching console handles.
 
