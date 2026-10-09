@@ -413,7 +413,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v${{ needs.detect-version.outputs.version }}"
+          TAG="v${{ needs.build-and-smoke.outputs.version }}"
           MARKER='<!-- headroom-teams-footer -->'
           gh release view "$TAG" --json body --jq .body > release-notes.md
           if ! grep -qF "$MARKER" release-notes.md; then
