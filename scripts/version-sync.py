@@ -70,6 +70,7 @@ def update_marketplace_manifest(file_path: Path, version: str) -> None:
             if isinstance(plugin, dict) and plugin.get("name") in {
                 "headroom",
                 "headroom-agent-hooks",
+                "headroom-snip",
             }:
                 plugin["version"] = version
     with open(file_path, "w", encoding="utf-8") as f:

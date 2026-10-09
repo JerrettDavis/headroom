@@ -59,6 +59,31 @@ def test_verifier_accepts_matching_independent_manifest(tmp_path, monkeypatch):
     assert set(module._read_marketplace_versions(path).values()) == {"0.40.0"}
 
 
+def test_release_sync_keeps_snip_manifest_and_marketplace_aligned(tmp_path, monkeypatch):
+    path, sidebar_manifest = marketplace(tmp_path)
+    snip_manifest = tmp_path / "plugins/headroom-snip/.claude-plugin/plugin.json"
+    snip_manifest.parent.mkdir(parents=True)
+    snip_manifest.write_text(json.dumps({"name": "headroom-snip", "version": "0.40.0"}))
+    data = json.loads(path.read_text())
+    data["plugins"].append(
+        {
+            "name": "headroom-snip",
+            "source": "./plugins/headroom-snip",
+            "version": "0.40.0",
+        }
+    )
+    path.write_text(json.dumps(data))
+
+    sync = load("version-sync")
+    sync.update_plugin_manifest(snip_manifest, "0.40.1")
+    sync.update_marketplace_manifest(path, "0.40.1")
+    verifier = load("verify-versions")
+    monkeypatch.setattr(verifier, "ROOT", tmp_path)
+
+    assert set(verifier._read_marketplace_versions(path).values()) == {"0.40.1"}
+    assert json.loads(sidebar_manifest.read_text())["version"] == "0.1.1"
+
+
 def test_verifier_rejects_stale_independent_manifest(tmp_path, monkeypatch):
     path, manifest = marketplace(tmp_path)
     manifest.write_text(json.dumps({"name": "headroom-sidebar", "version": "0.1.2"}))
