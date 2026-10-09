@@ -244,6 +244,13 @@ def _compression_deadline_seconds() -> float:
         return 20.0
 
 
+def _compress_workers() -> int:
+    try:
+        return int(os.environ.get("HEADROOM_COMPRESS_WORKERS", "4"))
+    except ValueError:
+        return 4
+
+
 def _router_debug_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
 
@@ -6550,9 +6557,7 @@ class ContentRouter(Transform):
 
         # --- Pass 2: Parallel compression of all cache-miss messages ---
         if pending_tasks:
-            max_workers = min(
-                len(pending_tasks), int(os.environ.get("HEADROOM_COMPRESS_WORKERS", "4"))
-            )
+            max_workers = min(len(pending_tasks), _compress_workers())
             t_parallel_start = time.perf_counter()
 
             if max_workers <= 1 or len(pending_tasks) == 1:
