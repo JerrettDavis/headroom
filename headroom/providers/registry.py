@@ -72,8 +72,15 @@ class ProxyProviderRuntime:
         """Resolve the upstream provider that should serve OpenAI-style model metadata."""
         return "anthropic" if _is_anthropic_auth(headers) else "openai"
 
-    def select_passthrough_base_url(self, headers: Mapping[str, str]) -> str:
+    def select_passthrough_base_url(
+        self, headers: Mapping[str, str], path: str | None = None
+    ) -> str:
         """Resolve the upstream base URL for catch-all passthrough requests."""
+        if path is not None:
+            from headroom.providers.proxy_targets import is_anthropic_hello_path
+
+            if is_anthropic_hello_path(path):
+                return self.api_targets.anthropic
         if _is_anthropic_auth(headers):
             return self.api_targets.anthropic
         if headers.get("x-goog-api-key"):
@@ -214,6 +221,7 @@ def model_matches_provider(provider: str, model_name: str) -> bool:
         # names (for example azure/gpt-4o and chatgpt-4o-latest).
         or (provider == "openai" and any(prefix in normalized for prefix in openai_prefixes))
         or (provider == "gemini" and "gemini" in normalized)
+        or (provider == "xai" and "grok" in normalized)
         or (provider == "bedrock" and "claude" in normalized)
     )
 

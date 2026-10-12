@@ -52,6 +52,12 @@ _CACHE_ECONOMICS: dict[str, ProviderCacheEconomics] = {
         write_multiplier=1.25,
         label="Same as Anthropic (Bedrock)",
     ),
+    "xai": ProviderCacheEconomics(
+        provider="xai",
+        read_multiplier=0.16,
+        write_multiplier=1.0,
+        label="Automatic, no TTL control",
+    ),
 }
 
 

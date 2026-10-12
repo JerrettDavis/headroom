@@ -18,12 +18,14 @@ import random
 import re
 import threading
 import time
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from headroom import fileperms as _fileperms
 from headroom import paths as _paths
@@ -42,16 +44,13 @@ from headroom.proxy.beta_header_merge import (
     merge_anthropic_beta as merge_anthropic_beta,
 )
 from headroom.proxy.beta_header_merge import (
-    merge_beta_tokens,
-    split_beta_tokens,
-)
-from headroom.proxy.beta_header_merge import (
     merge_openai_beta as merge_openai_beta,
 )
+from headroom.proxy.beta_header_merge import (
+    split_beta_tokens,
+)
 from headroom.proxy.beta_header_policy import (
-    BETA_HEADER_STICKY_DEFAULT,
     BETA_HEADER_STICKY_ENV,
-    BETA_TRACKER_MAX_SESSIONS_DEFAULT,
     BETA_TRACKER_MAX_SESSIONS_ENV,
     BetaHeaderStickyMode,
     resolve_beta_header_sticky_mode,
@@ -81,8 +80,6 @@ from headroom.proxy.ccr_marker_policy import (
 )
 from headroom.proxy.ccr_session_tracker import SessionCcrTracker as _SessionCcrTracker
 from headroom.proxy.internal_header_policy import (
-    INTERNAL_HEADER_PREFIX,
-    STRIP_INTERNAL_HEADERS_DEFAULT,
     STRIP_INTERNAL_HEADERS_ENV,
     StripInternalHeadersMode,
     resolve_strip_internal_headers_mode,
@@ -125,8 +122,6 @@ logger = logging.getLogger("headroom.proxy")
 
 _CODEX_WIRE_DEBUG_ENV = "HEADROOM_CODEX_WIRE_DEBUG"
 _CODEX_WIRE_DEBUG_DIR_ENV = "HEADROOM_CODEX_WIRE_DEBUG_DIR"
-_CODEX_WIRE_REDACTED = wire_debug_redaction_policy.WIRE_DEBUG_REDACTED
-_CODEX_WIRE_SECRET_KEYS = wire_debug_redaction_policy.WIRE_DEBUG_SECRET_KEYS
 
 
 def codex_wire_debug_enabled() -> bool:
@@ -145,14 +140,6 @@ def _codex_wire_debug_dir() -> Path:
     if explicit:
         return Path(explicit).expanduser()
     return _paths.codex_wire_debug_dir()
-
-
-def _should_redact_key(key: str) -> bool:
-    return wire_debug_redaction_policy.should_redact_key(key)
-
-
-def _redact_value(value: Any) -> Any:
-    return wire_debug_redaction_policy.redact_for_wire_debug(value)
 
 
 def redact_for_wire_debug(value: Any) -> Any:
@@ -268,7 +255,6 @@ def capture_codex_wire_debug(
 # "system_prompt" option — that path is permanently retired by I2 (cache hot
 # zone never modified). See REALIGNMENT/02-architecture.md §2.2.
 _MEMORY_INJECTION_MODE_ENV = memory_injection_mode_policy.MEMORY_INJECTION_MODE_ENV
-_MEMORY_INJECTION_MODE_DEFAULT = memory_injection_mode_policy.MEMORY_INJECTION_MODE_DEFAULT
 MemoryInjectionMode = memory_injection_mode_policy.MemoryInjectionMode
 
 
@@ -369,6 +355,27 @@ def sanitize_forwarded_response_headers(
     return {key: value for key, value in dict(headers).items() if key.lower() not in drop}
 
 
+def _path_for_log(path: str) -> str:
+    """Drop the query string, fragment and userinfo from an outbound URL.
+
+    Callers pass the full upstream URL, and Google routes put the API key in
+    the query (``?key=...``), so logging it verbatim writes the key to disk.
+    Scheme, host and path are enough to tell forwarder calls apart.
+    """
+    try:
+        parts = urlsplit(path)
+        port = parts.port
+    except ValueError:
+        return "<unparseable>"
+    host = parts.hostname or ""
+    # ``hostname`` drops the brackets around an IPv6 literal; put them back
+    # so the logged URL still names the upstream that was contacted.
+    netloc = f"[{host}]" if ":" in host else host
+    if port:
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
 def log_outbound_request(
     *,
     forwarder: str,
@@ -384,8 +391,8 @@ def log_outbound_request(
     """Structured log line for every outbound forwarder call.
 
     Per realignment build constraints: every cache-affecting decision is
-    logged. Never includes ``Authorization``/``x-api-key`` content or full
-    body bytes.
+    logged. Never includes ``Authorization``/``x-api-key`` content, the URL
+    query string (where Google puts ``key=``) or full body bytes.
 
     ``dropped_mutation_reasons`` records edits that byte-faithful passthrough
     discarded before the wire. That is a WARNING, not a detail: the line above
@@ -397,7 +404,7 @@ def log_outbound_request(
         "body_mutated=%s mutation_reasons=%s source=%s request_id=%s",
         forwarder,
         method,
-        path,
+        _path_for_log(path),
         body_bytes_count,
         "true" if body_mutated else "false",
         ",".join(mutation_reasons) if mutation_reasons else "",
@@ -1027,6 +1034,22 @@ _ROLE_SYSTEM = "system"
 _TEXT_BLOCK_TYPE = "text"
 
 
+def _coerce_system_block(block: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a block representable by Anthropic's top-level ``system`` field."""
+    text = block.get("text")
+    if isinstance(text, str) and text:
+        # Anthropic TextBlockParam accepts these fields only. Image sources
+        # and tool IDs/inputs remain invalid even after changing ``type``.
+        coerced = {
+            key: value
+            for key, value in block.items()
+            if key in {"type", "text", "cache_control", "citations"}
+        }
+        coerced["type"] = _TEXT_BLOCK_TYPE
+        return coerced
+    return None
+
+
 def _system_message_to_blocks(message: dict[str, Any]) -> list[Any]:
     """Convert a ``role="system"`` message into Anthropic system content blocks."""
     content = message.get("content")
@@ -1057,10 +1080,12 @@ def relocate_system_messages_to_top_level(
     field as the issue-765 last-line wire-contract guard.
 
     The relocated content is appended after any existing top-level ``system``
-    so wire order (system prompt, then conversation) is preserved and no content
-    is dropped. Only text-shaped content moves: non-text blocks (images,
-    documents) stay in a mid-conversation system section at their original
-    position, because top-level `system` accepts text blocks only (issue #3552).
+    so wire order (system prompt, then conversation) is preserved. Only
+    text-shaped content moves: non-text blocks (images, documents) stay in a
+    mid-conversation system section at their original position, because
+    top-level `system` accepts text blocks only (issue #3552). A leading system
+    section cannot stay in ``messages[0]``; non-text blocks there are dropped
+    with a warning because they cannot be represented in either valid location.
 
     Returns ``(clean_messages, new_system, changed)``. When no system-role
     message is present the inputs pass through unchanged (``changed=False``) so
@@ -1123,26 +1148,52 @@ def relocate_system_messages_to_top_level(
 
     relocated_blocks: list[Any] = []
     retained: dict[int, dict[str, Any]] = {}
+    leading_system_indices: set[int] = set()
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or message.get("role") != _ROLE_SYSTEM:
+            break
+        leading_system_indices.add(index)
     for i in sorted(system_indices):
         message = messages[i]
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list):
             # Only text-shaped content may move into the top-level ``system``
             # parameter (text blocks and bare strings). Non-text blocks such as
-            # images or documents stay in place so nothing is dropped and
-            # upstreams that reject non-text system blocks keep working
-            # (issue #3552).
+            # images or documents stay in mid-conversation sections so nothing
+            # is dropped and upstreams that reject non-text system blocks keep
+            # working (issue #3552). A leading section cannot remain there
+            # without violating Anthropic's message contract.
             hoisted_from_list: list[Any] = []
             leftovers: list[Any] = []
             for block in content:
-                if isinstance(block, dict) and block.get("type") == _TEXT_BLOCK_TYPE:
-                    hoisted_from_list.append(block)
+                if isinstance(block, dict):
+                    if i in leading_system_indices:
+                        coerced = _coerce_system_block(block)
+                        if coerced is not None:
+                            hoisted_from_list.append(coerced)
+                        else:
+                            logger.warning(
+                                "event=system_relocation_block_dropped block_type=%s "
+                                "reason=not_representable_as_text",
+                                block.get("type", "missing"),
+                            )
+                    elif block.get("type") == _TEXT_BLOCK_TYPE:
+                        hoisted_from_list.append(block)
+                    else:
+                        leftovers.append(block)
                 elif isinstance(block, str) and block:
                     hoisted_from_list.append({"type": _TEXT_BLOCK_TYPE, "text": block})
                 else:
-                    leftovers.append(block)
+                    if i in leading_system_indices:
+                        logger.warning(
+                            "event=system_relocation_block_dropped block_type=%s "
+                            "reason=not_representable_as_text",
+                            "string" if isinstance(block, str) else type(block).__name__,
+                        )
+                    else:
+                        leftovers.append(block)
             relocated_blocks.extend(hoisted_from_list)
-            if leftovers:
+            if leftovers and i not in leading_system_indices:
                 retained[i] = {**message, "content": leftovers}
         else:
             # String (and other) content converts losslessly to text blocks.
@@ -1254,25 +1305,6 @@ _DECOMPRESS_CHUNK_SIZE = 64 * 1024
 # Maximum SSE buffer size (10MB - prevents memory exhaustion from malformed streams)
 MAX_SSE_BUFFER_SIZE = 10 * 1024 * 1024
 
-# Per-event SSE size cap (PR-A8 / P1-8). Configurable via
-# HEADROOM_SSE_BUFFER_MAX_BYTES. Guards against pathological huge events
-# (a single event > 1 MB by default is treated as an upstream protocol bug
-# and surfaces loudly rather than silently growing the buffer).
-_SSE_EVENT_MAX_BYTES_ENV = request_limit_policy.SSE_EVENT_MAX_BYTES_ENV
-_SSE_EVENT_MAX_BYTES_DEFAULT = request_limit_policy.SSE_EVENT_MAX_BYTES_DEFAULT
-
-
-def get_sse_event_max_bytes() -> int:
-    """Return the per-event SSE size cap.
-
-    Read at request time so operators can flip the env var without a
-    restart. Negative values are rejected loudly (no silent fallback).
-    """
-    return request_limit_policy.resolve_sse_event_max_bytes(
-        os.environ.get(_SSE_EVENT_MAX_BYTES_ENV)
-    )
-
-
 # Well-known OpenAI-compatible upstreams, matched by host against the
 # configured ``--openai-api-url``. Used only to label the dashboard/stats
 # display provider — the internal provider key stays ``openai`` so pricing
@@ -1339,7 +1371,6 @@ def resolve_display_provider(
 # Configurable via HEADROOM_PROXY_BODY_TOO_LARGE_STATUS for operators who need
 # to override (no expected production use; documentation knob).
 _BODY_TOO_LARGE_STATUS_ENV = request_limit_policy.BODY_TOO_LARGE_STATUS_ENV
-_BODY_TOO_LARGE_STATUS_DEFAULT = request_limit_policy.BODY_TOO_LARGE_STATUS_DEFAULT
 
 
 def get_body_too_large_status() -> int:
@@ -1347,18 +1378,6 @@ def get_body_too_large_status() -> int:
     return request_limit_policy.resolve_body_too_large_status(
         os.environ.get(_BODY_TOO_LARGE_STATUS_ENV)
     )
-
-
-_SSE_EVENT_TERMINATORS = sse_byte_buffer_policy.SSE_EVENT_TERMINATORS
-
-
-def _find_sse_event_terminator(buf: bytearray) -> tuple[int, int] | None:
-    """Return the earliest complete SSE event terminator in ``buf``."""
-    return sse_byte_buffer_policy.find_sse_event_terminator(buf)
-
-
-_SSE_EVENT_LINE_PREFIX = b"event:"
-_SSE_DATA_LINE_PREFIX = b"data:"
 
 
 def safe_decode_for_logging(raw: bytes, *, max_bytes: int | None = None) -> str:
@@ -1398,6 +1417,12 @@ def parse_sse_events_from_byte_buffer(
 # Maximum message array length (prevents DoS from deeply nested payloads)
 MAX_MESSAGE_ARRAY_LENGTH = 10000
 
+
+def _warn_invalid_env_number(name: str, default: float) -> None:
+    """Say which numeric knob was ignored, so a typo does not silently revert it."""
+    logger.warning("Ignoring invalid %s=%r; using %s", name, os.environ.get(name), default)
+
+
 # Compression pipeline timeout in seconds. Override via the
 # HEADROOM_COMPRESSION_TIMEOUT_SECONDS env var for slow CPUs or long Claude Code
 # conversations (GH #946). Falls back to 30 on an unparseable value.
@@ -1407,6 +1432,7 @@ try:
     )
 except ValueError:
     COMPRESSION_TIMEOUT_SECONDS = 30.0
+    _warn_invalid_env_number("HEADROOM_COMPRESSION_TIMEOUT_SECONDS", COMPRESSION_TIMEOUT_SECONDS)
 
 # Cold-start fast-pass timeout in seconds. When background compression defers
 # a cold-start-large request, the handler still runs the pipeline synchronously
@@ -1421,6 +1447,9 @@ try:
     )
 except ValueError:
     COLD_START_FAST_PASS_TIMEOUT_SECONDS = 10.0
+    _warn_invalid_env_number(
+        "HEADROOM_COLD_START_FAST_PASS_TIMEOUT_SECONDS", COLD_START_FAST_PASS_TIMEOUT_SECONDS
+    )
 
 # Eager startup preload timeout in seconds. The preload (compressor/parser models,
 # cache-only, allow_download=False) runs off the event loop during startup; this
@@ -1433,6 +1462,9 @@ try:
     )
 except ValueError:
     EAGER_PRELOAD_TIMEOUT_SECONDS = 120.0
+    _warn_invalid_env_number(
+        "HEADROOM_EAGER_PRELOAD_TIMEOUT_SECONDS", EAGER_PRELOAD_TIMEOUT_SECONDS
+    )
 
 # Maximum compression cache sessions (prevents unbounded memory growth).
 # Overridable via HEADROOM_COMPRESSION_CACHE_MAX_SESSIONS for gateway
@@ -1444,6 +1476,9 @@ try:
     )
 except ValueError:
     MAX_COMPRESSION_CACHE_SESSIONS = 500
+    _warn_invalid_env_number(
+        "HEADROOM_COMPRESSION_CACHE_MAX_SESSIONS", MAX_COMPRESSION_CACHE_SESSIONS
+    )
 
 # Idle TTL for per-session compression caches. Eviction is bust-free only
 # once the provider's own prompt cache has lapsed, so this must exceed the
@@ -1468,6 +1503,9 @@ try:
     COMPRESSION_CACHE_TTL_SECONDS = max(600.0, _ttl_env)
 except ValueError:
     COMPRESSION_CACHE_TTL_SECONDS = 3900.0
+    _warn_invalid_env_number(
+        "HEADROOM_COMPRESSION_CACHE_TTL_SECONDS", COMPRESSION_CACHE_TTL_SECONDS
+    )
 
 # Entries per session compression cache. 10k covers a single conversation with
 # ~2x headroom even at a 1M-token context (a compressible tool_result is at
@@ -1482,6 +1520,9 @@ try:
     )
 except ValueError:
     COMPRESSION_CACHE_MAX_ENTRIES = 10000
+    _warn_invalid_env_number(
+        "HEADROOM_COMPRESSION_CACHE_MAX_ENTRIES", COMPRESSION_CACHE_MAX_ENTRIES
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1622,6 +1663,14 @@ def retry_after_ms(response: httpx.Response, max_ms: int) -> float | None:
     exponential backoff. Anthropic sends integer seconds; the HTTP-date branch
     covers other upstreams. Fails open on any parse error.
     """
+    seconds = _retry_after_seconds(response)
+    if seconds is None:
+        return None
+    return min(seconds * 1000.0, float(max_ms))
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """Uncapped, non-negative ``Retry-After`` in seconds, or ``None`` if absent/unparseable."""
     value = response.headers.get("retry-after")
     if not value:
         return None
@@ -1636,7 +1685,25 @@ def retry_after_ms(response: httpx.Response, max_ms: int) -> float | None:
             seconds = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
         except (TypeError, ValueError):
             return None
-    return min(max(seconds, 0.0) * 1000.0, float(max_ms))
+    return max(seconds, 0.0)
+
+
+def overload_retry_is_futile(response: httpx.Response, max_ms: int, retries_left: int = 1) -> bool:
+    """True when retrying a 429/529 cannot succeed within the proxy's backoff.
+
+    Upstream says so explicitly with ``x-should-retry: false``, or implicitly with a
+    ``Retry-After`` beyond every wait still available: each of the ``retries_left``
+    retries sleeps at most ``max_ms``, so a reset further out than
+    ``retries_left * max_ms`` is never reached and the retries only delay the same
+    error (an exhausted subscription window answers with a reset hours away).
+    Forwarding it at once lets the client, or a credential-rotating proxy in front,
+    act on it. A reset within that window stays retryable: later 429s carry a
+    shorter Retry-After as the reset approaches.
+    """
+    if response.headers.get("x-should-retry", "").strip().lower() == "false":
+        return True
+    seconds = _retry_after_seconds(response)
+    return seconds is not None and seconds * 1000.0 > max(retries_left, 0) * max_ms
 
 
 # Transient upstream statuses worth retrying with backoff: 429 (rate limit) and
@@ -1889,13 +1956,30 @@ def _setup_file_logging(
             headroom_logger.removeHandler(stale)
             stale.close()
         headroom_logger.addHandler(handler)
-    except OSError:
-        # Non-fatal: can't write logs (read-only fs, permissions, etc.)
-        pass
+    except OSError as exc:
+        # Non-fatal: can't write logs (read-only fs, permissions, etc.). Say so,
+        # or the missing proxy.log is the only clue. The OSError names the path.
+        logger.warning(
+            "Headroom runtime log disabled: cannot write the log file: %s. "
+            "Point HEADROOM_WORKSPACE_DIR at a writable directory to restore proxy.log.",
+            exc,
+        )
 
 
 def is_anthropic_auth(headers: dict[str, str]) -> bool:
-    """Detect Anthropic auth signals in request headers."""
+    """Detect Anthropic auth signals in request headers.
+
+    .. deprecated::
+        Request routing does not use this. It uses the classifier in
+        ``headroom.providers.registry``, which also recognises Claude Code's
+        user-agent.
+    """
+    warnings.warn(
+        "is_anthropic_auth is deprecated and will be removed in a future release; "
+        "request routing uses the auth classifier in headroom.providers.registry.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if headers.get("x-api-key") or headers.get("anthropic-version"):
         return True
     auth = headers.get("authorization", "")
@@ -1926,9 +2010,7 @@ def is_anthropic_auth(headers: dict[str, str]) -> bool:
 # tell its client about its own work. This helper only filters
 # request-side headers.
 
-_INTERNAL_HEADER_PREFIX = INTERNAL_HEADER_PREFIX
 _STRIP_INTERNAL_HEADERS_ENV = STRIP_INTERNAL_HEADERS_ENV
-_STRIP_INTERNAL_HEADERS_DEFAULT = STRIP_INTERNAL_HEADERS_DEFAULT
 
 
 def get_strip_internal_headers_mode() -> StripInternalHeadersMode:
@@ -2073,10 +2155,7 @@ def log_outbound_headers(
 # explicit per realignment build constraint #4 — NOT a silent fallback.
 
 _BETA_HEADER_STICKY_ENV = BETA_HEADER_STICKY_ENV
-_BETA_HEADER_STICKY_DEFAULT = BETA_HEADER_STICKY_DEFAULT
-
 _BETA_TRACKER_MAX_SESSIONS_ENV = BETA_TRACKER_MAX_SESSIONS_ENV
-_BETA_TRACKER_MAX_SESSIONS_DEFAULT = BETA_TRACKER_MAX_SESSIONS_DEFAULT
 
 
 def get_beta_header_sticky_mode() -> BetaHeaderStickyMode:
@@ -2095,9 +2174,6 @@ def get_beta_tracker_max_sessions() -> int:
 
 
 _split_beta_tokens = split_beta_tokens
-
-
-_merge_beta_tokens = merge_beta_tokens
 
 
 class SessionBetaTracker:
@@ -2335,8 +2411,7 @@ def serialize_tool_definition_canonical(tool_definition: dict[str, Any]) -> byte
     no ASCII escaping). Python 3.7+ dict insertion order is preserved by
     ``json.dumps`` so callers must construct the tool definition with a
     stable key order — which the static schemas in
-    ``headroom/proxy/memory_handler.py`` and
-    ``headroom/proxy/memory_tool_adapter.py`` already do.
+    ``headroom/proxy/memory_handler.py`` already do.
 
     Returned bytes pin the golden tool definition for a session: every
     follow-up turn must inject byte-equal output to keep the prefix
@@ -2924,6 +2999,30 @@ class RequestBodyTooLarge(ValueError):
     """
 
 
+class RequestBodyNotObject(ValueError):
+    """The request body parsed as JSON but is not an object (e.g. a list)."""
+
+
+def invalid_request_body_message(exc: Exception) -> str:
+    """Client-facing text for a request body that failed to read or parse.
+
+    Fixed strings only, chosen by exception type. The exception's own text can
+    carry decoder internals and request metadata, and echoing it back is what
+    CodeQL's ``py/stack-trace-exposure`` flags. The type is logged so a 400 can
+    still be diagnosed from the proxy side.
+    """
+    logger.info("rejected request body (%s)", type(exc).__name__)
+    if isinstance(exc, RequestBodyTooLarge):
+        return "Invalid request body: too large"
+    if isinstance(exc, RequestBodyNotObject):
+        return "Invalid request body: must be a JSON object"
+    if isinstance(exc, json.JSONDecodeError):
+        return "Invalid request body: malformed JSON"
+    if isinstance(exc.__cause__, UnicodeDecodeError):
+        return "Invalid request body: not valid UTF-8 (possibly compressed?)"
+    return "Invalid request body"
+
+
 def _inflate_bounded(raw: bytes, *, wbits: int, label: str, multi_member: bool = False) -> bytes:
     """Incrementally inflate ``raw``, stopping the instant output passes the cap.
 
@@ -3256,7 +3355,9 @@ async def _read_request_json(request: Request) -> dict[str, Any]:
 
     result = json.loads(text)
     if not isinstance(result, dict):
-        raise ValueError("Request body must be a JSON object, not " + type(result).__name__)
+        raise RequestBodyNotObject(
+            "Request body must be a JSON object, not " + type(result).__name__
+        )
 
     # Drop output-only blocks the request schema rejects (see
     # ``strip_output_only_request_blocks``). Callers of this bytes-less reader
@@ -3296,7 +3397,9 @@ async def read_request_json_with_bytes(request: Request) -> tuple[dict[str, Any]
 
     result = json.loads(text)
     if not isinstance(result, dict):
-        raise ValueError("Request body must be a JSON object, not " + type(result).__name__)
+        raise RequestBodyNotObject(
+            "Request body must be a JSON object, not " + type(result).__name__
+        )
 
     # Drop output-only blocks (see ``strip_output_only_request_blocks``) before
     # any downstream deepcopy / compression / 400-retry path. This is the shared
@@ -3622,17 +3725,6 @@ CORE_TOOLS_ENV_LEGACY = "HEADROOM_TOOL_SEARCH_CORE"
 
 _core_tools_legacy_lock = threading.Lock()
 _core_tools_legacy_warned = False
-
-
-def reset_core_tools_legacy_warn_state() -> None:
-    """Re-arm the legacy-variable warning. Test helper only.
-
-    Without this the flag leaks between tests in a process, so a caplog
-    assertion on this warning passes alone and fails depending on ordering.
-    """
-    global _core_tools_legacy_warned
-    with _core_tools_legacy_lock:
-        _core_tools_legacy_warned = False
 
 
 def _core_tools_override() -> str | None:
@@ -4497,6 +4589,9 @@ _OPENAI_TOOL_SEARCH_UNSUPPORTED_CLIENTS = frozenset({"codex", "opencode"})
 # HEADROOM_OPENAI_TOOL_SEARCH_MODELS (matched against the model name) so new
 # model families can be enabled without a code edit + release.
 _OPENAI_TOOL_SEARCH_MIN_VERSION = (5, 4)
+# Last malformed override pattern warned about, so a bad regex is reported once
+# instead of on every request.
+_openai_tool_search_bad_pattern: str | None = None
 
 
 def _model_supports_openai_tool_search(model: str | None) -> bool:
@@ -4507,14 +4602,27 @@ def _model_supports_openai_tool_search(model: str | None) -> bool:
     when set; a malformed pattern falls back to the version gate rather than
     crashing.
     """
+    global _openai_tool_search_bad_pattern
     if not model:
         return False
     override = os.environ.get("HEADROOM_OPENAI_TOOL_SEARCH_MODELS", "").strip()
     if override:
         try:
-            return re.search(override, model) is not None
-        except re.error:
-            pass  # malformed override → fall back to the version gate
+            matched = re.search(override, model) is not None
+        except re.error as exc:
+            # Malformed override → fall back to the version gate.
+            if override != _openai_tool_search_bad_pattern and logger.isEnabledFor(logging.WARNING):
+                _openai_tool_search_bad_pattern = override
+                logger.warning(
+                    "Ignoring invalid HEADROOM_OPENAI_TOOL_SEARCH_MODELS regex %r (%s); "
+                    "using the gpt-5.4+ version gate",
+                    override,
+                    exc,
+                )
+        else:
+            # A valid pattern re-arms the warning for the next bad one.
+            _openai_tool_search_bad_pattern = None
+            return matched
     match = re.match(r"gpt-(\d+)(?:\.(\d+))?", model.strip().lower())
     if not match:
         return False
