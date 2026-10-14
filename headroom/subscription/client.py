@@ -27,6 +27,7 @@ from headroom.providers.anthropic_subscription import (
     ANTHROPIC_OAUTH_USAGE_URL,
 )
 from headroom.subscription.models import SubscriptionSnapshot
+from headroom.subscription.session_tracking import _claude_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,7 @@ _TOKEN_EXPIRY_BUFFER_S = 60
 
 
 def _credentials_path() -> Path:
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-    return Path(base) / ".credentials.json"
+    return _claude_config_dir() / ".credentials.json"
 
 
 def _load_credentials_file() -> dict[str, Any] | None:
