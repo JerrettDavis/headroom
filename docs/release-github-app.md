@@ -60,6 +60,20 @@ later in GitHub App settings.
 
 ## Qualification and rollout
 
+The live prototype App is [Headroom Release JerrettDavis](https://github.com/apps/headroom-release-jerrettdavis),
+App ID `5324302`, owned by `JerrettDavis`. Installation `171562720` selects only
+`JerrettDavis/headroom`. Both required repository settings are configured.
+The initial [qualification run](https://github.com/JerrettDavis/headroom/actions/runs/38665736285)
+minted an installation token and created [release PR #11](https://github.com/JerrettDavis/headroom/pull/11)
+as `headroom-release-jerrettdavis[bot]`. Its pushes triggered metadata sync and
+pull-request workflows. The prototype workflow runs on `release-app-prototype`,
+uses `skip-github-release` to avoid package publication, and checks release write
+access with a disposable draft. The fork's `main` has not been changed.
+
+GitHub requires `hook_attributes.url` even when the webhook is disabled; the
+manifest therefore supplies an inactive URL. App names are limited to 34
+characters; use `--name` to override the generated name if it is already taken.
+
 On the fork, merge this workflow change after App installation and settings are
 present. Push a conventional commit to `main`. Confirm the release workflow
 mints an App token, a release PR is created by the App, and its CI starts.
