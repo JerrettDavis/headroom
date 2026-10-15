@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--owner", default="JerrettDavis")
     parser.add_argument("--repo", default="JerrettDavis/headroom")
     parser.add_argument("--organization", action="store_true")
+    parser.add_argument("--name", help="Globally unique App name (34 characters maximum)")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", args.repo):
         parser.error("--repo must be OWNER/REPOSITORY")
@@ -58,7 +59,9 @@ def main():
     state = secrets.token_urlsafe(32)
     action = registration_url(args.owner, args.organization, state)
     manifest = json.loads(Path(__file__).with_name("release-app-manifest.json").read_text())
-    manifest["name"] = f"Headroom Release Please {args.owner}"
+    manifest["name"] = args.name or f"Headroom Release {args.owner}"[:34]
+    if not manifest["name"].strip() or len(manifest["name"]) > 34:
+        parser.error("App name must contain 1 to 34 characters")
     manifest["url"] = f"https://github.com/{args.repo}"
     outcome = {"success": False}
 

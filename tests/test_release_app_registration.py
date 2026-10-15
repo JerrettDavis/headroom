@@ -59,6 +59,7 @@ def test_manifest_permissions_are_minimal():
     assert manifest["default_permissions"] == {"contents": "write", "pull_requests": "write"}
     assert manifest["default_events"] == []
     assert manifest["hook_attributes"]["active"] is False
+    assert manifest["hook_attributes"]["url"].startswith("https://")
 
 
 def test_workflow_writers_require_repository_scoped_app_tokens():
