@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "headroom-ai"
-version = "0.40.0"
+version = "0.41.0"
 description = "The Context Optimization Layer for LLM Applications - Cut costs by 50-90%"
 readme = "README.md"
 license = "Apache-2.0"
@@ -534,6 +534,7 @@ markers = [
     "real_llm: tests that hit real LLM APIs; skipped unless explicitly enabled",
     "live: opt-in multi-turn tests that hit real upstream APIs; require provider keys",
     "proxy_dependency_gate: exercises ensure_proxy_dependencies() without mocking",
+    "proxy_port_preflight: exercises the proxy busy-port check against real sockets",
     "windows_newline: newline-contract tests (#3698); also run on windows-latest in CI",
 ]
 
@@ -541,7 +542,6 @@ markers = [
 source = ["headroom"]
 branch = true
 omit = [
-    "headroom/cli.py",
     "*/tests/*",
 ]
 

@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from headroom.log_safety import describe_exception
 from headroom.proxy.conversation_savings import get_conversation_savings
 from headroom.proxy.tool_schema_savings_policy import (
     headline_tokens_saved,
@@ -337,6 +338,7 @@ class RequestOutcome:
         original_messages: list[dict] | None = None,
         conversation_key: str | None = None,
         conversation_tokens_saved: int | None = None,
+        provider_input_tokens: int = 0,
     ) -> RequestOutcome:
         """Construct an outcome from the locals available at streaming
         finalize. Three streaming finalizers
@@ -407,6 +409,7 @@ class RequestOutcome:
             model=model,
             original_tokens=original_tokens,
             optimized_tokens=optimized_tokens,
+            provider_input_tokens=max(int(provider_input_tokens or 0), 0),
             output_tokens=output_tokens,
             tokens_saved=tokens_saved,
             conversation_key=conversation_key,
@@ -439,6 +442,29 @@ class RequestOutcome:
 
 
 # ── The funnel ───────────────────────────────────────────────────────
+
+
+_estimated_input_warned: set[tuple[str, str]] = set()
+
+
+def _warn_estimated_input(provider: str, model: str) -> None:
+    """Log once per (provider, model) when a request's input volume is an estimate.
+
+    Every successful response from Anthropic, OpenAI and Gemini carries usage,
+    so landing here on those providers means a code path dropped it. The
+    request still records (fail open), but the volume it contributes is
+    Headroom's tokenizer estimate, not the bill, and the coverage counters say so.
+    """
+    key = (str(provider), str(model))
+    if key in _estimated_input_warned or len(_estimated_input_warned) >= 256:
+        return
+    _estimated_input_warned.add(key)
+    logger.warning(
+        "event=input_tokens_estimated provider=%s model=%s: no provider usage on this "
+        "request; input volume recorded from Headroom's local tokenizer estimate",
+        provider,
+        model,
+    )
 
 
 async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
@@ -604,8 +630,12 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
             # does a full read-modify-write of the ledger file — run them
             # together off the event loop (#18) so a slow flush can't stall it.
             output_tokens_saved_est = await asyncio.to_thread(_record_and_estimate)
-        except Exception:  # pragma: no cover - defensive
-            pass
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "Output savings record/estimate failed for request %s; booking 0: %s",
+                outcome.request_id,
+                describe_exception(exc),
+            )
 
     # Project attribution: explicit outcome field wins, else the value the
     # HTTP middleware / WS accept captured from ``X-Headroom-Project``.
@@ -652,6 +682,9 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
     # Deliberately NOT used for any delta: differencing this against
     # ``original_tokens`` mixes tokenizer scales. See the field docs.
     billed_input_tokens = outcome.provider_input_tokens or outcome.optimized_tokens
+    input_provider_reported = outcome.provider_input_tokens > 0
+    if not input_provider_reported and billed_input_tokens > 0:
+        _warn_estimated_input(outcome.provider, outcome.model)
 
     # 1. Prometheus / SavingsTracker.
     await handler.metrics.record_request(
@@ -684,6 +717,7 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
         # so counting it as a write would both double it and apply a premium
         # OpenAI never charges.
         cache_inferred=outcome.cache_inferred,
+        input_provider_reported=input_provider_reported,
     )
 
     # 2. Cost tracker (optional).
@@ -704,6 +738,7 @@ async def emit_request_outcome(handler: Any, outcome: RequestOutcome) -> None:
             # cost tracker feeds the dashboard's per-model table, which read
             # compression only while its own headline counted both layers.
             tool_schema_saved=tool_search_saved,
+            provider_reported=input_provider_reported,
         )
 
     # 3. Per-request log (optional). The ``client`` outcome field is
