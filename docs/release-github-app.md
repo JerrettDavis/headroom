@@ -70,6 +70,16 @@ pull-request workflows. The prototype workflow runs on `release-app-prototype`,
 uses `skip-github-release` to avoid package publication, and checks release write
 access with a disposable draft. The fork's `main` has not been changed.
 
+The [second qualification run](https://github.com/JerrettDavis/headroom/actions/runs/38665988599)
+passed token minting, updating the existing release PR, creating/reading/deleting
+a draft GitHub release, and token revocation. No disposable draft remains.
+Metadata sync [run 38665856422](https://github.com/JerrettDavis/headroom/actions/runs/38665856422)
+also passed App token minting, version synchronization, verification, and push.
+These checks prove the prototype's App credential and release-please operations.
+Published package delivery and upstream adoption remain rollout steps below.
+The PR's separate Rust audit reports four existing `rustls 0.23.45` advisories;
+this change does not modify Rust dependencies or resolve that audit.
+
 GitHub requires `hook_attributes.url` even when the webhook is disabled; the
 manifest therefore supplies an inactive URL. App names are limited to 34
 characters; use `--name` to override the generated name if it is already taken.
