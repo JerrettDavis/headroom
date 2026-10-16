@@ -2489,7 +2489,6 @@ class ContentRouter(Transform):
         # skip — i.e. revert it to original text and bust the provider prefix
         # cache. Counting pins isolates the freeze's attributable payoff.
         self._freeze_pin_hits = 0
-        self._freeze_pin_chars = 0
 
     # ── #3486: per-request runtime state accessors ──────────────────────
     #
@@ -2624,7 +2623,6 @@ class ContentRouter(Transform):
         preserved = max(0, int(len(content) * (1.0 - cached_ratio)))
         with self._frozen_lock:
             self._freeze_pin_hits += 1
-            self._freeze_pin_chars += preserved
             hits = self._freeze_pin_hits
         logger.info(
             f"FREEZE-PIN: pins={hits} cached_ratio={cached_ratio:.3f} "
@@ -2743,6 +2741,21 @@ class ContentRouter(Transform):
             return bool(compressor.is_ready())
         except Exception:
             return True
+
+    @staticmethod
+    def _kompress_load_in_progress(compressor: Any) -> bool:
+        """Whether a background thread is still fetching or loading ``compressor``'s model.
+
+        Compressors without ``is_loading`` (the remote one is always ready,
+        test doubles) count as not loading.
+        """
+        is_loading = getattr(compressor, "is_loading", None)
+        if is_loading is None:
+            return False
+        try:
+            return bool(is_loading())
+        except Exception:
+            return False
 
     def _record_to_toin(
         self,
@@ -4727,10 +4740,22 @@ class ContentRouter(Transform):
             if compressor:
                 if not compressor.is_ready():
                     compressor.ensure_background_load()
-                    # Surface: warn once per ContentRouter instance so operators
-                    # know compression is degraded — model not cached, or
-                    # HuggingFace unreachable (corporate firewall, SSL, etc.).
-                    if not getattr(self, "_kompress_warned", False):
+                    # Surface once per ContentRouter instance that requests pass
+                    # through uncompressed. While a thread is still fetching or
+                    # loading the model (the post-startup warm-up, or the
+                    # download just started above) that is expected, so say it
+                    # at INFO. With no loader running, e.g. a failed download
+                    # in its retry backoff, compression is degraded: warn and
+                    # name the usual causes (_background_download has already
+                    # logged the actual error).
+                    if self._kompress_load_in_progress(compressor):
+                        if not getattr(self, "_kompress_loading_noted", False):
+                            logger.info(
+                                "Kompress model still loading in the background; "
+                                "requests pass through uncompressed until it is ready."
+                            )
+                            self._kompress_loading_noted = True
+                    elif not getattr(self, "_kompress_warned", False) and not compressor.is_ready():
                         logger.warning(
                             "Kompress model not ready; requests will not be "
                             "compressed. Check HuggingFace connectivity or "
@@ -7885,24 +7910,3 @@ class ContentRouter(Transform):
         Always returns True - the router handles all content types.
         """
         return True
-
-
-def route_and_compress(
-    content: str,
-    context: str = "",
-) -> str:
-    """Convenience function for one-off routing and compression.
-
-    Args:
-        content: Content to compress.
-        context: Optional context for relevance-aware compression.
-
-    Returns:
-        Compressed content.
-
-    Example:
-        >>> compressed = route_and_compress(mixed_content)
-    """
-    router = ContentRouter()
-    result = router.compress(content, context=context)
-    return result.compressed
