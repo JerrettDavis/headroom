@@ -12,9 +12,9 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -40,6 +40,7 @@ from headroom.pipeline import PipelineStage, summarize_routing_markers
 from headroom.proxy import public_errors
 from headroom.proxy.anthropic_wire import (
     build_anthropic_upstream_url,
+    fold_anthropic_stream,
     is_safeguard_capable_request,
     preserve_opaque_response_fields,
     strip_safeguard_payload,
@@ -51,6 +52,7 @@ from headroom.proxy.auth_mode import (
 )
 from headroom.proxy.buffered_ccr_response import (
     ANTHROPIC_ERROR_FORMAT,
+    ANTHROPIC_ERROR_TYPES,
     DEFAULT_BUFFERED_CCR_GRACE_SECONDS,
     buffered_ccr_asgi_call,
 )
@@ -401,6 +403,87 @@ class AnthropicHandlerMixin:
             f"event stream; adapted {len(response.content)} bytes of SSE to JSON"
         )
         return httpx.Response(200, json=parsed, headers=headers)
+
+    async def _send_buffered_as_stream(
+        self,
+        send: Callable[[dict[str, str], dict[str, Any]], Awaitable[httpx.Response]],
+        headers: dict[str, str],
+        body: dict[str, Any],
+        *,
+        url: str,
+        request_id: str,
+    ) -> httpx.Response:
+        """Send a non-streaming request Headroom built as a stream, and fold the reply.
+
+        The buffered CCR path flips a streaming turn to ``stream: false`` so the
+        whole reply is in hand before server-side retrieval, and the CCR, memory
+        and turn-hook continuations are built from that body. Upstream then
+        sends nothing until the generation is complete, and a network that
+        drops HTTP connections idle for ~60s (TLS-inspecting antivirus, VPN,
+        corporate proxy; TCP keepalive does not reset an HTTP idle timer) cuts
+        every long turn: each retry fails at ~60s and the client gets a 502 it
+        resends forever. Asked for as a stream, upstream sends deltas and pings
+        for the whole generation; folded, the reply is the same Message JSON the
+        caller already reads.
+
+        ``send(headers, body)`` makes one upstream call. A reply that is not a
+        200 event stream (an HTTP error, or an upstream that answered JSON
+        anyway) is returned unchanged. A connection dropped mid-stream raises
+        inside ``send``, as it does for a ``stream: false`` reply; a stream that
+        ends early gets the 502 of ``_adapt_event_stream_to_json``; an in-band
+        ``error`` event comes back with its HTTP status. A complete stream this
+        proxy cannot fold is answered by sending the original ``stream: false``
+        body instead, so it costs one more generation rather than a 502 the
+        client would resend forever.
+
+        First-party Anthropic only: a gateway's event stream is not something
+        the fold has been checked against. Kill switch:
+        ``HEADROOM_BUFFERED_UPSTREAM_STREAM=0``, a runtime-env knob, so
+        ``headroom wrap`` also pushes it to a reused proxy.
+        """
+        from headroom.providers.claude.runtime import is_custom_anthropic_base_url
+        from headroom.proxy import runtime_env
+
+        if (
+            body.get("stream")
+            or is_custom_anthropic_base_url(url)
+            or runtime_env.getenv("HEADROOM_BUFFERED_UPSTREAM_STREAM", "1").strip().lower()
+            in ("0", "false", "no", "off")
+        ):
+            return await send(headers, body)
+
+        stream_headers = {k: v for k, v in headers.items() if k.lower() != "accept"}
+        stream_headers["accept"] = "text/event-stream"
+        response = await send(stream_headers, {**body, "stream": True})
+        if response.status_code != 200 or not _looks_like_sse_response(response):
+            return response
+        try:
+            folded = fold_anthropic_stream(response.content)
+        except ValueError as exc:
+            logger.warning(
+                f"[{request_id}] Could not fold the upstream event stream ({exc}); "
+                "sending the request again as stream:false"
+            )
+            return await send(headers, body)
+        if folded is None:
+            # Ended early: the strict 502 any truncated reply here gets (#3266).
+            return self._adapt_event_stream_to_json(response, request_id)
+
+        status_code = 200
+        if folded.get("type") == "error":
+            error_type = (folded.get("error") or {}).get("type")
+            status_code = {name: code for code, name in ANTHROPIC_ERROR_TYPES.items()}.get(
+                error_type, 500
+            )
+            logger.warning(
+                f"[{request_id}] Upstream event stream carried an in-band "
+                f"{error_type!r} error; answering {status_code}"
+            )
+        return httpx.Response(
+            status_code,
+            json=folded,
+            headers=sanitize_forwarded_response_headers(response.headers, "content-type"),
+        )
 
     async def _count_tokens_offloaded(self, model, messages):  # noqa: ANN001, ANN201
         from headroom.proxy.token_counting import count_tokens_offloaded
@@ -1165,9 +1248,10 @@ class AnthropicHandlerMixin:
             pipeline_path = request.url.path if upstream_base_url else "/v1/messages"
             pipeline_stream = bool(body.get("stream", False) or force_stream)
             # O1 (2026-09-27 perf audit): the snapshot of the original
-            # conversation aliases the live list unless hooks or pipeline
-            # extensions are configured - those can mutate `messages` in place
-            # (pre_compress receives the live list), so then the snapshot is an
+            # conversation aliases the live list unless hooks, pipeline
+            # extensions or turn hooks are configured - those can mutate
+            # `messages` in place (pre_compress receives the live list, skill
+            # search folds text in place), so then the snapshot is an
             # independently owned copy (snapshot_original_messages). The
             # deep_copy stage is always measured so the timing summary keeps
             # its key.
@@ -4212,11 +4296,10 @@ class AnthropicHandlerMixin:
 
                     async def _buffered_ccr_operation():
                         async with stage_timer.measure("upstream_connect"):
-                            response = await self._retry_request(
+                            send_upstream = partial(
+                                self._retry_request,
                                 "POST",
                                 url,
-                                headers,
-                                body,
                                 original_body_bytes=original_body_bytes,
                                 body_mutated=body_mutation_tracker.mutated,
                                 mutation_reasons=body_mutation_tracker.reasons,
@@ -4225,6 +4308,14 @@ class AnthropicHandlerMixin:
                                 path_for_log="/v1/messages",
                                 timeout=self._anthropic_buffered_request_timeout(),
                             )
+                            # Only the CCR flip goes out as a stream: a client's
+                            # own stream:false request keeps its bytes.
+                            if buffered_stream_ccr:
+                                response = await self._send_buffered_as_stream(
+                                    send_upstream, headers, body, url=url, request_id=request_id
+                                )
+                            else:
+                                response = await send_upstream(headers, body)
                         self.pipeline_extensions.emit(
                             PipelineStage.POST_SEND,
                             operation="proxy.request",
@@ -4520,13 +4611,6 @@ class AnthropicHandlerMixin:
                                 )
                                 from headroom.proxy.helpers import log_outbound_request
 
-                                ccr_outbound_bytes, ccr_outbound_source = (
-                                    prepare_outbound_body_bytes(
-                                        body=continuation_body,
-                                        original_body_bytes=None,
-                                        body_mutated=True,
-                                    )
-                                )
                                 # A continuation is a non-streaming call, so it
                                 # needs a matching Accept for the same reason the
                                 # buffered flip above does (#3078).
@@ -4537,22 +4621,42 @@ class AnthropicHandlerMixin:
                                 }
                                 ccr_outbound_headers["content-type"] = "application/json"
                                 ccr_outbound_headers["accept"] = "application/json"
-                                log_outbound_request(
-                                    forwarder="anthropic_ccr_continuation",
-                                    method="POST",
-                                    path=url,
-                                    body_bytes_count=len(ccr_outbound_bytes),
-                                    body_mutated=True,
-                                    mutation_reasons=["ccr_continuation"],
-                                    request_id=request_id,
-                                    source=ccr_outbound_source,
-                                )
-                                try:
-                                    cont_response = await self.http_client.post(
+
+                                async def _post_continuation(
+                                    send_headers: dict[str, str], send_body: dict[str, Any]
+                                ) -> httpx.Response:
+                                    assert self.http_client is not None
+                                    ccr_outbound_bytes, ccr_outbound_source = (
+                                        prepare_outbound_body_bytes(
+                                            body=send_body,
+                                            original_body_bytes=None,
+                                            body_mutated=True,
+                                        )
+                                    )
+                                    log_outbound_request(
+                                        forwarder="anthropic_ccr_continuation",
+                                        method="POST",
+                                        path=url,
+                                        body_bytes_count=len(ccr_outbound_bytes),
+                                        body_mutated=True,
+                                        mutation_reasons=["ccr_continuation"],
+                                        request_id=request_id,
+                                        source=ccr_outbound_source,
+                                    )
+                                    return await self.http_client.post(
                                         url,
                                         content=ccr_outbound_bytes,
-                                        headers=ccr_outbound_headers,
+                                        headers=send_headers,
                                         timeout=self._anthropic_buffered_request_timeout(),
+                                    )
+
+                                try:
+                                    cont_response = await self._send_buffered_as_stream(
+                                        _post_continuation,
+                                        ccr_outbound_headers,
+                                        continuation_body,
+                                        url=url,
+                                        request_id=request_id,
                                     )
                                     logger.info(
                                         f"CCR: Got response status={cont_response.status_code}, "
@@ -4758,12 +4862,17 @@ class AnthropicHandlerMixin:
                                     if tools:
                                         continuation_body["tools"] = tools
 
-                                    cont_response = await self._retry_request(
-                                        "POST",
-                                        url,
+                                    cont_response = await self._send_buffered_as_stream(
+                                        partial(
+                                            self._retry_request,
+                                            "POST",
+                                            url,
+                                            timeout=self._anthropic_buffered_request_timeout(),
+                                        ),
                                         headers,
                                         continuation_body,
-                                        timeout=self._anthropic_buffered_request_timeout(),
+                                        url=url,
+                                        request_id=request_id,
                                     )
 
                                     # Update response with continuation
@@ -4800,12 +4909,17 @@ class AnthropicHandlerMixin:
                                 hook_messages: list[dict[str, Any]],
                             ) -> dict[str, Any]:
                                 continuation_body = {**body, "messages": hook_messages}
-                                continuation_response = await self._retry_request(
-                                    "POST",
-                                    url,
+                                continuation_response = await self._send_buffered_as_stream(
+                                    partial(
+                                        self._retry_request,
+                                        "POST",
+                                        url,
+                                        timeout=self._anthropic_buffered_request_timeout(),
+                                    ),
                                     headers,
                                     continuation_body,
-                                    timeout=self._anthropic_buffered_request_timeout(),
+                                    url=url,
+                                    request_id=request_id,
                                 )
                                 continuation_json = continuation_response.json()
                                 _hook_usage.record(continuation_json)
@@ -5666,7 +5780,7 @@ class AnthropicHandlerMixin:
         pipeline_timing: dict[str, float] = {}
 
         # O1 (2026-09-27 perf audit): the per-request snapshot aliases unless
-        # hooks or extensions are configured (see the main handler).
+        # hooks, extensions or turn hooks are configured (see the main handler).
         from headroom.proxy.helpers import snapshot_original_messages
         from headroom.transforms.cold_prefix import anthropic_cache_ttl_seconds
 

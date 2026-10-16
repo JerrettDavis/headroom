@@ -69,6 +69,7 @@ from headroom.config import is_tool_excluded, unwrap_tool_call_name
 from headroom.copilot_auth import (
     apply_copilot_api_auth,
     build_copilot_upstream_url,
+    copilot_nes_base_url,
     is_copilot_api_url,
 )
 from headroom.pipeline import PipelineStage, summarize_routing_markers
@@ -3134,8 +3135,8 @@ class OpenAIHandlerMixin:
         model = body.get("model", "unknown")
         messages = body.get("messages", [])
         # O1 (2026-09-27 perf audit): the snapshot of the original
-        # conversation aliases the live list unless hooks or pipeline
-        # extensions are configured; those can mutate `messages` in place
+        # conversation aliases the live list unless hooks, pipeline extensions
+        # or turn hooks are configured; those can mutate `messages` in place
         # (pre_compress receives the live list), so then it is an
         # independently owned copy (see snapshot_original_messages).
         from headroom.proxy.helpers import snapshot_original_messages
@@ -3145,6 +3146,16 @@ class OpenAIHandlerMixin:
         )
         custom_upstream_base_url = _resolve_openai_upstream_base(request.headers)
         upstream_base_url = self._resolve_openai_upstream(request)
+        # Ghost text and next edits: CAPI does not serve these models. A
+        # caller-chosen x-headroom-base-url is left alone, as in
+        # select_passthrough_base_url.
+        nes_base_url = (
+            copilot_nes_base_url(model, upstream_base_url)
+            if custom_upstream_base_url is None
+            else None
+        )
+        if nes_base_url:
+            upstream_base_url = nes_base_url
         handler_path_suffix = _resolve_openai_chat_handler_path(
             upstream_base_url,
             model,

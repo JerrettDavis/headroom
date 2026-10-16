@@ -374,6 +374,7 @@ class BatchHandlerMixin:
                         await self._store_google_batch_context(
                             batch_name,
                             requests_list,
+                            compressed_requests,
                             model,
                             api_key,
                         )
@@ -619,6 +620,7 @@ class BatchHandlerMixin:
         self,
         batch_name: str,
         requests_list: list[dict[str, Any]],
+        forwarded_requests: list[dict[str, Any]],
         model: str,
         api_key: str | None,
     ) -> None:
@@ -627,6 +629,7 @@ class BatchHandlerMixin:
         Args:
             batch_name: The batch name from the API response.
             requests_list: The original batch requests.
+            forwarded_requests: Effective requests with any injected native tools.
             model: The model used for the batch.
             api_key: The API key for continuation calls.
         """
@@ -640,7 +643,7 @@ class BatchHandlerMixin:
             api_base_url=self.GEMINI_API_URL,
         )
 
-        for batch_req in requests_list:
+        for batch_req, forwarded_req in zip(requests_list, forwarded_requests, strict=True):
             metadata = batch_req.get("metadata", {})
             custom_id = metadata.get("key", "")
             req_content = batch_req.get("request", {})
@@ -661,7 +664,7 @@ class BatchHandlerMixin:
                 BatchRequestContext(
                     custom_id=custom_id,
                     messages=messages,
-                    tools=req_content.get("tools"),
+                    tools=forwarded_req.get("request", {}).get("tools"),
                     model=model,
                     system_instruction=sys_text,
                 )
