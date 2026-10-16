@@ -163,6 +163,7 @@ from headroom.proxy.modes import (
     PROXY_MODE_TOKEN,
     is_token_mode,
     normalize_proxy_mode,
+    read_maturation_inert_reason,
 )
 from headroom.proxy.orphan_watchdog import (
     orphan_grace_seconds,
@@ -2037,7 +2038,11 @@ class HeadroomProxy(
                 backend,
             )
 
-        threading.Thread(target=_warm, name="kompress-warmup", daemon=True).start()
+        from headroom.transforms.kompress_compressor import start_kompress_warmup_thread
+
+        # Registered as the model's loader, so a request during the warm-up
+        # doesn't start a second load thread.
+        start_kompress_warmup_thread(compressor.config.model_id, _warm)
         return True
 
     async def startup(self):
@@ -2092,6 +2097,25 @@ class HeadroomProxy(
         if self.config.mode == PROXY_MODE_CACHE:
             logger.info("  Prefix freeze: strict (all prior turns immutable)")
             logger.info("  Mutations: latest turn only")
+        if self.config.read_maturation:
+            _inert = read_maturation_inert_reason(
+                self.config.mode,
+                quiesce_turns=self.config.read_maturation_quiesce_turns,
+                max_hold_turns=self.config.read_maturation_max_hold_turns,
+            )
+            if _inert:
+                logger.warning(
+                    "Read maturation: INERT (%s); use --mode token or disable read_maturation",
+                    _inert,
+                )
+            else:
+                logger.info(
+                    "Read maturation: ENABLED (quiesce_turns=%d max_hold_turns=%d "
+                    "min_size_bytes=%d)",
+                    self.config.read_maturation_quiesce_turns,
+                    self.config.read_maturation_max_hold_turns,
+                    self.config.read_maturation_min_size_bytes,
+                )
         # Effective compression posture, resolved (not merely requested). The
         # savings profile reaches the router through two paths — the config
         # object and the seeded process env — and `setdefault` semantics mean a
@@ -2196,6 +2220,12 @@ class HeadroomProxy(
             self._kompress_status = eager_status["kompress"]
         if eager_status.get("code_aware") == "enabled":
             self._code_aware_status = "enabled"
+        kompress_enabled = any(
+            transform.config.enable_kompress
+            for pipeline in (self.anthropic_pipeline, self.openai_pipeline)
+            for transform in pipeline.transforms
+            if isinstance(transform, ContentRouter)
+        )
 
         # Log component status
         if self._kompress_status == "enabled":
@@ -2205,6 +2235,13 @@ class HeadroomProxy(
                 logger.info("Kompress: DEFERRED (warming in the background after startup)")
             else:
                 logger.info("Kompress: DEFERRED (model loads on first request)")
+        elif not kompress_enabled and (
+            self.config.optimize
+            or self.config.disable_kompress
+            or self.config.disable_kompress_anthropic is True
+            or self.config.disable_kompress_openai is True
+        ):
+            logger.info("Kompress: DISABLED")
         elif self.config.optimize:
             logger.info("Kompress: not installed (pip install headroom-ai[ml] for ML compression)")
 
@@ -3772,6 +3809,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
                 "cloudcode_api_url": config.cloudcode_api_url,
                 "vertex_api_url": config.vertex_api_url,
                 "savings_profile": config.savings_profile,
+                # Enabled extension names only (no plugin state): `headroom
+                # wrap` carries them over when it has to start a dedicated
+                # proxy beside this one, so an enterprise sink is not lost.
+                "proxy_extensions": sorted(config.proxy_extensions or []),
                 "target_ratio": effective_target_ratio,
                 "target_savings_percent": (
                     round(max(0.0, min(1.0, 1.0 - float(effective_target_ratio))) * 100, 1)
@@ -5370,6 +5411,25 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             # Effective state from the running process. This is the supported
             # black-box provenance surface for benchmark/qualification tools.
             "rollout": proxy.config.rollout.to_dict() if proxy.config.rollout else None,
+            "read_maturation": _read_maturation_status(proxy.config),
+        }
+
+    def _read_maturation_status(cfg: ProxyConfig) -> dict[str, Any]:
+        # The rollout snapshot says whether the feature is enabled, not whether
+        # it can act; cache mode leaves it enabled but unable to fire.
+        inert = (
+            read_maturation_inert_reason(
+                cfg.mode,
+                quiesce_turns=cfg.read_maturation_quiesce_turns,
+                max_hold_turns=cfg.read_maturation_max_hold_turns,
+            )
+            if cfg.read_maturation
+            else None
+        )
+        return {
+            "enabled": cfg.read_maturation,
+            "effective": cfg.read_maturation and inert is None,
+            "inert_reason": inert,
         }
 
     def _dashboard_config_payload() -> dict[str, Any]:
