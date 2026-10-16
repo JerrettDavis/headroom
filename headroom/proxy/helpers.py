@@ -112,6 +112,7 @@ from headroom.proxy.tool_injection_logging import (
 )
 from headroom.proxy.tool_injection_tracker import SessionToolTracker as _SessionToolTracker
 from headroom.proxy.tool_name_policy import extract_tool_name
+from headroom.proxy.turn_hooks import registered_turn_hooks
 
 if TYPE_CHECKING:
     import httpx
@@ -4793,11 +4794,12 @@ def snapshot_original_messages(
 
     Aliasing the live list is safe only while nothing between ingress and the
     pipeline's own deepcopy can mutate it in place. A configured
-    ``config.hooks`` (``pre_compress`` and friends receive the live list) or an
-    enabled pipeline extension can, so in that case the snapshot is an
-    independently owned deep copy; with neither configured the alias is kept
-    and costs nothing.
+    ``config.hooks`` (``pre_compress`` and friends receive the live list), an
+    enabled pipeline extension or a registered turn hook (skill search folds
+    message text in place) can, so in that case the snapshot is an
+    independently owned deep copy; with none of them the alias is kept and
+    costs nothing.
     """
-    if hooks is not None or bool(getattr(extensions, "enabled", False)):
+    if hooks is not None or bool(getattr(extensions, "enabled", False)) or registered_turn_hooks():
         return copy.deepcopy(messages)
     return messages

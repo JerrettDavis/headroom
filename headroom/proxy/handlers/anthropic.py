@@ -1248,9 +1248,10 @@ class AnthropicHandlerMixin:
             pipeline_path = request.url.path if upstream_base_url else "/v1/messages"
             pipeline_stream = bool(body.get("stream", False) or force_stream)
             # O1 (2026-09-27 perf audit): the snapshot of the original
-            # conversation aliases the live list unless hooks or pipeline
-            # extensions are configured - those can mutate `messages` in place
-            # (pre_compress receives the live list), so then the snapshot is an
+            # conversation aliases the live list unless hooks, pipeline
+            # extensions or turn hooks are configured - those can mutate
+            # `messages` in place (pre_compress receives the live list, skill
+            # search folds text in place), so then the snapshot is an
             # independently owned copy (snapshot_original_messages). The
             # deep_copy stage is always measured so the timing summary keeps
             # its key.
@@ -5779,7 +5780,7 @@ class AnthropicHandlerMixin:
         pipeline_timing: dict[str, float] = {}
 
         # O1 (2026-09-27 perf audit): the per-request snapshot aliases unless
-        # hooks or extensions are configured (see the main handler).
+        # hooks, extensions or turn hooks are configured (see the main handler).
         from headroom.proxy.helpers import snapshot_original_messages
         from headroom.transforms.cold_prefix import anthropic_cache_ttl_seconds
 
