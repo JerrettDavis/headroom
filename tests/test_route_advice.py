@@ -7,6 +7,7 @@ with nothing published, every path is exactly what it was before.
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -626,3 +627,38 @@ def test_the_resolver_follows_a_reassigned_default():
     assert first.default is None
     h.anthropic_backend = DEFAULT
     assert BR(h.anthropic_backend).default is DEFAULT
+
+
+@pytest.mark.parametrize(("written", "inferred"), [(0, False), (20, False), (None, True)])
+def test_backend_openai_stream_reads_reported_cache_writes(written, inferred):
+    """A reported write, zero included, is the provider's word; only an absent
+    field falls back to inferring writes from the uncached slice."""
+    from types import MethodType
+
+    from headroom.proxy.handlers.streaming import StreamingMixin
+
+    details = {"cached_tokens": 75}
+    if written is not None:
+        details["cache_write_tokens"] = written
+    usage = {"input_tokens": 100, "output_tokens": 5, "input_tokens_details": details}
+
+    class Backend(_Backend):
+        async def stream_openai_message(self, body, headers):
+            yield f"data: {json.dumps({'type': 'response.completed', 'response': {'usage': usage}})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    outcomes = []
+
+    async def record(outcome):
+        outcomes.append(outcome)
+
+    handler = _handler(Backend("openai"))
+    handler._record_request_outcome = record
+    handler._parse_sse_usage_from_buffer = MethodType(
+        StreamingMixin._parse_sse_usage_from_buffer, handler
+    )
+    asyncio.run(_drive_openai_with_outcome(handler, handler.anthropic_backend))
+
+    o = outcomes[0]
+    assert o.cache_inferred is inferred
+    assert o.cache_write_tokens == (25 if written is None else written)

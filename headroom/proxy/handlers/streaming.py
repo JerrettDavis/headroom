@@ -32,6 +32,8 @@ from headroom.proxy.token_counting import gemini_output_tokens
 if TYPE_CHECKING:
     from fastapi.responses import Response, StreamingResponse
 
+    from headroom.proxy.savings import ItemMeasure
+
 
 import httpx
 
@@ -421,6 +423,13 @@ class StreamingMixin:
                         usage_found["cache_read_input_tokens"] = usage_int(
                             details.get("cached_tokens")
                         )
+                        # Responses reports billed cache writes itself; the
+                        # Anthropic-shape key routes them down the real-write
+                        # branch instead of inferring them from uncached.
+                        if details.get("cache_write_tokens") is not None:
+                            usage_found["cache_creation_input_tokens"] = usage_int(
+                                details.get("cache_write_tokens")
+                            )
 
             elif provider == "gemini":
                 usage_meta = _sse_dict(data.get("usageMetadata"))
@@ -808,6 +817,7 @@ class StreamingMixin:
         # See ``conversation_savings``.
         conversation_key: str | None = None,
         conversation_tokens_saved: int | None = None,
+        savings_measure: ItemMeasure | None = None,
     ) -> None:
         from headroom.proxy.outcome import RequestOutcome
 
@@ -1033,6 +1043,7 @@ class StreamingMixin:
             waste_signals=waste_signals,
             conversation_key=conversation_key,
             conversation_tokens_saved=conversation_tokens_saved,
+            savings_measure=savings_measure,
         )
         await self._record_request_outcome(outcome)
 
@@ -1064,6 +1075,7 @@ class StreamingMixin:
         session_key: str | None = None,
         conversation_key: str | None = None,
         conversation_tokens_saved: int | None = None,
+        savings_measure: ItemMeasure | None = None,
         server_memory_tool_names: frozenset[str] | None = None,
         client_beta: str | None = None,
     ) -> Response | StreamingResponse:
@@ -1111,6 +1123,7 @@ class StreamingMixin:
                 session_key=session_key,
                 conversation_key=conversation_key,
                 conversation_tokens_saved=conversation_tokens_saved,
+                savings_measure=savings_measure,
                 server_memory_tool_names=server_memory_tool_names,
                 client_beta=client_beta,
             )
@@ -1145,6 +1158,7 @@ class StreamingMixin:
         session_key: str,
         conversation_key: str | None = None,
         conversation_tokens_saved: int | None = None,
+        savings_measure: ItemMeasure | None = None,
         server_memory_tool_names: frozenset[str] | None = None,
         client_beta: str | None = None,
     ) -> Response | StreamingResponse:
@@ -1579,6 +1593,7 @@ class StreamingMixin:
                 status_code=upstream_response.status_code,
                 conversation_key=conversation_key,
                 conversation_tokens_saved=conversation_tokens_saved,
+                savings_measure=savings_measure,
             )
             self._cleanup_mid_turn_stream(session_key)
             return Response(
@@ -1974,6 +1989,7 @@ class StreamingMixin:
                     ),
                     conversation_key=conversation_key,
                     conversation_tokens_saved=conversation_tokens_saved,
+                    savings_measure=savings_measure,
                 )
                 if supports_mid_turn_coalescing(client) and pending_messages:
                     pending_event = json.dumps(
@@ -2425,12 +2441,15 @@ class StreamingMixin:
                 # Bedrock/Anthropic shape when present. Fall back to
                 # inferring write count from total - read for OpenAI
                 # shape (which has no separate write counter).
-                cache_creation_input_tokens = stream_state.get("cache_creation_input_tokens") or 0
+                # None means "not reported"; an explicit 0 is a reported zero
+                # and must not fall through to the inferred branch.
+                reported_write = stream_state.get("cache_creation_input_tokens")
+                cache_creation_input_tokens = reported_write or 0
                 if upstream_input is None:
                     cache_write_tokens = 0
                     uncached_input_tokens = 0
                     cache_inferred = False
-                elif cache_creation_input_tokens > 0:
+                elif reported_write is not None:
                     cache_write_tokens = cache_creation_input_tokens
                     uncached_input_tokens = max(
                         upstream_input - cache_read_tokens - cache_write_tokens, 0
