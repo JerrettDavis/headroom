@@ -21,7 +21,7 @@ is now a thin shim that:
 * **Conservative dedupe.** Pre-3e.5 normalised digits/paths/hex
   globally, collapsing distinct error categories that shared a
   trailing variable shape. Rust splits on the first `:`/`=` and only
-  normalises the trailing region â€” message identifiers stay distinct.
+  normalises the trailing region — message identifiers stay distinct.
 * **Loud CCR failures.** Storage failures are logged at warning level
   instead of being silently swallowed.
 * **`LogLevel.FAIL` is documented as cosmetic-equivalent to
@@ -143,7 +143,7 @@ class LogCompressionResult:
         return self.original_line_count - self.compressed_line_count
 
 
-# â”€â”€â”€ LogCompressor (Rust-backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── LogCompressor (Rust-backed) ────────────────────────────────────────────
 
 
 def _format_from_str(name: str) -> LogFormat:
@@ -164,7 +164,7 @@ class LogCompressor:
     """
 
     def __init__(self, config: LogCompressorConfig | None = None) -> None:
-        # Hard import â€” no fallback. If the wheel is missing, the user
+        # Hard import — no fallback. If the wheel is missing, the user
         # must build it. See feedback memory `feedback_no_silent_fallbacks.md`.
         from headroom._core import (
             LogCompressor as _RustLogCompressor,
@@ -199,7 +199,7 @@ class LogCompressor:
             )
         )
 
-    # â”€â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Public API ─────────────────────────────────────────────────────
 
     def compress(self, content: str, context: str = "", bias: float = 1.0) -> LogCompressionResult:
         # `context` is unused upstream and unused here (Python original
