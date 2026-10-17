@@ -25,6 +25,8 @@ scripts/*
 !scripts/build_python_release_smoke.py
 !scripts/release_smoke_all.py
 !scripts/verify_npm_release_assets.mjs
+!scripts/register-release-app.py
+!scripts/release-app-manifest.json
 !scripts/tests/
 !scripts/README.md
 !scripts/repro_codex_replay.py

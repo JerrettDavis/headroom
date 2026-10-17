@@ -1,0 +1,9 @@
+{
+  "name": "Headroom Release Please",
+  "url": "https://github.com/JerrettDavis/headroom",
+  "description": "Runs Headroom release-please with short-lived repository installation tokens.",
+  "public": true,
+  "hook_attributes": {"url": "https://github.com/JerrettDavis/headroom", "active": false},
+  "default_permissions": {"contents": "write", "pull_requests": "write"},
+  "default_events": []
+}

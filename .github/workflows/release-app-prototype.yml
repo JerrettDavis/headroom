@@ -1,0 +1,49 @@
+name: Release App Prototype
+
+on:
+  push:
+    branches: [release-app-prototype]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-app-prototype
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Mint repository installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Prototype release PR
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          target-branch: release-app-prototype
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+          # Qualification creates a real release PR but publishes no artifacts.
+          skip-github-release: true
+      - name: Verify GitHub release write access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Drafts do not emit release:published or start package publishing.
+          # The unique tag identifies only this run's disposable draft.
+          tag="release-app-prototype-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" --draft --target "$GITHUB_SHA" \
+            --title "Release App qualification" --notes "Temporary App permission check."
+          trap 'gh release delete "$tag" --yes' EXIT
+          test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true
