@@ -899,6 +899,43 @@ async def test_ws_session_metrics_include_response_completed_usage():
     assert recorded["cache_read_tokens"] == 75
     assert recorded["cache_write_tokens"] == 25
     assert recorded["uncached_input_tokens"] == 25
+    # The write above is the uncached slice, not a billed write: flagged, or
+    # pricing bills those 25 tokens twice.
+    assert recorded["cache_inferred"] is True
+
+
+@pytest.mark.asyncio
+async def test_ws_session_metrics_use_reported_cache_writes():
+    """Responses now reports billed cache writes; they are the truth, not the
+    uncached remainder, and pricing must treat them as real writes."""
+
+    upstream_events = [
+        json.dumps({"type": "response.created", "response": {"id": "r_1"}}),
+        json.dumps(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "r_1",
+                    "usage": {
+                        "input_tokens": 100,
+                        "input_tokens_details": {"cached_tokens": 75, "cache_write_tokens": 20},
+                        "output_tokens": 12,
+                    },
+                },
+            }
+        ),
+    ]
+    fake_ws_mod = _make_fake_websockets_module(_FakeUpstream(upstream_events))
+    handler = _DummyOpenAIHandler()
+
+    with patch.dict(sys.modules, {"websockets": fake_ws_mod}):
+        await handler.handle_openai_responses_ws(_FakeWebSocket(frames=[_first_frame()]))
+
+    recorded = handler.metrics.recorded_requests[-1]
+    assert recorded["cache_read_tokens"] == 75
+    assert recorded["cache_write_tokens"] == 20
+    assert recorded["uncached_input_tokens"] == 5
+    assert recorded["cache_inferred"] is False
 
 
 @pytest.mark.asyncio

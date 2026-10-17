@@ -322,7 +322,7 @@ class BatchResultProcessor:
         """Make Google/Gemini continuation call.
 
         Note: Google format uses 'contents' not 'messages',
-        and 'parts' format for messages.
+        and 'parts' format for messages. Tools are already native Google Tool objects.
         """
         return await self._make_continuation_call(
             messages,

@@ -99,7 +99,7 @@ class GoogleCcrAdapter(GenericCcrAdapter):
         if request_context.system_instruction:
             body["systemInstruction"] = {"parts": [{"text": request_context.system_instruction}]}
         if tools:
-            body["tools"] = [{"functionDeclarations": tools}]
+            body["tools"] = tools
         return body
 
     def messages_to_contents(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

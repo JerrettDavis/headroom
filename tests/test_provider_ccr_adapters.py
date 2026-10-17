@@ -75,3 +75,20 @@ def test_google_ccr_adapter_converts_standard_messages_to_contents() -> None:
             ],
         },
     ]
+
+
+def test_google_ccr_continuation_preserves_native_tools() -> None:
+    from types import SimpleNamespace
+
+    tools = [
+        {"functionDeclarations": [{"name": "lookup", "parameters": {"type": "OBJECT"}}]},
+        {"googleSearch": {}},
+        {"codeExecution": {}},
+    ]
+    body = get_ccr_adapter("google").continuation_body(
+        [{"role": "user", "content": "continue"}],
+        tools,
+        SimpleNamespace(system_instruction=None),
+    )
+    assert body["tools"] == tools
+    assert body["tools"][0]["functionDeclarations"][0]["name"] == "lookup"
