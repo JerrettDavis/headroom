@@ -22,6 +22,7 @@ from headroom.agent_savings import proxy_pipeline_kwargs
 from headroom.copilot_auth import build_copilot_upstream_url
 from headroom.proxy.auth_mode import classify_client
 from headroom.proxy.compression_decision import CompressionDecision
+from headroom.proxy.handlers._failure_logging import log_request_failure
 from headroom.proxy.helpers import (
     COMPRESSION_TIMEOUT_SECONDS,
     extract_tags,
@@ -61,11 +62,6 @@ class GeminiHandlerMixin:
         from headroom.proxy.token_counting import count_tokens_offloaded
 
         return await count_tokens_offloaded(self, model, messages)
-
-    async def _count_texts_offloaded(self, model, texts):  # noqa: ANN001, ANN201
-        from headroom.proxy.token_counting import count_texts_offloaded
-
-        return await count_texts_offloaded(self, model, texts)
 
     def _gemini_replay_forwarded_prefix(
         self,
@@ -1116,7 +1112,9 @@ class GeminiHandlerMixin:
             return Response(content=e.content, status_code=e.status_code, headers=response_headers)
         except Exception as e:
             await self.metrics.record_failed(provider=provider_name)
-            logger.error(f"[{request_id}] Gemini request failed: {type(e).__name__}: {e}")
+            log_request_failure(
+                request_id, "Gemini request", e, provider=provider_name, model=model
+            )
             return JSONResponse(
                 status_code=502,
                 content={
@@ -1586,7 +1584,9 @@ class GeminiHandlerMixin:
             )
         except Exception as e:
             await self.metrics.record_failed(provider=provider_name)
-            logger.error(f"[{request_id}] Gemini countTokens failed: {type(e).__name__}: {e}")
+            log_request_failure(
+                request_id, "Gemini countTokens", e, provider=provider_name, model=model
+            )
             return JSONResponse(
                 status_code=502,
                 content={
