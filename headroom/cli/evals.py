@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from headroom.offline import pin_litellm_cost_map_local
 from headroom.providers.evals import (
     EVAL_JUDGE_PROVIDER_CHOICES,
     create_eval_judge,
@@ -482,6 +483,7 @@ def _run_memory_eval(
     answer_fn = None
     if answer_model:
         try:
+            pin_litellm_cost_map_local()
             import litellm
 
             def answer_fn(question: str, memories: list[str]) -> str:

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from headroom.offline import guard_egress
+from headroom.offline import guard_egress, pin_litellm_cost_map_local
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,7 @@ def _ollama_client() -> Any:
 
 
 def _litellm_client() -> Any:
+    pin_litellm_cost_map_local()
     try:
         import litellm
     except ImportError as exc:
