@@ -123,6 +123,8 @@ class BackendMessagePreservationRule:
                 if _call_name(node.func) != "append" or not node.args:
                     continue
                 first = node.args[0]
+                if isinstance(first, ast.Name):
+                    continue
                 if not isinstance(first, ast.Dict):
                     continue
                 keys = _dict_keys(first)
@@ -135,6 +137,63 @@ class BackendMessagePreservationRule:
                             "wrap role/content reconstruction in preserve_message_fields(...)",
                         )
                     )
+            findings.extend(self._check_named_messages(path, tree))
+        return findings
+
+    def _check_named_messages(self, path: Path, tree: ast.Module) -> list[Finding]:
+        # A message built in a variable and appended later must still pass through
+        # preserve_message_fields(source, <variable>) in the same function.
+        findings: list[Finding] = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            built: dict[str, ast.Dict] = {}
+            for node in ast.walk(fn):
+                if isinstance(node, ast.AnnAssign | ast.Assign):
+                    value = node.value
+                    targets = [node.target] if isinstance(node, ast.AnnAssign) else node.targets
+                    if isinstance(value, ast.Dict) and len(targets) == 1:
+                        target = targets[0]
+                        if isinstance(target, ast.Name) and "role" in _dict_keys(value):
+                            built[target.id] = value
+            preserved = {
+                arg.id
+                for node in ast.walk(fn)
+                if isinstance(node, ast.Call)
+                and _call_name(node.func) == "preserve_message_fields"
+                for arg in node.args[1:2]
+                if isinstance(arg, ast.Name)
+            }
+            for node in ast.walk(fn):
+                if not (
+                    isinstance(node, ast.Call)
+                    and _call_name(node.func) == "append"
+                    and node.args
+                    and isinstance(node.args[0], ast.Name)
+                ):
+                    continue
+                name = node.args[0].id
+                message = built.get(name)
+                if message is None or name in preserved:
+                    continue
+                role = next(
+                    (
+                        v
+                        for k, v in zip(message.keys, message.values, strict=True)
+                        if isinstance(k, ast.Constant) and k.value == "role"
+                    ),
+                    None,
+                )
+                if isinstance(role, ast.Constant) and role.value == "tool":
+                    continue
+                findings.append(
+                    Finding(
+                        self.id,
+                        path,
+                        node.lineno,
+                        f"append of {name!r} must pass through preserve_message_fields(..., {name})",
+                    )
+                )
         return findings
 
 
@@ -190,7 +249,9 @@ class CcrExplicitHashRule:
     id = "PY003"
     summary = "Rust CCR marker shims must store under the marker hash"
 
-    paths = (
+    bridge = Path("headroom/transforms/base.py")
+    bridge_name = "persist_rust_ccr_entry"
+    callers = (
         Path("headroom/transforms/search_compressor.py"),
         Path("headroom/transforms/diff_compressor.py"),
         Path("headroom/transforms/log_compressor.py"),
@@ -198,48 +259,46 @@ class CcrExplicitHashRule:
 
     def check(self, root: Path) -> list[Finding]:
         findings: list[Finding] = []
-        for rel in self.paths:
-            path = root / rel
-            tree = _parse(path)
-            functions = [
+        path = root / self.bridge
+        functions = [
+            node
+            for node in ast.walk(_parse(path))
+            if isinstance(node, ast.FunctionDef) and node.name == self.bridge_name
+        ]
+        if not functions:
+            findings.append(Finding(self.id, path, 1, f"missing {self.bridge_name} marker bridge"))
+        for fn in functions:
+            store_calls = [
                 node
-                for node in ast.walk(tree)
-                if isinstance(node, ast.FunctionDef) and node.name == "_persist_to_python_ccr"
+                for node in ast.walk(fn)
+                if isinstance(node, ast.Call) and _call_name(node.func) == "store"
             ]
-            if not functions:
-                findings.append(
-                    Finding(self.id, path, 1, "missing _persist_to_python_ccr marker bridge")
-                )
+            if not store_calls:
+                findings.append(Finding(self.id, path, fn.lineno, "no store.store(...) call found"))
                 continue
-            for fn in functions:
-                store_calls = [
-                    node
-                    for node in ast.walk(fn)
-                    if isinstance(node, ast.Call) and _call_name(node.func) == "store"
+            for call in store_calls:
+                explicit_hash_values = [
+                    kw.value for kw in call.keywords if kw.arg == "explicit_hash"
                 ]
-                if not store_calls:
+                if not explicit_hash_values or not all(
+                    isinstance(value, ast.Name) and value.id == "cache_key"
+                    for value in explicit_hash_values
+                ):
                     findings.append(
-                        Finding(self.id, path, fn.lineno, "no store.store(...) call found")
-                    )
-                    continue
-                for call in store_calls:
-                    explicit_hash_values = [
-                        kw.value for kw in call.keywords if kw.arg == "explicit_hash"
-                    ]
-                    if not explicit_hash_values or not all(
-                        isinstance(value, ast.Name) and value.id == "cache_key"
-                        for value in explicit_hash_values
-                    ):
-                        findings.append(
-                            Finding(
-                                self.id,
-                                path,
-                                call.lineno,
-                                "store.store(...) must pass explicit_hash=cache_key",
-                            )
+                        Finding(
+                            self.id,
+                            path,
+                            call.lineno,
+                            "store.store(...) must pass explicit_hash=cache_key",
                         )
+                    )
+        for rel in self.callers:
+            caller = root / rel
+            if self.bridge_name not in _read(caller):
+                findings.append(
+                    Finding(self.id, caller, 1, f"must persist markers via {self.bridge_name}")
+                )
         return findings
-
 
 class InputCompressedOriginalMessagesRule:
     id = "PY004"

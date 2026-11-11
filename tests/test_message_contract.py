@@ -75,3 +75,19 @@ def test_anyllm_conversion_preserves_provider_data() -> None:
     converted = backend._convert_messages(messages)
 
     assert converted[0]["provider_data"] == {"trace_id": "abc"}
+
+
+def test_litellm_conversion_drops_reasoning_fields_for_anthropic_family_target() -> None:
+    backend = LiteLLMBackend.__new__(LiteLLMBackend)
+    messages = [
+        {"role": "assistant", "content": "plain", "reasoning_content": "foreign state"},
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "hi"}],
+            "reasoning_content": "foreign state",
+        },
+    ]
+
+    converted = backend._convert_messages_for_litellm(messages, preserve_thinking=True)
+
+    assert all("reasoning_content" not in m for m in converted)

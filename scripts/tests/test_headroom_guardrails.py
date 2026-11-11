@@ -54,6 +54,39 @@ def convert(messages):
     assert any(f.rule == "PY001" and "preserve_message_fields" in f.message for f in findings)
 
 
+def test_backend_message_rule_catches_unpreserved_named_message(tmp_path: Path) -> None:
+    guardrails = _load_guardrails()
+    backend_dir = tmp_path / "headroom" / "backends"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / "litellm.py").write_text(
+        """
+from headroom.message_contract import preserve_message_fields
+
+def convert(messages):
+    converted = []
+    for msg in messages:
+        kept = {"role": "assistant", "content": "a"}
+        preserve_message_fields(msg, kept)
+        converted.append(kept)
+        lost = {"role": "assistant", "content": None}
+        converted.append(lost)
+        tool_msg = {"role": "tool", "content": "x"}
+        converted.append(tool_msg)
+    return converted
+""",
+        encoding="utf-8",
+    )
+    (backend_dir / "anyllm.py").write_text(
+        "from headroom.message_contract import preserve_message_fields\n",
+        encoding="utf-8",
+    )
+
+    findings = guardrails.BackendMessagePreservationRule().check(tmp_path)
+
+    assert [f.message for f in findings if "'lost'" in f.message]
+    assert not [f for f in findings if "'kept'" in f.message or "'tool_msg'" in f.message]
+
+
 def test_positional_restore_rule_catches_optimized_message_index_restore(
     tmp_path: Path,
 ) -> None:
@@ -79,11 +112,12 @@ def test_ccr_hash_rule_requires_cache_key_value(tmp_path: Path) -> None:
     transforms = tmp_path / "headroom" / "transforms"
     transforms.mkdir(parents=True)
     source = """
-def _persist_to_python_ccr(store, cache_key):
+def persist_rust_ccr_entry(store, cache_key):
     store.store(content="payload", explicit_hash=None)
 """
+    (transforms / "base.py").write_text(source, encoding="utf-8")
     for name in ("search_compressor.py", "diff_compressor.py", "log_compressor.py"):
-        (transforms / name).write_text(source, encoding="utf-8")
+        (transforms / name).write_text("persist_rust_ccr_entry\n", encoding="utf-8")
 
     findings = guardrails.CcrExplicitHashRule().check(tmp_path)
 
